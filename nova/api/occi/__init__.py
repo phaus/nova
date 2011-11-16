@@ -13,7 +13,7 @@
 #    under the License.
 
 """
-WSGI middleware for OpenStack OCCI API controllers.
+WSGI middleware for OpenStack API controllers.
 """
 
 import routes

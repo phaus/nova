@@ -38,6 +38,7 @@ if __name__ == '__main__':
     flags.FLAGS(sys.argv)
     logging.setup()
     utils.monkey_patch()
+    #occiapi is identified in the OpenStack paste config file (api-paste.ini)
     server = service.WSGIService('occiapi')
     service.serve(server)
     service.wait()
