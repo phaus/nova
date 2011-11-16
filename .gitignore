@@ -11,3 +11,5 @@ nova.egg-info
 .nova-venv
 *.sqlite
 *.log
+.project
+.pydevproject
