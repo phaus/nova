@@ -98,6 +98,5 @@ class APIRouter(base_wsgi.Router):
     def _setup_routes(self, mapper):
         LOG.debug("setting up occi compute route: /compute")
         mapper.connect("occi", "/compute",
-                    controller=compute.create_controller(), action='show',
-                    conditions=dict(method=["GET"]))
+                    controller=compute.create_controller(), action='show')
         LOG.debug("done setting up occi route")

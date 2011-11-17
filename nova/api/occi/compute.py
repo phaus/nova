@@ -10,8 +10,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import ipdb
-
 #TODO fix to OCCI
 from nova.api.openstack import wsgi
 #TODO not need, just here for complete example
@@ -32,33 +30,31 @@ class ServerXMLDeserializer(wsgi.MetadataXMLDeserializer):
 class Controller(object):
     """ The Compute API base controller class for the OCCI API """
     def __init__(self):
-        print "init me!"
+        print "init me!\n"
     
-    def index(self):
-        print "index me!"
-        return "index me!"
+    def index(self, req):
+        print "index me!\n"
+        return "index me!\n"
     
-    def detail(self):
-        print "detail me!"
-        return "detail me!"
+    def detail(self, req):
+        print "detail me!\n"
+        return "detail me!\n"
     
-    def show(self):
-        ipdb.set_trace()
-        print "show me!"
-        return "show me!"
+    def show(self, req):
+        print "show me!\n"
+        return "show me!\n"
     
-    def create(self):
-        ipdb.set_trace()
-        print "create me!"
-        return "create me!"
+    def create(self, req):
+        print "create me!\n"
+        return "create me!\n"
     
-    def action(self):
-        print "action me!"
-        return "action me!"
+    def action(self, req):
+        print "action me!\n"
+        return "action me!\n"
     
-    def delete(self):
-        print "delete me!"
-        return "delete me!"
+    def delete(self, req):
+        print "delete me!\n"
+        return "delete me!\n"
 
 
 #def create_resource():
@@ -71,4 +67,4 @@ class Controller(object):
 #    return wsgi.Resource(Controller(), deserializer, serializer)
 
 def create_controller():
-    return Controller()
+    return wsgi.Resource(Controller())
