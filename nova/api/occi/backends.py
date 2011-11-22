@@ -1,3 +1,5 @@
+# vim: tabstop=4 shiftwidth=4 softtabstop=4
+
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
 #    a copy of the License at
@@ -10,12 +12,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from nova import log as logging
+
 from occi.backend import ActionBackend, KindBackend, MixinBackend
 from occi.extensions.infrastructure import START, STOP, SUSPEND, RESTART, UP, \
     DOWN, ONLINE, BACKUP, SNAPSHOT, RESIZE, OFFLINE, NETWORK, \
-    NETWORKINTERFACE #, COMPUTE, STORAGE, IPNETWORK, IPNETWORKINTERFACE, \
-    #STORAGELINK
-#from occi.service import OCCI
+    NETWORKINTERFACE
+
+
+LOG = logging.getLogger('nova.api.occi.backends')
+
 
 class MyBackend(KindBackend, ActionBackend):
     '''
