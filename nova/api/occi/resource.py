@@ -10,51 +10,46 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-#TODO fix to OCCI
+
+from webob import exc
+
 from nova.api.openstack import wsgi
-#TODO not need, just here for complete example
-from nova.api.openstack import xmlutil
+from base_controller import BaseController
 
-class HeadersSerializer(wsgi.ResponseHeadersSerializer):
-    pass
-
-
-class ServerXMLSerializer(xmlutil.XMLTemplateSerializer):
-    pass
-
-
-class ServerXMLDeserializer(wsgi.MetadataXMLDeserializer):
-    pass
-
-
-class Controller(object):
+class Controller(BaseController):
     """ The Compute API base controller class for the OCCI API """
     def __init__(self):
         print "init me!\n"
     
     def index(self, req):
         print "index me!\n"
-        return "index me!\n"
+        msg = "index me!\n"
+        raise exc.HTTPNotImplemented(explanation=msg)
     
     def detail(self, req):
         print "detail me!\n"
-        return "detail me!\n"
+        msg = "detail me!\n"
+        raise exc.HTTPNotImplemented(explanation=msg)
     
     def show(self, req):
         print "show me!\n"
-        return "show me!\n"
+        msg = "show me!\n"
+        raise exc.HTTPNotImplemented(explanation=msg)
     
     def create(self, req):
         print "create me!\n"
-        return "create me!\n"
+        msg = "create me!\n"
+        raise exc.HTTPNotImplemented(explanation=msg)
     
     def action(self, req):
         print "action me!\n"
-        return "action me!\n"
+        msg = "action me!\n"
+        raise exc.HTTPNotImplemented(explanation=msg)
     
     def delete(self, req):
         print "delete me!\n"
-        return "delete me!\n"
+        msg = "delete me!\n"
+        raise exc.HTTPNotImplemented(explanation=msg)
 
 
 #def create_resource():
