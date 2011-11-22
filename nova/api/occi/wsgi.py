@@ -1,17 +1,19 @@
 import tornado.wsgi
 import webob
 
-from occi import web
-from occi.backend import KindBackend, ActionBackend, MixinBackend
+from occi.web import QueryHandler, ResourceHandler, CollectionHandler
+from occi.registry import Registry, NonePersistentRegistry
 from occi.protocol.html_rendering import HTMLRendering
 from occi.protocol.occi_rendering import TextOcciRendering, \
     TextPlainRendering, TextUriListRendering
-from occi.registry import Registry, NonePersistentRegistry
 from occi.extensions.infrastructure import START, STOP, SUSPEND, RESTART, UP, \
     DOWN, ONLINE, BACKUP, SNAPSHOT, RESIZE, OFFLINE, NETWORK, \
     NETWORKINTERFACE, COMPUTE, STORAGE, IPNETWORK, IPNETWORKINTERFACE, \
     STORAGELINK
-from backends import ComputeBackend, StorageBackend, NetworkBackend, IpNetworkBackend, IpNetworkInterfaceBackend, StorageLinkBackend, NetworkInterfaceBackend
+from occi.backend import KindBackend, ActionBackend, MixinBackend
+from backends import ComputeBackend, StorageBackend, NetworkBackend, \
+    IpNetworkBackend, IpNetworkInterfaceBackend, StorageLinkBackend, \
+    NetworkInterfaceBackend
 
 from nova import wsgi
 
@@ -32,11 +34,11 @@ class OCCIApplication(wsgi.Application):
         
         # Not necessary to externalise these URLs
         self.application = tornado.wsgi.WSGIApplication([
-            (r"/-/", web.QueryHandler, dict(registry=self.registry)),
-            (r"/.well-known/org/ogf/occi/-/", web.QueryHandler, 
+            (r"/-/", QueryHandler, dict(registry=self.registry)),
+            (r"/.well-known/org/ogf/occi/-/", QueryHandler, 
                                             dict(registry=self.registry)),
-            (r"(.*)/", web.CollectionHandler, dict(registry=self.registry)),
-            (r"(.*)", web.ResourceHandler, dict(registry=self.registry)),
+            (r"(.*)/", CollectionHandler, dict(registry=self.registry)),
+            (r"(.*)", ResourceHandler, dict(registry=self.registry)),
         ])
 
     @webob.dec.wsgify(RequestClass=wsgi.Request)
