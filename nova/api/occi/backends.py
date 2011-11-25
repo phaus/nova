@@ -13,11 +13,9 @@
 #    under the License.
 
 from nova import log as logging
-
 from occi.backend import ActionBackend, KindBackend, MixinBackend
 from occi.extensions.infrastructure import START, STOP, SUSPEND, RESTART, UP, \
-    DOWN, ONLINE, BACKUP, SNAPSHOT, RESIZE, OFFLINE, NETWORK, \
-    NETWORKINTERFACE
+    DOWN, ONLINE, BACKUP, SNAPSHOT, RESIZE, OFFLINE, NETWORK, NETWORKINTERFACE
 
 
 LOG = logging.getLogger('nova.api.occi.backends')

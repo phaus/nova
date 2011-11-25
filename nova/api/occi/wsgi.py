@@ -12,26 +12,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import tornado.wsgi
-import webob
-
 from nova import wsgi
-from nova import log as logging
-
-from occi.web import QueryHandler, ResourceHandler, CollectionHandler
-from occi.registry import Registry, NonePersistentRegistry
-from occi.protocol.html_rendering import HTMLRendering
-from occi.protocol.occi_rendering import TextOcciRendering, \
-    TextPlainRendering, TextUriListRendering
-from occi.extensions.infrastructure import START, STOP, SUSPEND, RESTART, UP, \
-    DOWN, ONLINE, BACKUP, SNAPSHOT, RESIZE, OFFLINE, NETWORK, \
-    NETWORKINTERFACE, COMPUTE, STORAGE, IPNETWORK, IPNETWORKINTERFACE, \
-    STORAGELINK
-from occi.backend import KindBackend, ActionBackend, MixinBackend
-from backends import ComputeBackend, StorageBackend, NetworkBackend, \
-    IpNetworkBackend, IpNetworkInterfaceBackend, StorageLinkBackend, \
-    NetworkInterfaceBackend
-
+from nova.api.occi.backends import ComputeBackend, NetworkBackend, \
+    StorageBackend, IpNetworkBackend, IpNetworkInterfaceBackend, \
+    StorageLinkBackend, NetworkInterfaceBackend
+from occi.extensions.infrastructure import COMPUTE, START, STOP, RESTART, \
+    SUSPEND, NETWORK, UP, DOWN, STORAGE, ONLINE, OFFLINE, BACKUP, SNAPSHOT, \
+    RESIZE, IPNETWORK, IPNETWORKINTERFACE, STORAGELINK, NETWORKINTERFACE
+from occi.wsgi import Application
+import logging
+import webob
 
 LOG = logging.getLogger('nova.api.occi.wsgi')
 
@@ -39,25 +29,8 @@ LOG = logging.getLogger('nova.api.occi.wsgi')
 class OCCIApplication(wsgi.Application):
     
     def __init__(self, registry=None):
-        
-        if registry is None:
-            self.registry = NonePersistentRegistry()
-        elif isinstance(registry, Registry):
-            self.registry = registry
-        else:
-            raise AttributeError('Registry needs to derive from abstract' \
-                                 ' class \'Registry\'')
-        
-        self._setup_registry()
-        
-        # Not necessary to externalise these URLs
-        self.application = tornado.wsgi.WSGIApplication([
-            (r"/-/", QueryHandler, dict(registry=self.registry)),
-            (r"/.well-known/org/ogf/occi/-/", QueryHandler, 
-                                            dict(registry=self.registry)),
-            (r"(.*)/", CollectionHandler, dict(registry=self.registry)),
-            (r"(.*)", ResourceHandler, dict(registry=self.registry)),
-        ])
+        self.application = Application()
+        self._setup_occi_service()
 
     @webob.dec.wsgify(RequestClass=wsgi.Request)
     def __call__(self, req):
@@ -71,21 +44,9 @@ class OCCIApplication(wsgi.Application):
         
         req -- a WSGI request supplied by a HTTP client
         '''
-        res = req.get_response(self.application)
-        return res
+        return req.get_response(self.application)
     
-    def _setup_registry(self):
-        
-        # setup up content handlers
-        self.registry.set_renderer('text/occi',
-                                   TextOcciRendering(self.registry))
-        self.registry.set_renderer('text/plain',
-                                   TextPlainRendering(self.registry))
-        self.registry.set_renderer('text/uri-list',
-                                   TextUriListRendering(self.registry))
-        self.registry.set_renderer('text/html', HTMLRendering(self.registry))
-        
-        # setup backends
+    def _setup_occi_service(self):
         COMPUTE_BACKEND = ComputeBackend()
         NETWORK_BACKEND = NetworkBackend()
         STORAGE_BACKEND = StorageBackend()
@@ -95,53 +56,27 @@ class OCCIApplication(wsgi.Application):
         NETWORKINTERFACE_BACKEND = NetworkInterfaceBackend()
     
         # register kinds with backends
-        # TODO all of these Kinds statically set their endpoints.
-        #      These endpoints should be set externally.
-        self._register_backend(COMPUTE, COMPUTE_BACKEND)
-        self._register_backend(START, COMPUTE_BACKEND)
-        self._register_backend(STOP, COMPUTE_BACKEND)
-        self._register_backend(RESTART, COMPUTE_BACKEND)
-        self._register_backend(SUSPEND, COMPUTE_BACKEND)
+        self.application.register_backend(COMPUTE, COMPUTE_BACKEND)
+        self.application.register_backend(START, COMPUTE_BACKEND)
+        self.application.register_backend(STOP, COMPUTE_BACKEND)
+        self.application.register_backend(RESTART, COMPUTE_BACKEND)
+        self.application.register_backend(SUSPEND, COMPUTE_BACKEND)
     
-        self._register_backend(NETWORK, NETWORK_BACKEND)
-        self._register_backend(UP, NETWORK_BACKEND)
-        self._register_backend(DOWN, NETWORK_BACKEND)
+        self.application.register_backend(NETWORK, NETWORK_BACKEND)
+        self.application.register_backend(UP, NETWORK_BACKEND)
+        self.application.register_backend(DOWN, NETWORK_BACKEND)
     
-        self._register_backend(STORAGE, STORAGE_BACKEND)
-        self._register_backend(ONLINE, STORAGE_BACKEND)
-        self._register_backend(OFFLINE, STORAGE_BACKEND)
-        self._register_backend(BACKUP, STORAGE_BACKEND)
-        self._register_backend(SNAPSHOT, STORAGE_BACKEND)
-        self._register_backend(RESIZE, STORAGE_BACKEND)
+        self.application.register_backend(STORAGE, STORAGE_BACKEND)
+        self.application.register_backend(ONLINE, STORAGE_BACKEND)
+        self.application.register_backend(OFFLINE, STORAGE_BACKEND)
+        self.application.register_backend(BACKUP, STORAGE_BACKEND)
+        self.application.register_backend(SNAPSHOT, STORAGE_BACKEND)
+        self.application.register_backend(RESIZE, STORAGE_BACKEND)
     
-        self._register_backend(IPNETWORK, IPNETWORK_BACKEND)
-        self._register_backend(IPNETWORKINTERFACE, IPNETWORKINTERFACE_BACKEND)
+        self.application.register_backend(IPNETWORK, IPNETWORK_BACKEND)
+        self.application.register_backend(IPNETWORKINTERFACE, 
+                                          IPNETWORKINTERFACE_BACKEND)
     
-        self._register_backend(STORAGELINK, STORAGE_LINK_BACKEND)
-        self._register_backend(NETWORKINTERFACE, NETWORKINTERFACE_BACKEND)
-
-    def _register_backend(self, category, backend):
-        '''
-        Register a backend.
-
-        Verifies that correct 'parent' backends are used.
-
-        category -- The category the backend defines.
-        backend -- The backend which handles the given category.
-        '''
-        allow = False
-        if repr(category) == 'kind' and isinstance(backend, KindBackend):
-            allow = True
-        elif repr(category) == 'mixin' and isinstance(backend, MixinBackend):
-            allow = True
-        elif repr(category) == 'action' and isinstance(backend, ActionBackend):
-            allow = True
-
-        if allow:
-            self.registry.set_backend(category, backend)
-        else:
-            raise AttributeError('Backends handling kinds need to derive' \
-                                 ' from KindBackend; Backends handling' \
-                                 ' actions need to derive from' \
-                                 ' ActionBackend and backends handling' \
-                                 ' mixins need to derive from MixinBackend.')
+        self.application.register_backend(STORAGELINK, STORAGE_LINK_BACKEND)
+        self.application.register_backend(NETWORKINTERFACE, 
+                                          NETWORKINTERFACE_BACKEND)
