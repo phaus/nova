@@ -27,25 +27,26 @@ LOG = logging.getLogger('nova.api.occi.wsgi')
 
 
 class OCCIApplication(wsgi.Application):
-    
-    def __init__(self, registry=None):
+
+    def __init__(self):
+
         self.application = Application()
         self._setup_occi_service()
 
     @webob.dec.wsgify(RequestClass=wsgi.Request)
     def __call__(self, req):
         '''
-        
+
         Deals with incoming requests and outgoing responses
-        
+
         Takes the incoming request, sends it on to the OCCI WSGI application,
         which finds the appropriate backend for it and then executes the
         request. The backend then is responsible for the return content.
-        
+
         req -- a WSGI request supplied by a HTTP client
         '''
         return req.get_response(self.application)
-    
+
     def _setup_occi_service(self):
         COMPUTE_BACKEND = ComputeBackend()
         NETWORK_BACKEND = NetworkBackend()
@@ -54,29 +55,29 @@ class OCCIApplication(wsgi.Application):
         IPNETWORKINTERFACE_BACKEND = IpNetworkInterfaceBackend()
         STORAGE_LINK_BACKEND = StorageLinkBackend()
         NETWORKINTERFACE_BACKEND = NetworkInterfaceBackend()
-    
+
         # register kinds with backends
         self.application.register_backend(COMPUTE, COMPUTE_BACKEND)
         self.application.register_backend(START, COMPUTE_BACKEND)
         self.application.register_backend(STOP, COMPUTE_BACKEND)
         self.application.register_backend(RESTART, COMPUTE_BACKEND)
         self.application.register_backend(SUSPEND, COMPUTE_BACKEND)
-    
+
         self.application.register_backend(NETWORK, NETWORK_BACKEND)
         self.application.register_backend(UP, NETWORK_BACKEND)
         self.application.register_backend(DOWN, NETWORK_BACKEND)
-    
+
         self.application.register_backend(STORAGE, STORAGE_BACKEND)
         self.application.register_backend(ONLINE, STORAGE_BACKEND)
         self.application.register_backend(OFFLINE, STORAGE_BACKEND)
         self.application.register_backend(BACKUP, STORAGE_BACKEND)
         self.application.register_backend(SNAPSHOT, STORAGE_BACKEND)
         self.application.register_backend(RESIZE, STORAGE_BACKEND)
-    
+
         self.application.register_backend(IPNETWORK, IPNETWORK_BACKEND)
-        self.application.register_backend(IPNETWORKINTERFACE, 
+        self.application.register_backend(IPNETWORKINTERFACE,
                                           IPNETWORKINTERFACE_BACKEND)
-    
+
         self.application.register_backend(STORAGELINK, STORAGE_LINK_BACKEND)
-        self.application.register_backend(NETWORKINTERFACE, 
+        self.application.register_backend(NETWORKINTERFACE,
                                           NETWORKINTERFACE_BACKEND)
