@@ -27,16 +27,21 @@ LOG = logging.getLogger('nova.api.occi.wsgi')
 
 
 class OCCIApplication(wsgi.Application):
+    '''
+    Adapter which 'translates' represents a nova WSGI application into and OCCI
+    WSGI application.
+    '''
 
     def __init__(self):
-
+        '''
+        Initialize the WSGI OCCI application.
+        '''
         self.application = Application()
         self._setup_occi_service()
 
     @webob.dec.wsgify(RequestClass=wsgi.Request)
     def __call__(self, req):
         '''
-
         Deals with incoming requests and outgoing responses
 
         Takes the incoming request, sends it on to the OCCI WSGI application,
@@ -48,6 +53,9 @@ class OCCIApplication(wsgi.Application):
         return req.get_response(self.application)
 
     def _setup_occi_service(self):
+        '''
+        Register the OCCI backends within the OCCI WSGI application.
+        '''
         COMPUTE_BACKEND = ComputeBackend()
         NETWORK_BACKEND = NetworkBackend()
         STORAGE_BACKEND = StorageBackend()
