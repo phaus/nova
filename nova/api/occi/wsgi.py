@@ -32,6 +32,7 @@ from backends import ComputeBackend, StorageBackend, NetworkBackend, \
     IpNetworkBackend, IpNetworkInterfaceBackend, StorageLinkBackend, \
     NetworkInterfaceBackend
 
+from extensions import TCP, TCPBackend
 
 LOG = logging.getLogger('nova.api.occi.wsgi')
 
@@ -48,6 +49,8 @@ class OCCIApplication(wsgi.Application):
             raise AttributeError('Registry needs to derive from abstract' \
                                  ' class \'Registry\'')
         
+        
+        #TODO the registry needs to be populated with OS instance types as OS/Resource Templates
         self._setup_registry()
         
         # Not necessary to externalise these URLs
@@ -93,7 +96,7 @@ class OCCIApplication(wsgi.Application):
         IPNETWORKINTERFACE_BACKEND = IpNetworkInterfaceBackend()
         STORAGE_LINK_BACKEND = StorageLinkBackend()
         NETWORKINTERFACE_BACKEND = NetworkInterfaceBackend()
-    
+        
         # register kinds with backends
         # TODO all of these Kinds statically set their endpoints.
         #      These endpoints should be set externally.
@@ -120,6 +123,9 @@ class OCCIApplication(wsgi.Application):
         self._register_backend(STORAGELINK, STORAGE_LINK_BACKEND)
         self._register_backend(NETWORKINTERFACE, NETWORKINTERFACE_BACKEND)
 
+        TCP_BACKEND = TCPBackend()
+        self._register_backend(TCP, TCP_BACKEND)
+        
     def _register_backend(self, category, backend):
         '''
         Register a backend.
