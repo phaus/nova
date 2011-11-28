@@ -12,6 +12,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from extensions import TCP, TCPBackend
+
 from nova import wsgi
 from nova.api.occi.backends import ComputeBackend, NetworkBackend, \
     StorageBackend, IpNetworkBackend, IpNetworkInterfaceBackend, \
@@ -89,3 +91,5 @@ class OCCIApplication(wsgi.Application):
         self.application.register_backend(STORAGELINK, STORAGE_LINK_BACKEND)
         self.application.register_backend(NETWORKINTERFACE,
                                           NETWORKINTERFACE_BACKEND)
+        
+        self.application.register_backend(TCP, TCPBackend())
