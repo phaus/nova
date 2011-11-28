@@ -12,25 +12,13 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from webob import exc
-
-from nova import compute
-from nova import exception
-from nova import flags
 from nova import log as logging
-from nova import network
-from nova.compute import instance_types
-from nova.rpc import common as rpc_common
-
 from occi.backend import ActionBackend, KindBackend, MixinBackend
 from occi.extensions.infrastructure import START, STOP, SUSPEND, RESTART, UP, \
-    DOWN, ONLINE, BACKUP, SNAPSHOT, RESIZE, OFFLINE, NETWORK, \
-    NETWORKINTERFACE
+    DOWN, ONLINE, BACKUP, SNAPSHOT, RESIZE, OFFLINE, NETWORK, NETWORKINTERFACE
 
 
 LOG = logging.getLogger('nova.api.occi.backends')
-
-FLAGS = flags.FLAGS
 
 
 class MyBackend(KindBackend, ActionBackend):
@@ -60,17 +48,8 @@ class ComputeBackend(MyBackend):
     '''
     A Backend for compute instances.
     '''
-    def __init__(self):
-        self.compute_api = compute.API()
-        self.network_api = network.API()
-        
+
     def create(self, entity):
-        
-        # for openstack:
-        #    - all requests must include instance flavour information
-        #        - extract cpu parameters etc from flavour info
-        
-        
         # e.g. check if all needed attributes are defined...
 
         # adding some default dummy values:
@@ -88,106 +67,6 @@ class ComputeBackend(MyBackend):
         entity.actions = [START]
 
         print('Creating the virtual machine with id: ' + entity.identifier)
-        
-        #optional params
-        name = 'an_occi_vm'
-        key_name = 'keyname'
-        metadata = {} #server_dict.get('metadata', {})
-        access_ip_v4 = '192.168.1.23' #server_dict.get('accessIPv4')
-        access_ip_v6 = 'DEAD:BEEF' #server_dict.get('accessIPv6')
-        injected_files = [] # self._get_injected_files(personality)
-        password = 'password' #self._get_server_admin_password(server_dict)
-        zone_blob = 'blob' #server_dict.get('blob')
-        reservation_id = None #server_dict.get('reservation_id') <- used by admins!
-        min_count = max_count = 1
-        requested_networks = None #self._get_requested_networks(requested_networks)
-        sg_names = []
-        sg_names.append('default')
-        sg_names = list(set(sg_names))
-        user_data = None #server_dict.get('user_data')
-        availability_zone = None #server_dict.get('availability_zone')
-        config_drive = None #server_dict.get('config_drive')
-        block_device_mapping = None #self._get_block_device_mapping(server_dict)
-        
-        #required params
-        context = None #req.environ['nova.context']
-        
-        image_href = 'http://something' #self._image_ref_from_req_data(body)
-        
-        try:
-            flavor_id = '22' #self._flavor_id_from_req_data(body)
-        except ValueError as error:
-            msg = _("Invalid flavorRef provided.")
-            raise exc.HTTPBadRequest(explanation=msg)
-        
-        try:
-            inst_type = instance_types.get_instance_type_by_flavor_id(flavor_id)
-            
-            # all are None by default except context, inst_type and image_href
-            (instances, resv_id) = self.compute_api.create(context,
-                            inst_type,
-                            image_href,
-                            display_name=name,
-                            display_description=name,
-                            key_name=key_name,
-                            metadata=metadata,
-                            access_ip_v4=access_ip_v4,
-                            access_ip_v6=access_ip_v6,
-                            injected_files=injected_files,
-                            admin_password=password,
-                            zone_blob=zone_blob,
-                            reservation_id=reservation_id,
-                            min_count=min_count,
-                            max_count=max_count,
-                            requested_networks=requested_networks,
-                            security_group=sg_names,
-                            user_data=user_data,
-                            availability_zone=availability_zone,
-                            config_drive=config_drive,
-                            block_device_mapping=block_device_mapping)
-        except exception.QuotaError as error:
-            self._handle_quota_error(error)
-        except exception.InstanceTypeMemoryTooSmall as error:
-            raise exc.HTTPBadRequest(explanation=unicode(error))
-        except exception.InstanceTypeDiskTooSmall as error:
-            raise exc.HTTPBadRequest(explanation=unicode(error))
-        except exception.ImageNotFound as error:
-            msg = _("Can not find requested image")
-            raise exc.HTTPBadRequest(explanation=msg)
-        except exception.FlavorNotFound as error:
-            msg = _("Invalid flavorRef provided.")
-            raise exc.HTTPBadRequest(explanation=msg)
-        except exception.KeypairNotFound as error:
-            msg = _("Invalid key_name provided.")
-            raise exc.HTTPBadRequest(explanation=msg)
-        except exception.SecurityGroupNotFound as error:
-            raise exc.HTTPBadRequest(explanation=unicode(error))
-        except rpc_common.RemoteError as err:
-            msg = "%(err_type)s: %(err_msg)s" % \
-                  {'err_type': err.exc_type, 'err_msg': err.value}
-            raise exc.HTTPBadRequest(explanation=msg)
-     
-    def _handle_quota_error(self, error):
-        """
-        Reraise quota errors as api-specific http exceptions
-        """
-
-        code_mappings = {
-            "OnsetFileLimitExceeded":
-                    _("Personality file limit exceeded"),
-            "OnsetFilePathLimitExceeded":
-                    _("Personality file path too long"),
-            "OnsetFileContentLimitExceeded":
-                    _("Personality file content too long"),
-            "InstanceLimitExceeded":
-                    _("Instance quotas have been exceeded")}
-
-        expl = code_mappings.get(error.code)
-        if expl:
-            raise exc.HTTPRequestEntityTooLarge(explanation=expl,
-                                                headers={'Retry-After': 0})
-        # if the original error is okay, just reraise it
-        raise error    
 
     def retrieve(self, entity):
         # trigger your management framework to get most up to date information
@@ -204,18 +83,6 @@ class ComputeBackend(MyBackend):
         # call the management framework to delete this compute instance...
         print('Removing representation of virtual machine with id: '
               + entity.identifier)
-        
-        context = None
-        
-        try:
-            instance = self.compute_api.routing_get(context, entity.identifier)
-        except exception.NotFound:
-            raise exc.HTTPNotFound()
-        
-        if FLAGS.reclaim_instance_interval:
-            self.compute_api.soft_delete(context, instance)
-        else:
-            self.compute_api.delete(context, instance)
 
     def action(self, entity, action):
         if action not in entity.actions:
