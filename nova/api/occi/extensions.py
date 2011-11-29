@@ -16,21 +16,21 @@ from occi.core_model import Mixin
 from occi.backend import MixinBackend
 from occi.extensions.infrastructure import COMPUTE
 
-
 # Trusted Compute Pool technology mixin definition
 TCP_ATTRIBUTES = {'eu.fi-ware.compute.tcp': ''}
 TCP = Mixin('http://schemas.fi-ware.eu/occi/infrastructure/compute#',
                   'tcp', attributes=TCP_ATTRIBUTES)
 
-# Trusted Compute Pool technology mixin backend handler
+
 class TCPBackend(MixinBackend):
     '''
-    A mixin backend for the IPnetworking.
+    Trusted Compute Pool technology mixin backend handler
     '''
+
     def create(self, entity):
         if not entity.kind == COMPUTE:
             raise AttributeError('This mixin cannot be applied to this kind.')
         entity.attributes['eu.fi-ware.compute.tcp'] = 'true'
-        
+
     def delete(self, entity):
         entity.attributes.pop('eu.fi-ware.compute.tcp')

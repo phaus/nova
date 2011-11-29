@@ -29,8 +29,8 @@ from occi.extensions.infrastructure import START, STOP, SUSPEND, RESTART, UP, \
 
 LOG = logging.getLogger('nova.api.occi.backends')
 
-
 FLAGS = flags.FLAGS
+
 
 class MyBackend(KindBackend, ActionBackend):
     '''
@@ -63,7 +63,7 @@ class ComputeBackend(MyBackend):
     def __init__(self):
         self.compute_api = compute.API()
         self.network_api = network.API()
-    
+
     def create(self, entity):
         # e.g. check if all needed attributes are defined...
 
@@ -82,7 +82,7 @@ class ComputeBackend(MyBackend):
         entity.actions = [START]
 
         print('Creating the virtual machine with id: ' + entity.identifier)
-        
+
         #optional params
         name = 'an_occi_vm'
         key_name = 'keyname'
@@ -102,21 +102,21 @@ class ComputeBackend(MyBackend):
         availability_zone = None #server_dict.get('availability_zone')
         config_drive = None #server_dict.get('config_drive')
         block_device_mapping = None #self._get_block_device_mapping(server_dict)
-        
+
         #required params
         context = None #req.environ['nova.context']
-        
+
         image_href = 'http://something' #self._image_ref_from_req_data(body)
-        
+
         try:
             flavor_id = '22' #self._flavor_id_from_req_data(body)
         except ValueError as error:
             msg = _("Invalid flavorRef provided.")
             raise exc.HTTPBadRequest(explanation=msg)
-        
+
         try:
             inst_type = instance_types.get_instance_type_by_flavor_id(flavor_id)
-            
+
             # all are None by default except context, inst_type and image_href
             (instances, resv_id) = self.compute_api.create(context,
                             inst_type,
@@ -181,8 +181,8 @@ class ComputeBackend(MyBackend):
             raise exc.HTTPRequestEntityTooLarge(explanation=expl,
                                                 headers={'Retry-After': 0})
         # if the original error is okay, just reraise it
-        raise error    
-    
+        raise error
+
     def retrieve(self, entity):
         # trigger your management framework to get most up to date information
 
@@ -198,14 +198,14 @@ class ComputeBackend(MyBackend):
         # call the management framework to delete this compute instance...
         print('Removing representation of virtual machine with id: '
               + entity.identifier)
-        
+
         context = None
-        
+
         try:
             instance = self.compute_api.routing_get(context, entity.identifier)
         except exception.NotFound:
             raise exc.HTTPNotFound()
-        
+
         if FLAGS.reclaim_instance_interval:
             self.compute_api.soft_delete(context, instance)
         else:

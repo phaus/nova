@@ -58,38 +58,38 @@ class OCCIApplication(wsgi.Application):
         '''
         Register the OCCI backends within the OCCI WSGI application.
         '''
-        COMPUTE_BACKEND = ComputeBackend()
-        NETWORK_BACKEND = NetworkBackend()
-        STORAGE_BACKEND = StorageBackend()
-        IPNETWORK_BACKEND = IpNetworkBackend()
-        IPNETWORKINTERFACE_BACKEND = IpNetworkInterfaceBackend()
-        STORAGE_LINK_BACKEND = StorageLinkBackend()
-        NETWORKINTERFACE_BACKEND = NetworkInterfaceBackend()
+        compute_backend = ComputeBackend()
+        network_backend = NetworkBackend()
+        storage_backend = StorageBackend()
+        ipnetwork_backend = IpNetworkBackend()
+        ipnetworking_backend = IpNetworkInterfaceBackend()
+        storage_link_backend = StorageLinkBackend()
+        networkinterface_backend = NetworkInterfaceBackend()
 
         # register kinds with backends
-        self.application.register_backend(COMPUTE, COMPUTE_BACKEND)
-        self.application.register_backend(START, COMPUTE_BACKEND)
-        self.application.register_backend(STOP, COMPUTE_BACKEND)
-        self.application.register_backend(RESTART, COMPUTE_BACKEND)
-        self.application.register_backend(SUSPEND, COMPUTE_BACKEND)
+        self.application.register_backend(COMPUTE, compute_backend)
+        self.application.register_backend(START, compute_backend)
+        self.application.register_backend(STOP, compute_backend)
+        self.application.register_backend(RESTART, compute_backend)
+        self.application.register_backend(SUSPEND, compute_backend)
 
-        self.application.register_backend(NETWORK, NETWORK_BACKEND)
-        self.application.register_backend(UP, NETWORK_BACKEND)
-        self.application.register_backend(DOWN, NETWORK_BACKEND)
+        self.application.register_backend(NETWORK, network_backend)
+        self.application.register_backend(UP, network_backend)
+        self.application.register_backend(DOWN, network_backend)
 
-        self.application.register_backend(STORAGE, STORAGE_BACKEND)
-        self.application.register_backend(ONLINE, STORAGE_BACKEND)
-        self.application.register_backend(OFFLINE, STORAGE_BACKEND)
-        self.application.register_backend(BACKUP, STORAGE_BACKEND)
-        self.application.register_backend(SNAPSHOT, STORAGE_BACKEND)
-        self.application.register_backend(RESIZE, STORAGE_BACKEND)
+        self.application.register_backend(STORAGE, storage_backend)
+        self.application.register_backend(ONLINE, storage_backend)
+        self.application.register_backend(OFFLINE, storage_backend)
+        self.application.register_backend(BACKUP, storage_backend)
+        self.application.register_backend(SNAPSHOT, storage_backend)
+        self.application.register_backend(RESIZE, storage_backend)
 
-        self.application.register_backend(IPNETWORK, IPNETWORK_BACKEND)
+        self.application.register_backend(IPNETWORK, ipnetwork_backend)
         self.application.register_backend(IPNETWORKINTERFACE,
-                                          IPNETWORKINTERFACE_BACKEND)
+                                          ipnetworking_backend)
 
-        self.application.register_backend(STORAGELINK, STORAGE_LINK_BACKEND)
+        self.application.register_backend(STORAGELINK, storage_link_backend)
         self.application.register_backend(NETWORKINTERFACE,
-                                          NETWORKINTERFACE_BACKEND)
-        
+                                          networkinterface_backend)
+
         self.application.register_backend(TCP, TCPBackend())
