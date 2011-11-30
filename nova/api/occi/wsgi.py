@@ -15,9 +15,12 @@
 from extensions import TCP, TCPBackend
 
 from nova import wsgi
+from nova.compute import instance_types
+
+from occi.core_model import Mixin
 from nova.api.occi.backends import ComputeBackend, NetworkBackend, \
     StorageBackend, IpNetworkBackend, IpNetworkInterfaceBackend, \
-    StorageLinkBackend, NetworkInterfaceBackend
+    StorageLinkBackend, NetworkInterfaceBackend, ResourceMixinBackend
 from occi.extensions.infrastructure import COMPUTE, START, STOP, RESTART, \
     SUSPEND, NETWORK, UP, DOWN, STORAGE, ONLINE, OFFLINE, BACKUP, SNAPSHOT, \
     RESIZE, IPNETWORK, IPNETWORKINTERFACE, STORAGELINK, NETWORKINTERFACE
@@ -98,3 +101,17 @@ class OCCIApplication(Application, wsgi.Application):
                                           networkinterface_backend)
 
         self.application.register_backend(TCP, TCPBackend())
+
+        self._register_resource_mixins(ResourceMixinBackend())
+        
+    def _register_resource_mixins(self, resource_mixin_backend):
+        
+        os_flavours = instance_types.get_all_types()
+        
+        assert len(os_flavours) > 0
+    
+        for itype in os_flavours:
+            resourceTemplate = Mixin(term=itype, scheme='http://schemas.fi-ware.eu/template#', related=['http://schemas.ogf.org/occi/infrastructure#resource'], attributes=os_flavours[itype], title='This is an OS '+itype+' type')
+            resourceTemplate.location = itype
+            self.application.register_backend(resourceTemplate, resource_mixin_backend)
+

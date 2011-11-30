@@ -13,3 +13,4 @@ nova.egg-info
 *.log
 .project
 .pydevproject
+.settings

@@ -203,7 +203,7 @@ class ComputeBackend(MyBackend):
         print('Removing representation of virtual machine with id: '
               + entity.identifier)
 
-        context = None
+        context = extras['nova_ctx']
 
         try:
             instance = self.compute_api.routing_get(context, entity.identifier)
@@ -385,3 +385,6 @@ class NetworkInterfaceBackend(KindBackend):
         link.attributes.pop('occi.networkinterface.state')
         link.attributes.pop('occi.networkinterface.mac')
         link.attributes.pop('occi.networkinterface.interface')
+
+class ResourceMixinBackend(MixinBackend):
+    pass
