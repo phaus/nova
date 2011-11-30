@@ -107,19 +107,25 @@ class ComputeBackend(MyBackend):
         #context is mainly authorisation information
         #its assembled in AuthMiddleware - we can pipeline this with the OCCI service
         context = extras['nova_ctx']
-
-        #TODO
+        
+        #TODO - essential, required to get a vm image
         image_href = 'http://something' #self._image_ref_from_req_data(body)
 
+        #extract resource template from entity and get the flavor name. Flavor name is the term
+        flavor_name = None
+        if len(entity.mixins) > 0:
+            #TODO extract the scheme value as constant
+            m = filter(lambda mixin: mixin.scheme == 'http://schemas.fi-ware.eu/template#', entity.mixins)
+            if len(m) > 1:
+                LOG.warn('There is more that one resource template in the request. Using the 1st: ' + m[0].scheme+m[0].term)
+            flavor_name = m[0].term
+        
         try:
-            #TODO extract resource template from entity, look that up against the flavour table and get flavour id
-            flavor_id = 5 #self._flavor_id_from_req_data(body)
-        except ValueError as error:
-            msg = _("Invalid flavorRef provided.")
-            raise exc.HTTPBadRequest(explanation=msg)
-
-        try:
-            inst_type = instance_types.get_instance_type_by_flavor_id(flavor_id)
+            if flavor_name:
+                inst_type = instance_types.get_instance_type_by_name(flavor_name)
+            else:
+                inst_type = instance_types.get_default_instance_type()
+                LOG.warn('No resource template was found in the request. Using the default: ' + inst_type['name'])
 
             # all are None by default except context, inst_type and image_href
             (instances, resv_id) = self.compute_api.create(context,
