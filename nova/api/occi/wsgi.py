@@ -12,19 +12,26 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from extensions import TCP, TCPBackend
+from extensions import TCP, TCPBackend, OsTemplate, ResourceTemplate, \
+    DEFAULT_RESOURCE_TEMPLATE_SCHEME, \
+    OCCI_RESOURCE_TEMPLATE_SCHEME, DEFAULT_OS_TEMPLATE_SCHEME,\
+    OCCI_OS_TEMPLATE_SCHEME
 
+from glance.common import exception as glance_exception
 from nova import wsgi
+from nova import context
 from nova.compute import instance_types
+import nova.image as image
 
-from occi.core_model import Mixin
 from nova.api.occi.backends import ComputeBackend, NetworkBackend, \
     StorageBackend, IpNetworkBackend, IpNetworkInterfaceBackend, \
-    StorageLinkBackend, NetworkInterfaceBackend, ResourceMixinBackend
+    StorageLinkBackend, NetworkInterfaceBackend, ResourceMixinBackend,\
+    OsMixinBackend
 from occi.extensions.infrastructure import COMPUTE, START, STOP, RESTART, \
     SUSPEND, NETWORK, UP, DOWN, STORAGE, ONLINE, OFFLINE, BACKUP, SNAPSHOT, \
     RESIZE, IPNETWORK, IPNETWORKINTERFACE, STORAGELINK, NETWORKINTERFACE
 from occi.wsgi import Application
+
 import logging
 
 LOG = logging.getLogger('nova.api.occi.wsgi')
@@ -44,6 +51,9 @@ class OCCIApplication(Application, wsgi.Application):
         Application.__init__(self)
         
         self.application = Application()
+        self.image_service = image.get_default_image_service()
+        self.context = context.get_admin_context()
+        self.os_flavours = instance_types.get_all_types()
         self._setup_occi_service()
 
     def __call__(self, environ, response):
@@ -100,18 +110,37 @@ class OCCIApplication(Application, wsgi.Application):
         self.application.register_backend(NETWORKINTERFACE,
                                           networkinterface_backend)
 
-        self.application.register_backend(TCP, TCPBackend())
-
+        # register openstack resource templates
         self._register_resource_mixins(ResourceMixinBackend())
+        self._register_os_mixins(OsMixinBackend())
+        
+        # register extensions to the basic occi entities
+        self._register_occi_extensions()
         
     def _register_resource_mixins(self, resource_mixin_backend):
-        
-        os_flavours = instance_types.get_all_types()
-        
-        assert len(os_flavours) > 0
-    
-        for itype in os_flavours:
-            resourceTemplate = Mixin(term=itype, scheme='http://schemas.fi-ware.eu/template#', related=['http://schemas.ogf.org/occi/infrastructure#resource'], attributes=os_flavours[itype], title='This is an OS '+itype+' type')
+        assert len(self.os_flavours) > 0
+        for itype in self.os_flavours:
+            resourceTemplate = ResourceTemplate(term=itype, scheme=DEFAULT_RESOURCE_TEMPLATE_SCHEME, \
+                related=[OCCI_RESOURCE_TEMPLATE_SCHEME], attributes=self.os_flavours[itype], \
+                title='This is an openstack '+itype+' flavor.')
             resourceTemplate.location = itype
             self.application.register_backend(resourceTemplate, resource_mixin_backend)
-
+    
+    def _register_os_mixins(self, os_mixin_backend):
+        try:
+            #this is a HTTP call out to glance
+            images = self.image_service.detail(self.context)
+        except glance_exception.GlanceException as ge:
+            raise ge
+        
+        assert len(images) > 0
+        for image in images:
+            osTemplate = OsTemplate(term=image['name'], scheme=DEFAULT_OS_TEMPLATE_SCHEME, \
+                os_id=image['id'], related=[OCCI_OS_TEMPLATE_SCHEME], \
+                attributes=None, title='This is an OS '+image['name']+' image')
+            osTemplate.location = image['name']
+            self.application.register_backend(osTemplate, os_mixin_backend)
+            
+    def _register_occi_extensions(self):
+        #TODO scan all classes in extensions.py and load dynamically
+        self.application.register_backend(TCP, TCPBackend())

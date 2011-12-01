@@ -21,6 +21,9 @@ from nova import network
 from nova.compute import instance_types
 from nova.rpc import common as rpc_common
 
+from extensions import DEFAULT_RESOURCE_TEMPLATE_SCHEME, \
+DEFAULT_OS_TEMPLATE_SCHEME
+
 from nova import log as logging
 from occi.backend import ActionBackend, KindBackend, MixinBackend
 from occi.extensions.infrastructure import START, STOP, SUSPEND, RESTART, UP, \
@@ -68,27 +71,27 @@ class ComputeBackend(MyBackend):
         # e.g. check if all needed attributes are defined...
 
         # adding some default dummy values:
-        if 'occi.compute.hostname' not in entity.attributes:
-            entity.attributes['occi.compute.hostname'] = 'dummy'
-        if 'occi.compute.memory' not in entity.attributes:
-            entity.attributes['occi.compute.memory'] = '2'
-        # rest is set by SERVICE provider...
-        entity.attributes['occi.compute.architecture'] = 'x86'
-        entity.attributes['occi.compute.cores'] = '2'
-        entity.attributes['occi.compute.speed'] = '1'
-
-        # trigger your management framework to start the compute instance...
-        entity.attributes['occi.compute.state'] = 'inactive'
-        entity.actions = [START]
+#        if 'occi.compute.hostname' not in entity.attributes:
+#            entity.attributes['occi.compute.hostname'] = 'dummy'
+#        if 'occi.compute.memory' not in entity.attributes:
+#            entity.attributes['occi.compute.memory'] = '2'
+#        # rest is set by SERVICE provider...
+#        entity.attributes['occi.compute.architecture'] = 'x86'
+#        entity.attributes['occi.compute.cores'] = '2'
+#        entity.attributes['occi.compute.speed'] = '1'
+#
+#        # trigger your management framework to start the compute instance...
+#        entity.attributes['occi.compute.state'] = 'inactive'
+#        entity.actions = [START]
 
         print('Creating the virtual machine with id: ' + entity.identifier)
 
         #optional params
         name = 'an_occi_vm'
-        key_name = 'keyname'
+        key_name = None # only set if a key-pair is registered
         metadata = {} #server_dict.get('metadata', {})
         access_ip_v4 = '192.168.1.23' #server_dict.get('accessIPv4')
-        access_ip_v6 = 'DEAD:BEEF' #server_dict.get('accessIPv6')
+        access_ip_v6 = 'DEAD:BEEF:BABE' #server_dict.get('accessIPv6')
         injected_files = [] # self._get_injected_files(personality)
         password = 'password' #self._get_server_admin_password(server_dict)
         zone_blob = 'blob' #server_dict.get('blob')
@@ -108,17 +111,26 @@ class ComputeBackend(MyBackend):
         #its assembled in AuthMiddleware - we can pipeline this with the OCCI service
         context = extras['nova_ctx']
         
-        #TODO - essential, required to get a vm image
-        image_href = 'http://something' #self._image_ref_from_req_data(body)
-
+        #essential, required to get a vm image e.g. image_href = 'http://10.211.55.20:9292/v1/images/1'
         #extract resource template from entity and get the flavor name. Flavor name is the term
+        os_tpl_url = None
         flavor_name = None
         if len(entity.mixins) > 0:
-            #TODO extract the scheme value as constant
-            m = filter(lambda mixin: mixin.scheme == 'http://schemas.fi-ware.eu/template#', entity.mixins)
+            m = filter(lambda mixin: mixin.scheme == DEFAULT_RESOURCE_TEMPLATE_SCHEME, entity.mixins)
             if len(m) > 1:
-                LOG.warn('There is more that one resource template in the request. Using the 1st: ' + m[0].scheme+m[0].term)
+                #TODO should this be done inside the OCCI lib?
+                msg='There is more that one resource template in the request.'
+                LOG.error(msg)
+                raise exc.HTTPBadRequest(explanation=unicode(msg))
             flavor_name = m[0].term
+            
+            m = filter(lambda mixin: mixin.scheme == DEFAULT_OS_TEMPLATE_SCHEME, entity.mixins)
+            if len(m) > 1:
+                #TODO should this be done inside the OCCI lib?
+                msg='There is more that one os template in the request.'
+                LOG.error(msg)
+                raise exc.HTTPBadRequest(explanation=unicode(msg))
+            os_tpl_url = m[0].os_url()
         
         try:
             if flavor_name:
@@ -130,7 +142,7 @@ class ComputeBackend(MyBackend):
             # all are None by default except context, inst_type and image_href
             (instances, resv_id) = self.compute_api.create(context,
                             inst_type,
-                            image_href,
+                            image_href=os_tpl_url,
                             display_name=name,
                             display_description=name,
                             key_name=key_name,
@@ -170,7 +182,17 @@ class ComputeBackend(MyBackend):
             msg = "%(err_type)s: %(err_msg)s" % \
                   {'err_type': err.exc_type, 'err_msg': err.value}
             raise exc.HTTPBadRequest(explanation=msg)
-
+        
+        #TODO it's unlikely that his uuid is the instance id
+        entity.identifier = instances[0]['uuid']
+        entity.attributes['occi.compute.hostname'] = instances[0]['hostname']
+        entity.attributes['occi.compute.architecture'] = 'x86'
+        entity.attributes['occi.compute.cores'] = instances[0]['vcpus']
+        entity.attributes['occi.compute.speed'] = str(2.4) #this is not available in instances
+        entity.attributes['occi.compute.memory'] = str(float(instances[0]['memory_mb'])/1024)
+        #TODO some call back mechanism is required to update this field
+        entity.attributes['occi.compute.state'] = 'inactive'
+        
     def _handle_quota_error(self, error):
         """
         Reraise quota errors as api-specific http exceptions
@@ -393,4 +415,7 @@ class NetworkInterfaceBackend(KindBackend):
         link.attributes.pop('occi.networkinterface.interface')
 
 class ResourceMixinBackend(MixinBackend):
+    pass
+
+class OsMixinBackend(MixinBackend):
     pass
