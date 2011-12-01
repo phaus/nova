@@ -53,7 +53,6 @@ class OCCIApplication(Application, wsgi.Application):
         self.application = Application()
         self.image_service = image.get_default_image_service()
         self.context = context.get_admin_context()
-        self.os_flavours = instance_types.get_all_types()
         self._setup_occi_service()
 
     def __call__(self, environ, response):
@@ -118,12 +117,14 @@ class OCCIApplication(Application, wsgi.Application):
         self._register_occi_extensions()
         
     def _register_resource_mixins(self, resource_mixin_backend):
-        assert len(self.os_flavours) > 0
-        for itype in self.os_flavours:
+        
+        os_flavours = instance_types.get_all_types()
+        
+        assert len(os_flavours) > 0
+        for itype in os_flavours:
             resourceTemplate = ResourceTemplate(term=itype, scheme=DEFAULT_RESOURCE_TEMPLATE_SCHEME, \
-                related=[OCCI_RESOURCE_TEMPLATE_SCHEME], attributes=self.os_flavours[itype], \
-                title='This is an openstack '+itype+' flavor.')
-            resourceTemplate.location = itype
+                related=[OCCI_RESOURCE_TEMPLATE_SCHEME], attributes=os_flavours[itype], \
+                title='This is an openstack '+itype+' flavor.', location=itype)
             self.application.register_backend(resourceTemplate, resource_mixin_backend)
     
     def _register_os_mixins(self, os_mixin_backend):
@@ -137,8 +138,7 @@ class OCCIApplication(Application, wsgi.Application):
         for image in images:
             osTemplate = OsTemplate(term=image['name'], scheme=DEFAULT_OS_TEMPLATE_SCHEME, \
                 os_id=image['id'], related=[OCCI_OS_TEMPLATE_SCHEME], \
-                attributes=None, title='This is an OS '+image['name']+' image')
-            osTemplate.location = image['name']
+                attributes=None, title='This is an OS '+image['name']+' image', location=image['name'])
             self.application.register_backend(osTemplate, os_mixin_backend)
             
     def _register_occi_extensions(self):
