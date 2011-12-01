@@ -59,15 +59,14 @@ class OsTemplate(Mixin):
                  attributes=None, location=None):
         super(OsTemplate, self).__init__(scheme, term, related, actions, 
                                          title, attributes, location)
+        self.os_id = os_id
         
+    def os_url(self):
         glance_hosts = FLAGS.get('glance_api_servers', ['localhost:9292'])
         #TODO handle when there are more than one glance hosts
         if len(glance_hosts) > 1:
             LOG.warn('There are more than one glance host. Using the first: ' + glance_hosts[0])
-        self.url = 'http://'+glance_hosts[0]+'/v1/images/'+str(os_id)
-        
-    def os_url(self):
-        return self.url
+        return 'http://'+glance_hosts[0]+'/v1/images/'+str(self.os_id)
     
 class ResourceTemplate(Mixin):
     '''
