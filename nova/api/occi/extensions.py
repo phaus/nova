@@ -25,12 +25,6 @@ LOG = logging.getLogger('nova.api.occi.extensions')
 
 FLAGS = flags.FLAGS
 
-#TODO these constants need a better home
-DEFAULT_OS_TEMPLATE_SCHEME = 'http://schemas.openstack.org/template/os#'
-DEFAULT_RESOURCE_TEMPLATE_SCHEME = 'http://schemas.openstack.org/template/resource#'
-
-OCCI_OS_TEMPLATE_SCHEME = 'http://schemas.ogf.org/occi/infrastructure#os_tpl'
-OCCI_RESOURCE_TEMPLATE_SCHEME = 'http://schemas.ogf.org/occi/infrastructure#resource_tpl'
 
 # Trusted Compute Pool technology mixin definition
 TCP_ATTRIBUTES = {'eu.fi-ware.compute.tcp': ''}
@@ -65,7 +59,8 @@ class OsTemplate(Mixin):
         glance_hosts = FLAGS.get('glance_api_servers', ['localhost:9292'])
         #TODO handle when there are more than one glance hosts
         if len(glance_hosts) > 1:
-            LOG.warn('There are more than one glance host. Using the first: ' + glance_hosts[0])
+            LOG.warn('There are more than one glance host. Using the first: '
+                      + glance_hosts[0])
         return 'http://'+glance_hosts[0]+'/v1/images/'+str(self.os_id)
     
 class ResourceTemplate(Mixin):
