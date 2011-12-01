@@ -12,10 +12,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from extensions import TCP, TCPBackend, OsTemplate, ResourceTemplate, \
-    DEFAULT_RESOURCE_TEMPLATE_SCHEME, \
-    OCCI_RESOURCE_TEMPLATE_SCHEME, DEFAULT_OS_TEMPLATE_SCHEME,\
-    OCCI_OS_TEMPLATE_SCHEME
+from extensions import TCP, TCPBackend, OsTemplate, ResourceTemplate
+#    DEFAULT_RESOURCE_TEMPLATE_SCHEME, \
+#    OCCI_RESOURCE_TEMPLATE_SCHEME, DEFAULT_OS_TEMPLATE_SCHEME,\
+#    OCCI_OS_TEMPLATE_SCHEME
 
 from glance.common import exception as glance_exception
 from nova import wsgi
@@ -118,6 +118,9 @@ class OCCIApplication(Application, wsgi.Application):
         
     def _register_resource_mixins(self, resource_mixin_backend):
         
+        DEFAULT_RESOURCE_TEMPLATE_SCHEME = 'http://schemas.openstack.org/template/resource#'
+        OCCI_RESOURCE_TEMPLATE_SCHEME = 'http://schemas.ogf.org/occi/infrastructure#resource_tpl'
+        
         os_flavours = instance_types.get_all_types()
         
         assert len(os_flavours) > 0
@@ -128,6 +131,10 @@ class OCCIApplication(Application, wsgi.Application):
             self.application.register_backend(resourceTemplate, resource_mixin_backend)
     
     def _register_os_mixins(self, os_mixin_backend):
+
+        DEFAULT_OS_TEMPLATE_SCHEME = 'http://schemas.openstack.org/template/os#'
+        OCCI_OS_TEMPLATE_SCHEME = 'http://schemas.ogf.org/occi/infrastructure#os_tpl'
+                
         try:
             #this is a HTTP call out to glance
             images = self.image_service.detail(self.context)
