@@ -21,13 +21,12 @@ from nova import network
 from nova.compute import instance_types
 from nova.rpc import common as rpc_common
 
-from extensions import DEFAULT_RESOURCE_TEMPLATE_SCHEME, \
-DEFAULT_OS_TEMPLATE_SCHEME
-
 from nova import log as logging
 from occi.backend import ActionBackend, KindBackend, MixinBackend
+from occi.exceptions import HTTPError
 from occi.extensions.infrastructure import START, STOP, SUSPEND, RESTART, UP, \
     DOWN, ONLINE, BACKUP, SNAPSHOT, RESIZE, OFFLINE, NETWORK, NETWORKINTERFACE
+from nova.api.occi.extensions import ResourceTemplate, OsTemplate
 
 
 LOG = logging.getLogger('nova.api.occi.backends')
@@ -111,33 +110,46 @@ class ComputeBackend(MyBackend):
         #its assembled in AuthMiddleware - we can pipeline this with the OCCI service
         context = extras['nova_ctx']
         
-        #essential, required to get a vm image e.g. image_href = 'http://10.211.55.20:9292/v1/images/1'
-        #extract resource template from entity and get the flavor name. Flavor name is the term
+        #essential, required to get a vm image e.g. 
+        #            image_href = 'http://10.211.55.20:9292/v1/images/1'
+        #extract resource template from entity and get the flavor name. 
+        #            Flavor name is the term
         os_tpl_url = None
         flavor_name = None
         if len(entity.mixins) > 0:
-            m = filter(lambda mixin: mixin.scheme == DEFAULT_RESOURCE_TEMPLATE_SCHEME, entity.mixins)
-            if len(m) > 1:
-                #TODO should this be done inside the OCCI lib?
+            rc = oc = 0
+            for mixin in entity.mixins:
+                if isinstance(mixin, ResourceTemplate):
+                    r = mixin
+                    rc += 1
+                elif isinstance(mixin, OsTemplate):
+                    o = mixin
+                    oc += 1
+            
+            if rc > 1:
                 msg='There is more that one resource template in the request.'
                 LOG.error(msg)
-                raise exc.HTTPBadRequest(explanation=unicode(msg))
-            flavor_name = m[0].term
-            
-            m = filter(lambda mixin: mixin.scheme == DEFAULT_OS_TEMPLATE_SCHEME, entity.mixins)
-            if len(m) > 1:
-                #TODO should this be done inside the OCCI lib?
-                msg='There is more that one os template in the request.'
+                raise AttributeError(msg=unicode(msg))
+            if oc > 1:
+                msg='There is more that one resource template in the request.'
                 LOG.error(msg)
-                raise exc.HTTPBadRequest(explanation=unicode(msg))
-            os_tpl_url = m[0].os_url()
-        
+                raise AttributeError()            
+            
+            flavor_name = r.term
+            os_tpl_url = o.os_url()
+            
         try:
             if flavor_name:
                 inst_type = instance_types.get_instance_type_by_name(flavor_name)
             else:
                 inst_type = instance_types.get_default_instance_type()
-                LOG.warn('No resource template was found in the request. Using the default: ' + inst_type['name'])
+                LOG.warn('No resource template was found in the request. \
+                                Using the default: ' + inst_type['name'])
+            
+            if not os_tpl_url: #possibly an edge case
+                msg = 'No URL to an image file has been found.'
+                LOG.error(msg)
+                raise HTTPError(404, msg)
 
             # all are None by default except context, inst_type and image_href
             (instances, resv_id) = self.compute_api.create(context,
@@ -183,13 +195,15 @@ class ComputeBackend(MyBackend):
                   {'err_type': err.exc_type, 'err_msg': err.value}
             raise exc.HTTPBadRequest(explanation=msg)
         
-        #TODO it's unlikely that his uuid is the instance id
-        entity.identifier = instances[0]['uuid']
+        #TODO it's unlikely that his uuid is the instance id     
+        entity.attributes['occi.core.id'] = instances[0]['hostname']
         entity.attributes['occi.compute.hostname'] = instances[0]['hostname']
         entity.attributes['occi.compute.architecture'] = 'x86'
         entity.attributes['occi.compute.cores'] = instances[0]['vcpus']
-        entity.attributes['occi.compute.speed'] = str(2.4) #this is not available in instances
-        entity.attributes['occi.compute.memory'] = str(float(instances[0]['memory_mb'])/1024)
+        #this is not available in instances
+        entity.attributes['occi.compute.speed'] = str(2.4) 
+        entity.attributes['occi.compute.memory'] = \
+                                    str(float(instances[0]['memory_mb'])/1024)
         #TODO some call back mechanism is required to update this field
         entity.attributes['occi.compute.state'] = 'inactive'
         
