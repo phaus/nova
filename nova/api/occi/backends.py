@@ -127,11 +127,11 @@ class ComputeBackend(MyBackend):
                     oc += 1
             
             if rc > 1:
-                msg='There is more that one resource template in the request.'
+                msg = 'There is more that one resource template in the request.'
                 LOG.error(msg)
                 raise AttributeError(msg=unicode(msg))
             if oc > 1:
-                msg='There is more that one resource template in the request.'
+                msg = 'There is more that one resource template in the request.'
                 LOG.error(msg)
                 raise AttributeError()            
             
@@ -195,18 +195,24 @@ class ComputeBackend(MyBackend):
                   {'err_type': err.exc_type, 'err_msg': err.value}
             raise exc.HTTPBadRequest(explanation=msg)
         
-        #TODO it's unlikely that his uuid is the instance id     
+        #TODO it's unlikely that this uuid is the instance id     
         entity.attributes['occi.core.id'] = instances[0]['hostname']
         entity.attributes['occi.compute.hostname'] = instances[0]['hostname']
         entity.attributes['occi.compute.architecture'] = 'x86'
         entity.attributes['occi.compute.cores'] = instances[0]['vcpus']
         #this is not available in instances
+        # could possible be retreived from flavour info 
+        # if not where?
         entity.attributes['occi.compute.speed'] = str(2.4) 
         entity.attributes['occi.compute.memory'] = \
-                                    str(float(instances[0]['memory_mb'])/1024)
-        #TODO some call back mechanism is required to update this field
+                                    str(float(instances[0]['memory_mb']) / 1024)
         entity.attributes['occi.compute.state'] = 'inactive'
         
+        #Once created, the VM is attached to a public network with an address
+        # allocated by DHCP
+        # To create an OS floating IP then dhcp would be switched to static
+        
+    #TODO best import this from openstack api? it was taken from there
     def _handle_quota_error(self, error):
         """
         Reraise quota errors as api-specific http exceptions
@@ -277,12 +283,18 @@ class ComputeBackend(MyBackend):
             # read attributes from action and do something with it :-)
             print('Suspending virtual machine with id' + entity.identifier)
 
+#from quantum.client import cli_lib as cli
+#from quantum.client import Client
 
 class NetworkBackend(MyBackend):
     '''
     Backend to handle network resources.
     '''
-
+#    def __init__(self):
+#        self.tenant_id = 'admin'
+#        FORMAT = 'json'
+#        self.client = Client(tenant=self.tenant_id, format=FORMAT)
+        
     def create(self, entity, extras):
         # create a VNIC...
         entity.attributes['occi.network.vlan'] = '1'
@@ -290,7 +302,17 @@ class NetworkBackend(MyBackend):
         entity.attributes['occi.network.state'] = 'inactive'
         entity.actions = [UP]
         print('Creating a VNIC')
-
+        
+        #here comes the pain/fun!
+#        params = {'network': {'name': 'a name'}}
+#        try:
+#            res = self.client.create_network(params)
+#        except Exception as ex:
+#            raise ex
+#        
+#        LOG.debug("Operation 'create_network' executed.")
+#        entity.attributes['occi.core.id'] = res["network"]["id"]
+        
     def retrieve(self, entity, extras):
         # update a VNIC
         if entity.attributes['occi.network.state'] == 'active':
@@ -314,19 +336,59 @@ class NetworkBackend(MyBackend):
             # read attributes from action and do something with it :-)
             print('Stopping VNIC with id: ' + entity.identifier)
 
+from nova import volume
 
 class StorageBackend(MyBackend):
     '''
     Backend to handle storage resources.
     '''
-
-    def create(self, entity):
+    def __init__(self):
+        self.volume_api = volume.API()
+        
+    def create(self, entity, extras):
         # create a storage container here!
 
         entity.attributes['occi.storage.size'] = '1'
         entity.attributes['occi.storage.state'] = 'offline'
         entity.actions = [ONLINE]
         print('Creating a storage device')
+        
+        
+        """Creates a new volume."""
+        context = extras['nova_ctx']
+
+#        vol = body['volume']
+#        size = vol['size']
+        size = entity['occi.storage.size']
+        LOG.audit(_("Create volume of %s GB"), size, context=context)
+
+#        vol_type = vol.get('volume_type', None)
+#        if vol_type:
+#            try:
+#                vol_type = volume_types.get_volume_type_by_name(context,
+#                                                                vol_type)
+#            except exception.NotFound:
+#                raise exc.HTTPNotFound()
+#
+#        metadata = vol.get('metadata', None)
+        
+        vol_type = None
+        metadata = None
+        disp_name = 'a volume' #vol.get('display_name')
+        disp_descr = 'a volume' #vol.get('display_description')
+        new_volume = self.volume_api.create(context, size, None,
+                                            disp_name,
+                                            disp_descr,
+                                            volume_type=vol_type,
+                                            metadata=metadata)
+
+        # Work around problem that instance is lazy-loaded...
+        new_volume = self.volume_api.get(context, new_volume['id'])
+
+#        retval = _translate_volume_detail_view(context, new_volume)
+#
+#        return {'volume': retval}
+        
 
     def retrieve(self, entity, extras):
         # check the state and return it!

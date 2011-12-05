@@ -25,7 +25,7 @@ import nova.image as image
 
 from nova.api.occi.backends import ComputeBackend, NetworkBackend, \
     StorageBackend, IpNetworkBackend, IpNetworkInterfaceBackend, \
-    StorageLinkBackend, NetworkInterfaceBackend, ResourceMixinBackend,\
+    StorageLinkBackend, NetworkInterfaceBackend, ResourceMixinBackend, \
     OsMixinBackend
 from occi.extensions.infrastructure import COMPUTE, START, STOP, RESTART, \
     SUSPEND, NETWORK, UP, DOWN, STORAGE, ONLINE, OFFLINE, BACKUP, SNAPSHOT, \
@@ -110,6 +110,8 @@ class OCCIApplication(Application, wsgi.Application):
                                           networkinterface_backend)
 
         # register openstack resource templates
+        # TODO each of these calls need to be authenticated
+        # TODO need to pass admin credentials
         self._register_resource_mixins(ResourceMixinBackend())
         self._register_os_mixins(OsMixinBackend())
         
@@ -127,7 +129,7 @@ class OCCIApplication(Application, wsgi.Application):
         for itype in os_flavours:
             resourceTemplate = ResourceTemplate(term=itype, scheme=DEFAULT_RESOURCE_TEMPLATE_SCHEME, \
                 related=[OCCI_RESOURCE_TEMPLATE_SCHEME], attributes=os_flavours[itype], \
-                title='This is an openstack '+itype+' flavor.', location=itype)
+                title='This is an openstack ' + itype + ' flavor.', location=itype)
             self.application.register_backend(resourceTemplate, resource_mixin_backend)
     
     def _register_os_mixins(self, os_mixin_backend):
@@ -145,7 +147,7 @@ class OCCIApplication(Application, wsgi.Application):
         for image in images:
             osTemplate = OsTemplate(term=image['name'], scheme=DEFAULT_OS_TEMPLATE_SCHEME, \
                 os_id=image['id'], related=[OCCI_OS_TEMPLATE_SCHEME], \
-                attributes=None, title='This is an OS '+image['name']+' image', location=image['name'])
+                attributes=None, title='This is an OS ' + image['name'] + ' image', location=image['name'])
             self.application.register_backend(osTemplate, os_mixin_backend)
             
     def _register_occi_extensions(self):
