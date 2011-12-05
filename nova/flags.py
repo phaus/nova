@@ -362,7 +362,7 @@ DEFINE_integer('rabbit_max_retries', 0,
 DEFINE_string('control_exchange', 'nova', 'the main exchange to connect to')
 DEFINE_boolean('rabbit_durable_queues', False, 'use durable queues')
 
-DEFINE_list('enabled_apis', ['ec2', 'osapi', 'occiapi'],
+DEFINE_list('enabled_apis', ['ec2', 'osapi', 'metadata', 'occiapi'],
             'list of APIs to enable by default')
 
 DEFINE_string('ec2_host', '$my_ip', 'ip of api server')
@@ -372,7 +372,7 @@ DEFINE_string('ec2_scheme', 'http', 'prefix for ec2')
 DEFINE_string('ec2_path', '/services/Cloud', 'suffix for ec2')
 
 DEFINE_multistring('osapi_extension',
-                   ['nova.api.openstack.contrib.standard_extensions'],
+                   ['nova.api.openstack.v2.contrib.standard_extensions'],
                    'osapi extension to load')
 DEFINE_string('osapi_host', '$my_ip', 'ip of api server')
 DEFINE_string('osapi_scheme', 'http', 'prefix for openstack')
@@ -380,6 +380,8 @@ DEFINE_integer('osapi_port', 8774, 'OpenStack API port')
 DEFINE_string('osapi_path', '/v1.1/', 'suffix for openstack')
 DEFINE_integer('osapi_max_limit', 1000,
                'max number of items returned in a collection response')
+DEFINE_string('metadata_host', '$my_ip', 'ip of metadata server')
+DEFINE_integer('metadata_port', 8775, 'Metadata API port')
 
 DEFINE_integer('occiapi_listen_port', 8775, 'OCCI API port')
 DEFINE_string('occiapi_listen', '0.0.0.0', 'OCCI')
@@ -445,7 +447,8 @@ DEFINE_string('image_service', 'nova.image.glance.GlanceImageService',
               'The service to use for retrieving and searching for images.')
 
 DEFINE_string('host', socket.gethostname(),
-              'name of this node')
+              'Name of this node.  This can be an opaque identifier.  It is '
+              'not necessarily a hostname, FQDN, or IP address.')
 
 DEFINE_string('node_availability_zone', 'nova',
               'availability zone of this node')

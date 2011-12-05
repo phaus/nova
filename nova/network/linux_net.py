@@ -377,7 +377,8 @@ def metadata_forward():
                                           '-s 0.0.0.0/0 -d 169.254.169.254/32 '
                                           '-p tcp -m tcp --dport 80 -j DNAT '
                                           '--to-destination %s:%s' % \
-                                          (FLAGS.ec2_dmz_host, FLAGS.ec2_port))
+                                          (FLAGS.metadata_host,
+                                           FLAGS.metadata_port))
     iptables_manager.apply()
 
 
@@ -387,8 +388,8 @@ def metadata_accept():
                                              '-s 0.0.0.0/0 -d %s '
                                              '-p tcp -m tcp --dport %s '
                                              '-j ACCEPT' % \
-                                             (FLAGS.ec2_dmz_host,
-                                              FLAGS.ec2_port))
+                                             (FLAGS.metadata_host,
+                                              FLAGS.metadata_port))
     iptables_manager.apply()
 
 
@@ -599,7 +600,7 @@ def update_dhcp(context, dev, network_ref):
     conffile = _dhcp_file(dev, 'conf')
     with open(conffile, 'w') as f:
         f.write(get_dhcp_hosts(context, network_ref))
-    restart_dhcp(dev, network_ref)
+    restart_dhcp(context, dev, network_ref)
 
 
 def update_dhcp_hostfile_with_text(dev, hosts_text):
@@ -617,7 +618,7 @@ def kill_dhcp(dev):
 #           configuration options (like dchp-range, vlan, ...)
 #           aren't reloaded.
 @utils.synchronized('dnsmasq_start')
-def restart_dhcp(dev, network_ref):
+def restart_dhcp(context, dev, network_ref):
     """(Re)starts a dnsmasq server for a given network.
 
     If a dnsmasq instance is already running then send a HUP
@@ -894,6 +895,8 @@ class LinuxBridgeInterfaceDriver(LinuxNetInterfaceDriver):
                           network['bridge_interface'],
                           network, gateway)
 
+        # NOTE(vish): applying here so we don't get a lock conflict
+        iptables_manager.apply()
         return network['bridge']
 
     def unplug(self, network):
@@ -963,14 +966,14 @@ class LinuxBridgeInterfaceDriver(LinuxNetInterfaceDriver):
 
             # NOTE(vish): This will break if there is already an ip on the
             #             interface, so we move any ips to the bridge
-            gateway = None
+            old_gateway = None
             out, err = _execute('route', '-n', run_as_root=True)
             for line in out.split('\n'):
                 fields = line.split()
                 if fields and fields[0] == '0.0.0.0' and \
                                 fields[-1] == interface:
-                    gateway = fields[1]
-                    _execute('route', 'del', 'default', 'gw', gateway,
+                    old_gateway = fields[1]
+                    _execute('route', 'del', 'default', 'gw', old_gateway,
                              'dev', interface, check_exit_code=False,
                              run_as_root=True)
             out, err = _execute('ip', 'addr', 'show', 'dev', interface,
@@ -983,8 +986,8 @@ class LinuxBridgeInterfaceDriver(LinuxNetInterfaceDriver):
                                 run_as_root=True)
                     _execute(*_ip_bridge_cmd('add', params, bridge),
                                 run_as_root=True)
-            if gateway:
-                _execute('route', 'add', 'default', 'gw', gateway,
+            if old_gateway:
+                _execute('route', 'add', 'default', 'gw', old_gateway,
                             run_as_root=True)
 
             if (err and err != "device %s is already a member of a bridge;"
@@ -1019,7 +1022,7 @@ class LinuxOVSInterfaceDriver(LinuxNetInterfaceDriver):
                         '--', '--may-exist', 'add-port', bridge, dev,
                         '--', 'set', 'Interface', dev, "type=internal",
                         '--', 'set', 'Interface', dev,
-                                "external-ids:iface-id=nova-%s" % dev,
+                                "external-ids:iface-id=%s" % dev,
                         '--', 'set', 'Interface', dev,
                                 "external-ids:iface-status=active",
                         '--', 'set', 'Interface', dev,
