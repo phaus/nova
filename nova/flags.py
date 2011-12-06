@@ -383,7 +383,7 @@ DEFINE_integer('osapi_max_limit', 1000,
 DEFINE_string('metadata_host', '$my_ip', 'ip of metadata server')
 DEFINE_integer('metadata_port', 8775, 'Metadata API port')
 
-DEFINE_integer('occiapi_listen_port', 8775, 'OCCI API port')
+DEFINE_integer('occiapi_listen_port', 8776, 'OCCI API port')
 DEFINE_string('occiapi_listen', '0.0.0.0', 'OCCI')
 
 DEFINE_string('default_project', 'openstack', 'default project for openstack')
