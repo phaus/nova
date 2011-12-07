@@ -74,8 +74,8 @@ class OCCIApplication(Application, wsgi.Application):
 
         environ -- The environ.
         response -- The response.
-
         '''
+        print environ
         nova_ctx = environ['nova.context']
         self._register_os_mixins(OsMixinBackend(), nova_ctx)
         return self._call_occi(environ, response, nova_ctx=nova_ctx)
@@ -142,10 +142,7 @@ class OCCIApplication(Application, wsgi.Application):
         images = []
         try:
             #this is a HTTP call out to the image service
-            print dir(self.image_service)
-            print self.image_service.detail(context)
-            return
-            images = image_service.image_service.detail(context)
+            images = self.image_service.detail(context)
         except glance_exception.GlanceException as ge:
             raise ge
 
