@@ -195,11 +195,11 @@ class ComputeBackend(MyBackend):
                   {'err_type': err.exc_type, 'err_msg': err.value}
             raise exc.HTTPBadRequest(explanation=msg)
         
-        #TODO it's unlikely that this uuid is the instance id     
-        entity.attributes['occi.core.id'] = instances[0]['hostname']
+        entity.attributes['occi.core.id'] = instances[0]['uuid']
         entity.attributes['occi.compute.hostname'] = instances[0]['hostname']
+        #TODO can't we tell this from the image used?
         entity.attributes['occi.compute.architecture'] = 'x86'
-        entity.attributes['occi.compute.cores'] = instances[0]['vcpus']
+        entity.attributes['occi.compute.cores'] = str(instances[0]['vcpus'])
         #this is not available in instances
         # could possible be retreived from flavour info 
         # if not where?
@@ -236,25 +236,34 @@ class ComputeBackend(MyBackend):
         raise error
 
     def retrieve(self, entity, extras):
-        # trigger your management framework to get most up to date information
+        context = extras['nova_ctx']
+        try:
+            instance = self.compute_api.routing_get(context, entity.attributes['occi.core.id'])
+        except exception.NotFound:
+            raise exc.HTTPNotFound()
+        
+        #TODO OpenStack supports differenet states - need to do a mapping
+        #   see nova/compute/vm_states.py
+        entity.attributes['occi.compute.state'] = instance['vm_state']
 
         # add up to date actions...
         if entity.attributes['occi.compute.state'] == 'inactive':
             entity.actions = [START]
-        if entity.attributes['occi.compute.state'] == 'active':
+        elif entity.attributes['occi.compute.state'] == 'active':
             entity.actions = [STOP, SUSPEND, RESTART]
-        if entity.attributes['occi.compute.state'] == 'suspended':
+        elif entity.attributes['occi.compute.state'] == 'suspended':
             entity.actions = [START]
 
     def delete(self, entity, extras):
         # call the management framework to delete this compute instance...
-        print('Removing representation of virtual machine with id: '
+        print('Removing representation of virtual machine with id: ' 
               + entity.identifier)
 
         context = extras['nova_ctx']
 
         try:
-            instance = self.compute_api.routing_get(context, entity.identifier)
+            instance = self.compute_api.routing_get(context,
+                                            entity.attributes['occi.core.id'])
         except exception.NotFound:
             raise exc.HTTPNotFound()
 
