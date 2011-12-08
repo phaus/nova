@@ -57,7 +57,7 @@ class OCCIApplication(Application, wsgi.Application):
         self.context = context.get_admin_context()
         self._setup_occi_service()
 
-        # register openstack stuff
+        # register openstack instance types (flavours)
         self._register_resource_mixins(ResourceMixinBackend())
 
         # register extensions to the basic occi entities
@@ -77,6 +77,7 @@ class OCCIApplication(Application, wsgi.Application):
         '''
         print environ
         nova_ctx = environ['nova.context']
+        #TODO this is not optimal
         self._register_os_mixins(OsMixinBackend(), nova_ctx)
         return self._call_occi(environ, response, nova_ctx=nova_ctx)
 
@@ -84,6 +85,7 @@ class OCCIApplication(Application, wsgi.Application):
         '''
         Register the OCCI backends within the OCCI WSGI application.
         '''
+        LOG.info('Registering OCCI backends with web app.')
         compute_backend = ComputeBackend()
         network_backend = NetworkBackend()
         storage_backend = StorageBackend()
@@ -118,10 +120,14 @@ class OCCIApplication(Application, wsgi.Application):
         self.application.register_backend(NETWORKINTERFACE,
                                           networkinterface_backend)
 
+    #TODO the following 2 methods need to refresh their info as OS 
+    # flavours and images will be added and removed
     def _register_resource_mixins(self, resource_mixin_backend):
 
-        DEFAULT_RESOURCE_TEMPLATE_SCHEME = 'http://schemas.openstack.org/template/resource#'
-        OCCI_RESOURCE_TEMPLATE_SCHEME = 'http://schemas.ogf.org/occi/infrastructure#resource_tpl'
+        DEFAULT_RESOURCE_TEMPLATE_SCHEME = \
+                    'http://schemas.openstack.org/template/resource#'
+        OCCI_RESOURCE_TEMPLATE_SCHEME = \
+                    'http://schemas.ogf.org/occi/infrastructure#resource_tpl'
 
         os_flavours = instance_types.get_all_types()
 
@@ -132,6 +138,9 @@ class OCCIApplication(Application, wsgi.Application):
                 attributes=os_flavours[itype],
                 title='This is an openstack ' + itype + ' flavor.',
                 location=itype)
+            LOG.debug('Regsitering an OpeStack flavour/instance type as: ' + \
+                                                        str(resourceTemplate))
+            #TODO - no check is done to see if the resource template is existing
             self.application.register_backend(resourceTemplate,
                                               resource_mixin_backend)
 
@@ -151,7 +160,9 @@ class OCCIApplication(Application, wsgi.Application):
             osTemplate = OsTemplate(term=image['name'],
                                     scheme=DEFAULT_OS_TEMPLATE_SCHEME, \
                 os_id=image['id'], related=[OCCI_OS_TEMPLATE_SCHEME], \
-                attributes=None, title='This is an OS ' + image['name'] + ' image', location=image['name'])
+                attributes=None, title='This is an OS ' + image['name'] + \
+                                            ' image', location=image['name'])
+            LOG.debug('Regsitering an OpeStack image type as: ' + str(osTemplate))
             self.application.register_backend(osTemplate, os_mixin_backend)
 
     def _register_occi_extensions(self):

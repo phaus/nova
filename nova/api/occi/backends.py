@@ -347,6 +347,7 @@ class NetworkBackend(MyBackend):
 
 from nova import volume
 
+#NOTE: for this to operate the nova-vol service must be running
 class StorageBackend(MyBackend):
     '''
     Backend to handle storage resources.
@@ -355,22 +356,18 @@ class StorageBackend(MyBackend):
         self.volume_api = volume.API()
         
     def create(self, entity, extras):
-        # create a storage container here!
-
-        entity.attributes['occi.storage.size'] = '1'
-        entity.attributes['occi.storage.state'] = 'offline'
-        entity.actions = [ONLINE]
-        print('Creating a storage device')
-        
-        
         """Creates a new volume."""
+        # create a storage container here!
         context = extras['nova_ctx']
+        size = entity.attributes['occi.storage.size']
+        LOG.audit(_("Create volume of %s GB"), size, context=context)
+        
+        import ipdb
+        ipdb.set_trace()
+
 
 #        vol = body['volume']
 #        size = vol['size']
-        size = entity['occi.storage.size']
-        LOG.audit(_("Create volume of %s GB"), size, context=context)
-
 #        vol_type = vol.get('volume_type', None)
 #        if vol_type:
 #            try:
@@ -381,8 +378,8 @@ class StorageBackend(MyBackend):
 #
 #        metadata = vol.get('metadata', None)
         
-        vol_type = None
-        metadata = None
+        vol_type = None #volume type can be specified by mixin
+        metadata = None #a metadata mixin???
         disp_name = 'a volume' #vol.get('display_name')
         disp_descr = 'a volume' #vol.get('display_description')
         new_volume = self.volume_api.create(context, size, None,
@@ -393,11 +390,9 @@ class StorageBackend(MyBackend):
 
         # Work around problem that instance is lazy-loaded...
         new_volume = self.volume_api.get(context, new_volume['id'])
-
-#        retval = _translate_volume_detail_view(context, new_volume)
-#
-#        return {'volume': retval}
         
+        entity.attributes['occi.storage.state'] = 'offline'
+        entity.actions = [ONLINE]
 
     def retrieve(self, entity, extras):
         # check the state and return it!
