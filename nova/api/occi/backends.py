@@ -67,23 +67,8 @@ class ComputeBackend(MyBackend):
         self.network_api = network.API()
 
     def create(self, entity, extras):
-        # e.g. check if all needed attributes are defined...
 
-        # adding some default dummy values:
-#        if 'occi.compute.hostname' not in entity.attributes:
-#            entity.attributes['occi.compute.hostname'] = 'dummy'
-#        if 'occi.compute.memory' not in entity.attributes:
-#            entity.attributes['occi.compute.memory'] = '2'
-#        # rest is set by SERVICE provider...
-#        entity.attributes['occi.compute.architecture'] = 'x86'
-#        entity.attributes['occi.compute.cores'] = '2'
-#        entity.attributes['occi.compute.speed'] = '1'
-#
-#        # trigger your management framework to start the compute instance...
-#        entity.attributes['occi.compute.state'] = 'inactive'
-#        entity.actions = [START]
-
-        print('Creating the virtual machine with id: ' + entity.identifier)
+        LOG.info('Creating the virtual machine with id: ' + entity.identifier)
 
         #optional params
         name = 'an_occi_vm'
@@ -208,8 +193,10 @@ class ComputeBackend(MyBackend):
                                     str(float(instances[0]['memory_mb']) / 1024)
         entity.attributes['occi.compute.state'] = 'inactive'
         
-        #Once created, the VM is attached to a public network with an address
+        #Once created, the VM is attached to a public network with an addresses
         # allocated by DHCP
+        # Then create link to this network (IP) and set the ip to that of the
+        # allocated ip
         # To create an OS floating IP then dhcp would be switched to static
         
     #TODO best import this from openstack api? it was taken from there
@@ -362,10 +349,6 @@ class StorageBackend(MyBackend):
         size = entity.attributes['occi.storage.size']
         LOG.audit(_("Create volume of %s GB"), size, context=context)
         
-        import ipdb
-        ipdb.set_trace()
-
-
 #        vol = body['volume']
 #        size = vol['size']
 #        vol_type = vol.get('volume_type', None)
@@ -390,21 +373,56 @@ class StorageBackend(MyBackend):
 
         # Work around problem that instance is lazy-loaded...
         new_volume = self.volume_api.get(context, new_volume['id'])
+        entity.attributes['occi.core.id'] = new_volume['id']
+        
+        import ipdb
+        ipdb.set_trace()
+                
+        if new_volume['status'] == 'error':
+            msg = 'There was an error creating the volume'
+            LOG.error(msg)
+            raise HTTPError(500, msg)
         
         entity.attributes['occi.storage.state'] = 'offline'
         entity.actions = [ONLINE]
 
     def retrieve(self, entity, extras):
         # check the state and return it!
-
+        
+        import ipdb
+        ipdb.set_trace()
+        
+        context = extras['nova_ctx']
+        volume_id = entity.attributes['occi.core.id']
+        
+        try:
+            vol = self.volume_api.get(context, volume_id)
+        except exception.NotFound:
+            raise exc.HTTPNotFound()
+        
+        if vol['status'] == 'available':
+            entity.attributes['occi.storage.state'] = 'online'
+        
         if entity.attributes['occi.storage.state'] == 'offline':
             entity.actions = [ONLINE]
-        if entity.attributes['occi.storage.state'] == 'online':
+        elif entity.attributes['occi.storage.state'] == 'online':
             entity.actions = [BACKUP, SNAPSHOT, RESIZE]
 
     def delete(self, entity, extras):
         # call the management framework to delete this storage instance...
         print('Removing storage device with id: ' + entity.identifier)
+        
+        import ipdb
+        ipdb.set_trace()
+        
+        context = extras['nova_ctx']
+        volume_id = entity.attributes['occi.core.id']
+        
+        try:
+            self.volume_api.delete(context, volume_id)
+        except exception.NotFound:
+            raise exc.HTTPNotFound()
+        
 
     def action(self, entity, action, extras):
         if action not in entity.actions:
