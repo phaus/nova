@@ -81,4 +81,5 @@ class OpenStackOCCIRegistry(registry.NonePersistentRegistry):
         '''
         key = self.get_hostname() + resource.kind.location
         key += resource.attributes['occi.core.id']
+        resource.identifier = key
         registry.NonePersistentRegistry.add_resource(self, key, resource)
