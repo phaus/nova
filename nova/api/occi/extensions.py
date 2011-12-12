@@ -82,7 +82,6 @@ class OpenStackOCCIRegistry(registry.NonePersistentRegistry):
         '''
         Make sure OS keys get used!
         '''
-        key = self.get_hostname() + resource.kind.location
-        key += resource.attributes['occi.core.id']
+        key = resource.kind.location + resource.attributes['occi.core.id']
         resource.identifier = key
         registry.NonePersistentRegistry.add_resource(self, key, resource)
