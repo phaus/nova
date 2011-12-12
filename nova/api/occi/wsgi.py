@@ -77,7 +77,7 @@ class OCCIApplication(Application, wsgi.Application):
         '''
         print environ
         nova_ctx = environ['nova.context']
-        #TODO this is not optimal
+        #TODO this is not optimal, will be replaced by a new registry backend
         self._register_os_mixins(OsMixinBackend(), nova_ctx)
         return self._call_occi(environ, response, nova_ctx=nova_ctx)
 
