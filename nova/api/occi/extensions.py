@@ -13,63 +13,60 @@
 #    under the License.
 
 from nova import flags
-from occi.core_model import Mixin
-from occi.backend import MixinBackend
-from occi.extensions.infrastructure import COMPUTE
+from occi import backend, core_model
+from occi.extensions import infrastructure
+from nova import log
 
-import logging
-
-
-LOG = logging.getLogger('nova.api.occi.extensions')
-
+LOG = log.getLogger('nova.api.occi.extensions')
 
 FLAGS = flags.FLAGS
 
-
 # Trusted Compute Pool technology mixin definition
 TCP_ATTRIBUTES = {'eu.fi-ware.compute.tcp': ''}
-TCP = Mixin('http://schemas.fi-ware.eu/occi/infrastructure/compute#',
-                  'tcp', attributes=TCP_ATTRIBUTES)
+TCP = core_model.Mixin(\
+    'http://schemas.fi-ware.eu/occi/infrastructure/compute#',
+    'tcp', attributes=TCP_ATTRIBUTES)
 
 
-class TCPBackend(MixinBackend):
+class TCPBackend(backend.MixinBackend):
     '''
     Trusted Compute Pool technology mixin backend handler
     '''
     def create(self, entity):
-        if not entity.kind == COMPUTE:
+        if not entity.kind == infrastructure.COMPUTE:
             raise AttributeError('This mixin cannot be applied to this kind.')
         entity.attributes['eu.fi-ware.compute.tcp'] = 'true'
 
     def delete(self, entity):
         entity.attributes.pop('eu.fi-ware.compute.tcp')
 
-class OsTemplate(Mixin):
+
+class OsTemplate(core_model.Mixin):
     '''
     Represents the OS Template mechanism as per OCCI specification.
     An OS template is equivocal to an image in OpenStack
     '''
-    def __init__(self, scheme, term, os_id, related=None, actions=None, title='',
-                 attributes=None, location=None):
-        super(OsTemplate, self).__init__(scheme, term, related, actions, 
+    def __init__(self, scheme, term, os_id, related=None, actions=None,
+                 title='', attributes=None, location=None):
+        super(OsTemplate, self).__init__(scheme, term, related, actions,
                                          title, attributes, location)
         self.os_id = os_id
-        
+
     def os_url(self):
         glance_hosts = FLAGS.get('glance_api_servers', ['localhost:9292'])
         #TODO handle when there are more than one glance hosts
         if len(glance_hosts) > 1:
             LOG.warn('There are more than one glance host. Using the first: '
                       + glance_hosts[0])
-        return 'http://'+glance_hosts[0]+'/v1/images/'+str(self.os_id)
-    
-class ResourceTemplate(Mixin):
+        return 'http://' + glance_hosts[0] + '/v1/images/' + str(self.os_id)
+
+
+class ResourceTemplate(core_model.Mixin):
     '''
     Represents the Resource Template mechanism as per OCCI specification.
     An Resource template is equivocal to a flavor in OpenStack.
     '''
     def __init__(self, scheme, term, related=None, actions=None, title='',
                  attributes=None, location=None):
-        super(ResourceTemplate, self).__init__(scheme, term, related, actions, 
+        super(ResourceTemplate, self).__init__(scheme, term, related, actions,
                                          title, attributes, location)
-            
