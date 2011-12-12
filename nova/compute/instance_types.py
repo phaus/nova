@@ -31,7 +31,7 @@ LOG = logging.getLogger('nova.instance_types')
 
 
 def create(name, memory, vcpus, local_gb, flavorid, swap=0,
-           rxtx_factor=1):
+           rxtx_factor=1, extra_specs=None):
     """Creates instance types."""
     kwargs = {
         'memory_mb': memory,
@@ -39,13 +39,15 @@ def create(name, memory, vcpus, local_gb, flavorid, swap=0,
         'local_gb': local_gb,
         'swap': swap,
         'rxtx_factor': rxtx_factor,
+        'extra_specs': extra_specs
     }
 
     # ensure some attributes are integers and greater than or equal to 0
     for option in kwargs:
         try:
-            kwargs[option] = int(kwargs[option])
-            assert kwargs[option] >= 0
+            if not option == 'extra_specs':
+                kwargs[option] = int(kwargs[option])
+                assert kwargs[option] >= 0
         except (ValueError, AssertionError):
             msg = _("create arguments must be positive integers")
             raise exception.InvalidInput(reason=msg)

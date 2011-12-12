@@ -12,34 +12,22 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from extensions import TCP, TCPBackend, OsTemplate, ResourceTemplate
-#    DEFAULT_RESOURCE_TEMPLATE_SCHEME, \
-#    OCCI_RESOURCE_TEMPLATE_SCHEME, DEFAULT_OS_TEMPLATE_SCHEME,\
-#    OCCI_OS_TEMPLATE_SCHEME
 
-# TODO: look into import structure!!!
-
-from glance.common import exception as glance_exception
+from nova import image
+from nova import log
 from nova import wsgi
-from nova import context
+from nova.api.occi import backends
+from nova.api.occi import extensions
 from nova.compute import instance_types
-import nova.image as image
+from nova.image import glance
 
-from nova.api.occi.backends import ComputeBackend, NetworkBackend, \
-    StorageBackend, IpNetworkBackend, IpNetworkInterfaceBackend, \
-    StorageLinkBackend, NetworkInterfaceBackend, ResourceMixinBackend, \
-    OsMixinBackend
-from occi.extensions.infrastructure import COMPUTE, START, STOP, RESTART, \
-    SUSPEND, NETWORK, UP, DOWN, STORAGE, ONLINE, OFFLINE, BACKUP, SNAPSHOT, \
-    RESIZE, IPNETWORK, IPNETWORKINTERFACE, STORAGELINK, NETWORKINTERFACE
-from occi.wsgi import Application
+from occi import wsgi as occi_wsgi
+from occi.extensions import infrastructure
 
-import logging
-
-LOG = logging.getLogger('nova.api.occi.wsgi')
+LOG = log.getLogger('nova.api.occi.wsgi')
 
 
-class OCCIApplication(Application, wsgi.Application):
+class OCCIApplication(occi_wsgi.Application, wsgi.Application):
     '''
     Adapter which 'translates' represents a nova WSGI application into and OCCI
     WSGI application.
@@ -49,16 +37,14 @@ class OCCIApplication(Application, wsgi.Application):
         '''
         Initialize the WSGI OCCI application.
         '''
+        super(OCCIApplication, self).__init__(
+                                registry=extensions.OpenStackOCCIRegistry())
 
-        Application.__init__(self)
-
-        self.application = Application()
-        self.image_service = image.get_default_image_service()
-        self.context = context.get_admin_context()
+        # setup the occi service...
         self._setup_occi_service()
 
         # register openstack instance types (flavours)
-        self._register_resource_mixins(ResourceMixinBackend())
+        self._register_resource_mixins(backends.ResourceMixinBackend())
 
         # register extensions to the basic occi entities
         self._register_occi_extensions()
@@ -75,10 +61,9 @@ class OCCIApplication(Application, wsgi.Application):
         environ -- The environ.
         response -- The response.
         '''
-        print environ
         nova_ctx = environ['nova.context']
-        #TODO this is not optimal, will be replaced by a new registry backend
-        self._register_os_mixins(OsMixinBackend(), nova_ctx)
+        # TODO(dizz) this is not optimal
+        self._register_os_mixins(backends.OsMixinBackend(), nova_ctx)
         return self._call_occi(environ, response, nova_ctx=nova_ctx)
 
     def _setup_occi_service(self):
@@ -86,85 +71,90 @@ class OCCIApplication(Application, wsgi.Application):
         Register the OCCI backends within the OCCI WSGI application.
         '''
         LOG.info('Registering OCCI backends with web app.')
-        compute_backend = ComputeBackend()
-        network_backend = NetworkBackend()
-        storage_backend = StorageBackend()
-        ipnetwork_backend = IpNetworkBackend()
-        ipnetworking_backend = IpNetworkInterfaceBackend()
-        storage_link_backend = StorageLinkBackend()
-        networkinterface_backend = NetworkInterfaceBackend()
+        compute_backend = backends.ComputeBackend()
+        network_backend = backends.NetworkBackend()
+        storage_backend = backends.StorageBackend()
+        ipnetwork_backend = backends.IpNetworkBackend()
+        ipnetworking_backend = backends.IpNetworkInterfaceBackend()
+        storage_link_backend = backends.StorageLinkBackend()
+        networkinterface_backend = backends.NetworkInterfaceBackend()
 
         # register kinds with backends
-        self.application.register_backend(COMPUTE, compute_backend)
-        self.application.register_backend(START, compute_backend)
-        self.application.register_backend(STOP, compute_backend)
-        self.application.register_backend(RESTART, compute_backend)
-        self.application.register_backend(SUSPEND, compute_backend)
+        self.register_backend(infrastructure.COMPUTE, compute_backend)
+        self.register_backend(infrastructure.START, compute_backend)
+        self.register_backend(infrastructure.STOP, compute_backend)
+        self.register_backend(infrastructure.RESTART, compute_backend)
+        self.register_backend(infrastructure.SUSPEND, compute_backend)
 
-        self.application.register_backend(NETWORK, network_backend)
-        self.application.register_backend(UP, network_backend)
-        self.application.register_backend(DOWN, network_backend)
+        self.register_backend(infrastructure.NETWORK, network_backend)
+        self.register_backend(infrastructure.UP, network_backend)
+        self.register_backend(infrastructure.DOWN, network_backend)
 
-        self.application.register_backend(STORAGE, storage_backend)
-        self.application.register_backend(ONLINE, storage_backend)
-        self.application.register_backend(OFFLINE, storage_backend)
-        self.application.register_backend(BACKUP, storage_backend)
-        self.application.register_backend(SNAPSHOT, storage_backend)
-        self.application.register_backend(RESIZE, storage_backend)
+        self.register_backend(infrastructure.STORAGE, storage_backend)
+        self.register_backend(infrastructure.ONLINE, storage_backend)
+        self.register_backend(infrastructure.OFFLINE, storage_backend)
+        self.register_backend(infrastructure.BACKUP, storage_backend)
+        self.register_backend(infrastructure.SNAPSHOT, storage_backend)
+        self.register_backend(infrastructure.RESIZE, storage_backend)
 
-        self.application.register_backend(IPNETWORK, ipnetwork_backend)
-        self.application.register_backend(IPNETWORKINTERFACE,
+        self.register_backend(infrastructure.IPNETWORK, ipnetwork_backend)
+        self.register_backend(infrastructure.IPNETWORKINTERFACE,
                                           ipnetworking_backend)
 
-        self.application.register_backend(STORAGELINK, storage_link_backend)
-        self.application.register_backend(NETWORKINTERFACE,
+        self.register_backend(infrastructure.STORAGELINK, storage_link_backend)
+        self.register_backend(infrastructure.NETWORKINTERFACE,
                                           networkinterface_backend)
 
-    #TODO the following 2 methods need to refresh their info as OS 
-    # flavours and images will be added and removed
     def _register_resource_mixins(self, resource_mixin_backend):
-
-        DEFAULT_RESOURCE_TEMPLATE_SCHEME = \
-                    'http://schemas.openstack.org/template/resource#'
-        OCCI_RESOURCE_TEMPLATE_SCHEME = \
+        '''
+        Register the resource resource templates to which the user has access.
+        '''
+        template_schema = 'http://schemas.openstack.org/template/resource#'
+        resource_schema = \
                     'http://schemas.ogf.org/occi/infrastructure#resource_tpl'
 
         os_flavours = instance_types.get_all_types()
 
         for itype in os_flavours:
-            resourceTemplate = ResourceTemplate(term=itype,
-                scheme=DEFAULT_RESOURCE_TEMPLATE_SCHEME,
-                related=[OCCI_RESOURCE_TEMPLATE_SCHEME],
+            resource_template = extensions.ResourceTemplate(term=itype,
+                scheme=template_schema,
+                related=[resource_schema],
                 attributes=os_flavours[itype],
                 title='This is an openstack ' + itype + ' flavor.',
                 location=itype)
             LOG.debug('Regsitering an OpeStack flavour/instance type as: ' + \
-                                                        str(resourceTemplate))
-            #TODO - no check is done to see if the resource template is existing
-            self.application.register_backend(resourceTemplate,
-                                              resource_mixin_backend)
+                                                        str(resource_template))
+            #TODO(dizz) - no check is done to see if the template is exists
+            self.register_backend(resource_template, resource_mixin_backend)
 
     def _register_os_mixins(self, os_mixin_backend, context):
-        DEFAULT_OS_TEMPLATE_SCHEME = 'http://schemas.openstack.org/template/os#'
-        OCCI_OS_TEMPLATE_SCHEME = 'http://schemas.ogf.org/occi/infrastructure#os_tpl'
+        '''
+        Register the os mixins from information retrieved frrom glance.
+        '''
+        template_schema = 'http://schemas.openstack.org/template/os#'
+        os_schema = 'http://schemas.ogf.org/occi/infrastructure#os_tpl'
 
         images = []
         try:
             #this is a HTTP call out to the image service
-            images = self.image_service.detail(context)
-        except glance_exception.GlanceException as ge:
+            image_service = image.get_default_image_service()
+            images = image_service.detail(context)
+        except glance.glance_exception as ge:
             raise ge
 
         # assert len(images) > 0
-        for image in images:
-            osTemplate = OsTemplate(term=image['name'],
-                                    scheme=DEFAULT_OS_TEMPLATE_SCHEME, \
-                os_id=image['id'], related=[OCCI_OS_TEMPLATE_SCHEME], \
-                attributes=None, title='This is an OS ' + image['name'] + \
-                                            ' image', location=image['name'])
-            LOG.debug('Regsitering an OpeStack image type as: ' + str(osTemplate))
-            self.application.register_backend(osTemplate, os_mixin_backend)
+        for img in images:
+            os_template = extensions.OsTemplate(term=img['name'],
+                                    scheme=template_schema, \
+                os_id=img['id'], related=[os_schema], \
+                attributes=None, title='This is an OS ' + img['name'] + \
+                                            ' image', location=img['name'])
+            LOG.debug('Registering an OS image type as: ' + str(os_template))
+            self.register_backend(os_template, os_mixin_backend)
 
     def _register_occi_extensions(self):
-        #TODO scan all classes in extensions.py and load dynamically
-        self.application.register_backend(TCP, TCPBackend())
+        '''
+        Register some other OCCI extensions.
+        '''
+        # TODO(dizz) scan all classes in extensions.py and load dynamically
+        self.register_backend(extensions.TCP, extensions.TCPBackend())
