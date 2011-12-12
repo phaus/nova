@@ -62,6 +62,8 @@ class OsTemplate(core_model.Mixin):
         if len(glance_hosts) > 1:
             LOG.warn('There are more than one glance host. Using the first: '
                       + glance_hosts[0])
+        #TODO: note there is an explicit API string here!
+        #TODO: glance can also simply accept self.os_id where the image is local 
         return 'http://' + glance_hosts[0] + '/v1/images/' + str(self.os_id)
 
 
