@@ -13,9 +13,12 @@
 #    under the License.
 
 from nova import flags
-from occi import backend, core_model
-from occi.extensions import infrastructure
 from nova import log
+
+from occi import backend
+from occi import core_model
+from occi import registry
+from occi.extensions import infrastructure
 
 LOG = log.getLogger('nova.api.occi.extensions')
 
@@ -70,3 +73,14 @@ class ResourceTemplate(core_model.Mixin):
                  attributes=None, location=None):
         super(ResourceTemplate, self).__init__(scheme, term, related, actions,
                                          title, attributes, location)
+
+
+class OpenStackOCCIRegistry(registry.NonePersistentRegistry):
+
+    def add_resource(self, key, resource):
+        '''
+        Make sure OS keys get used!
+        '''
+        key = self.get_hostname() + resource.kind.location
+        key += resource.identifier
+        registry.NonePersistentRegistry.add_resource(self, key, resource)
