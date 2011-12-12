@@ -13,17 +13,21 @@
 #    under the License.
 
 
-from nova import image
-from nova import log
-from nova import wsgi
-from nova.api.occi import backends
-from nova.api.occi import extensions
+from nova import image, log, wsgi
+from nova.api.occi import backends, extensions
+from nova.api.occi.compute.computeresource import ComputeBackend
+from nova.api.occi.network.networklink import IpNetworkInterfaceBackend, \
+    NetworkInterfaceBackend
+from nova.api.occi.network.networkresource import NetworkBackend, \
+    IpNetworkBackend
+from nova.api.occi.storage.storagelink import StorageLinkBackend
+from nova.api.occi.storage.storageresource import StorageBackend
 from nova.compute import instance_types
 from nova.image import glance
-
 from occi import wsgi as occi_wsgi
 from occi.extensions import infrastructure
 
+#Hi I'm a logger, use me! :-)
 LOG = log.getLogger('nova.api.occi.wsgi')
 
 
@@ -62,7 +66,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         response -- The response.
         '''
         nova_ctx = environ['nova.context']
-        # TODO(dizz) this is not optimal
+        # TODO:(dizz) this is not optimal
         self._register_os_mixins(backends.OsMixinBackend(), nova_ctx)
         return self._call_occi(environ, response, nova_ctx=nova_ctx)
 
@@ -71,13 +75,14 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         Register the OCCI backends within the OCCI WSGI application.
         '''
         LOG.info('Registering OCCI backends with web app.')
-        compute_backend = backends.ComputeBackend()
-        network_backend = backends.NetworkBackend()
-        storage_backend = backends.StorageBackend()
-        ipnetwork_backend = backends.IpNetworkBackend()
-        ipnetworking_backend = backends.IpNetworkInterfaceBackend()
-        storage_link_backend = backends.StorageLinkBackend()
-        networkinterface_backend = backends.NetworkInterfaceBackend()
+        
+        compute_backend = ComputeBackend()
+        network_backend = NetworkBackend()
+        storage_backend = StorageBackend()
+        ipnetwork_backend = IpNetworkBackend()
+        ipnetworking_backend = IpNetworkInterfaceBackend()
+        storage_link_backend = StorageLinkBackend()
+        networkinterface_backend = NetworkInterfaceBackend()
 
         # register kinds with backends
         self.register_backend(infrastructure.COMPUTE, compute_backend)
@@ -124,13 +129,15 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                 location=itype)
             LOG.debug('Regsitering an OpeStack flavour/instance type as: ' + \
                                                         str(resource_template))
-            #TODO(dizz) - no check is done to see if the template is exists
+            #TODO:(dizz) - no check is done to see if the template is exists
             self.register_backend(resource_template, resource_mixin_backend)
 
     def _register_os_mixins(self, os_mixin_backend, context):
         '''
         Register the os mixins from information retrieved frrom glance.
         '''
+        #TODO: kernel images should NOT be listed
+        
         template_schema = 'http://schemas.openstack.org/template/os#'
         os_schema = 'http://schemas.ogf.org/occi/infrastructure#os_tpl'
 
@@ -142,7 +149,6 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         except glance.glance_exception as ge:
             raise ge
 
-        # assert len(images) > 0
         for img in images:
             os_template = extensions.OsTemplate(term=img['name'],
                                     scheme=template_schema, \
@@ -156,5 +162,5 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         '''
         Register some other OCCI extensions.
         '''
-        # TODO(dizz) scan all classes in extensions.py and load dynamically
+        # TODO:(dizz) scan all classes in extensions.py and load dynamically
         self.register_backend(extensions.TCP, extensions.TCPBackend())

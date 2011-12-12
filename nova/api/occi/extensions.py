@@ -20,6 +20,7 @@ from occi import core_model
 from occi import registry
 from occi.extensions import infrastructure
 
+#Hi I'm a logger, use me! :-)
 LOG = log.getLogger('nova.api.occi.extensions')
 
 FLAGS = flags.FLAGS
@@ -57,7 +58,7 @@ class OsTemplate(core_model.Mixin):
 
     def os_url(self):
         glance_hosts = FLAGS.get('glance_api_servers', ['localhost:9292'])
-        #TODO handle when there are more than one glance hosts
+        #TODO: handle when there are more than one glance hosts
         if len(glance_hosts) > 1:
             LOG.warn('There are more than one glance host. Using the first: '
                       + glance_hosts[0])
