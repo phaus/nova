@@ -19,11 +19,10 @@
 # TODO: implement actions
 # TODO: implement updates
 
-from nova import exception, flags, log as logging, network
+from nova import flags, log as logging
 from nova.api.occi.backends import MyBackend
 from occi.backend import MixinBackend
 from occi.extensions.infrastructure import UP, DOWN, NETWORK
-from webob import exc
 
 #from quantum.client import cli_lib as cli
 #from quantum.client import Client

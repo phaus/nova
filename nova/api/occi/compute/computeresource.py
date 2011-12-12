@@ -47,11 +47,11 @@ class ComputeBackend(MyBackend):
         LOG.info('Creating the virtual machine with id: ' + entity.identifier)
 
         #optional params
-        name = 'an_occi_vm'
+        name = 'an_occi_vm' #TODO: should be taken from the OCCI request
         key_name = None # only set if a key-pair is registered
         metadata = {} #server_dict.get('metadata', {})
-        access_ip_v4 = '192.168.1.23' #server_dict.get('accessIPv4')
-        access_ip_v6 = 'DEAD:BEEF:BABE' #server_dict.get('accessIPv6')
+        access_ip_v4 = None #'192.168.1.23' #server_dict.get('accessIPv4')
+        access_ip_v6 = None #'DEAD:BEEF:BABE' #server_dict.get('accessIPv6')
         injected_files = [] # self._get_injected_files(personality)
         password = 'password' #self._get_server_admin_password(server_dict)
         zone_blob = 'blob' #server_dict.get('blob')
