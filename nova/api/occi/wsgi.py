@@ -13,22 +13,36 @@
 #    under the License.
 
 
-from nova import image, log, wsgi
-from nova.api.occi import backends, extensions
-from nova.api.occi.compute.computeresource import ComputeBackend
-from nova.api.occi.network.networklink import IpNetworkInterfaceBackend, \
-    NetworkInterfaceBackend
-from nova.api.occi.network.networkresource import NetworkBackend, \
-    IpNetworkBackend
-from nova.api.occi.storage.storagelink import StorageLinkBackend
-from nova.api.occi.storage.storageresource import StorageBackend
+from nova import image
+from nova import log
+from nova import wsgi
+from nova.api.occi import backends
+from nova.api.occi import extensions
+from nova.api.occi.compute import computeresource
+from nova.api.occi.network import networklink
+from nova.api.occi.network import networkresource
+from nova.api.occi.storage import storagelink
+from nova.api.occi.storage import storageresource
 from nova.compute import instance_types
 from nova.image import glance
+
+from occi import registry
 from occi import wsgi as occi_wsgi
 from occi.extensions import infrastructure
 
 #Hi I'm a logger, use me! :-)
 LOG = log.getLogger('nova.api.occi.wsgi')
+
+
+class OpenStackOCCIRegistry(registry.NonePersistentRegistry):
+
+    def add_resource(self, key, resource):
+        '''
+        Make sure OS keys get used!
+        '''
+        key = resource.kind.location + resource.attributes['occi.core.id']
+        resource.identifier = key
+        registry.NonePersistentRegistry.add_resource(self, key, resource)
 
 
 class OCCIApplication(occi_wsgi.Application, wsgi.Application):
@@ -42,7 +56,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         Initialize the WSGI OCCI application.
         '''
         super(OCCIApplication, self).__init__(
-                                registry=extensions.OpenStackOCCIRegistry())
+                                registry=OpenStackOCCIRegistry())
 
         # setup the occi service...
         self._setup_occi_service()
@@ -75,14 +89,14 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         Register the OCCI backends within the OCCI WSGI application.
         '''
         LOG.info('Registering OCCI backends with web app.')
-        
-        compute_backend = ComputeBackend()
-        network_backend = NetworkBackend()
-        storage_backend = StorageBackend()
-        ipnetwork_backend = IpNetworkBackend()
-        ipnetworking_backend = IpNetworkInterfaceBackend()
-        storage_link_backend = StorageLinkBackend()
-        networkinterface_backend = NetworkInterfaceBackend()
+
+        compute_backend = computeresource.ComputeBackend()
+        network_backend = networkresource.NetworkBackend()
+        storage_backend = storageresource.StorageBackend()
+        ipnetwork_backend = networkresource.IpNetworkBackend()
+        ipnetworking_backend = networklink.IpNetworkInterfaceBackend()
+        storage_link_backend = storagelink.StorageLinkBackend()
+        networkinterface_backend = networklink.NetworkInterfaceBackend()
 
         # register kinds with backends
         self.register_backend(infrastructure.COMPUTE, compute_backend)
@@ -137,7 +151,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         Register the os mixins from information retrieved frrom glance.
         '''
         #TODO: kernel images should NOT be listed
-        
+
         template_schema = 'http://schemas.openstack.org/template/os#'
         os_schema = 'http://schemas.ogf.org/occi/infrastructure#os_tpl'
 

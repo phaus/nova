@@ -41,9 +41,11 @@ class MyBackend(KindBackend, ActionBackend):
             old.attributes[item] = new.attributes[item]
         old.attributes['occi.compute.state'] = 'inactive'
 
+
 # TODO: Move these elsewhere?
 class ResourceMixinBackend(MixinBackend):
     pass
+
 
 class OsMixinBackend(MixinBackend):
     pass
