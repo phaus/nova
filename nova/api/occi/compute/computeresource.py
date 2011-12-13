@@ -162,7 +162,7 @@ class ComputeBackend(MyBackend):
         entity.attributes['occi.compute.architecture'] = 'x86'
         entity.attributes['occi.compute.cores'] = str(instances[0]['vcpus'])
         #this is not available in instances
-        # could possible be retreived from flavour info 
+        # TODO: could possible be retreived from flavour info 
         # if not where?
         entity.attributes['occi.compute.speed'] = str(2.4) 
         entity.attributes['occi.compute.memory'] = \
@@ -210,7 +210,8 @@ class ComputeBackend(MyBackend):
         entity.attributes['occi.compute.state'] = instance['vm_state']
 
         # add up to date actions...
-        if entity.attributes['occi.compute.state'] == 'inactive':
+        if entity.attributes['occi.compute.state'] in ('inactive', 'building', 'rebuilding'):
+            entity.attributes['occi.compute.state'] = 'inactive'
             entity.actions = [START]
         elif entity.attributes['occi.compute.state'] == 'active':
             entity.actions = [STOP, SUSPEND, RESTART]
