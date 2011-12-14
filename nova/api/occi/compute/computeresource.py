@@ -223,9 +223,9 @@ class ComputeBackend(MyBackend):
         except exception.NotFound:
             raise exc.HTTPNotFound()
         
-        # TODO: Review: OpenStack supports differenet states. Do we map them 
-        # to occi states or do we expose the OS state through 
-        # occi.compute.state? 
+        # TODO: Review, IMPORTANT: OpenStack supports differenet states. 
+        # Do we map them to OCCI states or do we expose the OS state values 
+        # through occi.compute.state? 
         #   - see nova/compute/vm_states.py nova/compute/task_states.py
         state = instance['vm_state']
         
@@ -327,6 +327,8 @@ class ComputeBackend(MyBackend):
             entity.attributes['occi.compute.state'] = 'active'
             self.compute_api.start(context, instance)
             # TODO: check that the instance is not paused or suspended
+            # self.compute_api.unpause(context, instance)
+            # self.compute_api.resume(context, instance)
             
         elif action == infrastructure.STOP:
             # TODO: Review semantics
