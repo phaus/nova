@@ -14,23 +14,25 @@
 
 
 # TODO: implement update
-# TODO: implement action
 
 from nova import flags
 from nova import compute, exception, log as logging
+from nova.compute import task_states
+from nova.compute import vm_states
 from nova.api.occi.backends import MyBackend
 from nova.api.occi.extensions import ResourceTemplate, OsTemplate
 from nova.compute import instance_types
 from nova.rpc import common as rpc_common
 
 from occi.exceptions import HTTPError
-from occi.extensions.infrastructure import START, STOP, SUSPEND, RESTART
+from occi.extensions import infrastructure
+from nova.api.occi import extensions
 from webob import exc
 
 
 FLAGS = flags.FLAGS
 
-#Hi I'm a logger, use me! :-)
+# Hi I'm a logger, use me! :-)
 LOG = logging.getLogger('nova.api.occi.backends.compute')
 
 class ComputeBackend(MyBackend):
@@ -46,29 +48,29 @@ class ComputeBackend(MyBackend):
 
         LOG.info('Creating the virtual machine with id: ' + entity.identifier)
 
-        #optional params
-        name = 'an_occi_vm' #TODO: should be taken from the OCCI request
-        key_name = None # only set if a key-pair is registered
-        metadata = {} #server_dict.get('metadata', {})
-        access_ip_v4 = None #'192.168.1.23' #server_dict.get('accessIPv4')
-        access_ip_v6 = None #'DEAD:BEEF:BABE' #server_dict.get('accessIPv6')
-        injected_files = [] # self._get_injected_files(personality)
-        password = 'password' #self._get_server_admin_password(server_dict)
-        zone_blob = 'blob' #server_dict.get('blob')
-        reservation_id = None #server_dict.get('reservation_id') <- used by admins!
+        #TODO: should be taken from the OCCI request
+        name = 'an_occi_vm' 
+        key_name = None
+        metadata = {}
+        access_ip_v4 = None
+        access_ip_v6 = None
+        injected_files = []
+        password = 'password'
+        zone_blob = 'blob'
+        reservation_id = None
         min_count = max_count = 1
-        requested_networks = None #self._get_requested_networks(requested_networks)
+        requested_networks = None
         sg_names = []
         sg_names.append('default')
         sg_names = list(set(sg_names))
-        user_data = None #server_dict.get('user_data')
-        availability_zone = None #server_dict.get('availability_zone')
-        config_drive = None #server_dict.get('config_drive')
-        block_device_mapping = None #self._get_block_device_mapping(server_dict)
+        user_data = None
+        availability_zone = None
+        config_drive = None
+        block_device_mapping = None
 
-        #required params
-        #context is mainly authorisation information
-        #its assembled in AuthMiddleware - we can pipeline this with the OCCI service
+        # context is mainly authorisation information
+        # its assembled in AuthMiddleware - we can pipeline this with the 
+        # OCCI service
         context = extras['nova_ctx']
         
         #essential, required to get a vm image e.g. 
@@ -88,11 +90,11 @@ class ComputeBackend(MyBackend):
                     oc += 1
             
             if rc > 1:
-                msg = 'There is more that one resource template in the request.'
+                msg = 'There is more than one resource template in the request'
                 LOG.error(msg)
                 raise AttributeError(msg=unicode(msg))
             if oc > 1:
-                msg = 'There is more that one resource template in the request.'
+                msg = 'There is more than one resource template in the request'
                 LOG.error(msg)
                 raise AttributeError()            
             
@@ -101,7 +103,8 @@ class ComputeBackend(MyBackend):
             
         try:
             if flavor_name:
-                inst_type = instance_types.get_instance_type_by_name(flavor_name)
+                inst_type = \
+                        instance_types.get_instance_type_by_name(flavor_name)
             else:
                 inst_type = instance_types.get_default_instance_type()
                 LOG.warn('No resource template was found in the request. \
@@ -158,7 +161,7 @@ class ComputeBackend(MyBackend):
         
         entity.attributes['occi.core.id'] = instances[0]['uuid']
         entity.attributes['occi.compute.hostname'] = instances[0]['hostname']
-        #TODO: can't we tell this from the image used?
+        # TODO: can't we tell this from the image used?
         entity.attributes['occi.compute.architecture'] = 'x86'
         entity.attributes['occi.compute.cores'] = str(instances[0]['vcpus'])
         #this is not available in instances
@@ -166,16 +169,21 @@ class ComputeBackend(MyBackend):
         # if not where?
         entity.attributes['occi.compute.speed'] = str(2.4) 
         entity.attributes['occi.compute.memory'] = \
-                                    str(float(instances[0]['memory_mb']) / 1024)
+                                str(float(instances[0]['memory_mb']) / 1024)
+        
+        
+        # TODO: is this sufficent or should we check the state param in 
+        # instance?
         entity.attributes['occi.compute.state'] = 'inactive'
         
-        #TODO: Once created, the VM is attached to a public network with an addresses
-        # allocated by DHCP
+        # TODO: Once created, the VM is attached to a public network with an 
+        # addresses allocated by DHCP
         # Then create link to this network (IP) and set the ip to that of the
         # allocated ip
         # To create an OS floating IP then dhcp would be switched to static
         
-    #TODO: best import this from openstack api? it was taken from there
+    
+    # TODO: best import this from openstack api? it was taken from there
     def _handle_quota_error(self, error):
         """
         Reraise quota errors as api-specific http exceptions
@@ -199,28 +207,92 @@ class ComputeBackend(MyBackend):
         raise error
 
     def retrieve(self, entity, extras):
+        self._retrieve(entity, extras)
+    
+    def _retrieve(self, entity, extras):
         context = extras['nova_ctx']
+        
+        # TODO: Review: when a new resource is added to the registry its UUID
+        # is prepended with it's location. Is this necessary? See extensions.py
+        uid = entity.attributes['occi.core.id']
+        if uid.find(entity.kind.location) > -1:
+            uid = uid.replace(entity.kind.location, '')
+        
         try:
-            instance = self.compute_api.routing_get(context, entity.attributes['occi.core.id'])
+            instance = self.compute_api.routing_get(context, uid)
         except exception.NotFound:
             raise exc.HTTPNotFound()
         
-        #TODO: OpenStack supports differenet states - need to do a mapping
-        #   see nova/compute/vm_states.py
-        entity.attributes['occi.compute.state'] = instance['vm_state']
-
-        # add up to date actions...
-        if entity.attributes['occi.compute.state'] in ('inactive', 'building', 'rebuilding'):
+        # TODO: Review: OpenStack supports differenet states. Do we map them 
+        # to occi states or do we expose the OS state through 
+        # occi.compute.state? 
+        #   - see nova/compute/vm_states.py nova/compute/task_states.py
+        state = instance['vm_state']
+        
+        # handle the user actions that are made available by OS & OCCI
+        if state is vm_states.ACTIVE:
+            entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
+                                                        infrastructure.RESTART]
+        # change password - OS 
+        elif state is task_states.UPDATING_PASSWORD:
+            entity.attributes['occi.compute.state'] = 'active'
+            entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
+                                                        infrastructure.RESTART]
+        # reboot server - OS, OCCI
+        elif state in (task_states.REBOOTING, task_states.REBOOTING_HARD):
+            entity.attributes['occi.compute.state'] = 'active'
+            entity.actions = []
+        # pause server - OCCI
+        elif state is task_states.PAUSING:
             entity.attributes['occi.compute.state'] = 'inactive'
-            entity.actions = [START]
-        elif entity.attributes['occi.compute.state'] == 'active':
-            entity.actions = [STOP, SUSPEND, RESTART]
-        elif entity.attributes['occi.compute.state'] == 'suspended':
-            entity.actions = [START]
-
+            entity.actions = [infrastructure.START]
+        # suspend server - OCCI
+        elif state is task_states.SUSPENDING:
+            entity.attributes['occi.compute.state'] = 'inactive'
+            entity.actions = [infrastructure.START]
+        # resume server - OCCI
+        elif state is task_states.RESUMING:
+            entity.attributes['occi.compute.state'] = 'active'
+            entity.actions = []
+        # stop server - OCCI
+        elif state in (task_states.STOPPING, task_states.POWERING_OFF):
+            entity.attributes['occi.compute.state'] = 'inactive'
+            entity.actions = [infrastructure.START]
+        # start server - OCCI
+        elif state in (task_states.STARTING, task_states.POWERING_ON):
+            entity.attributes['occi.compute.state'] = 'active'
+            entity.actions = []
+        # rebuild server - OS
+        elif state is task_states.REBUILDING:
+            entity.attributes['occi.compute.state'] = 'active'
+            entity.actions = []
+        # resize server confirm rebuild
+        # TODO: implement in update()
+        elif state in (task_states.RESIZE_CONFIRMING,
+                       task_states.RESIZE_FINISH,
+                       task_states.RESIZE_MIGRATED,
+                       task_states.RESIZE_MIGRATING,
+                       task_states.RESIZE_PREP):
+            entity.attributes['occi.compute.state'] = 'active'
+            entity.actions = []
+        # revert resized server - OS (indirectly OCCI)
+        # TODO: implement OS-OCCI extension or can be done via update()
+        elif state is task_states.RESIZE_REVERTING:
+            entity.attributes['occi.compute.state'] = 'active'
+            entity.actions = []
+        # confirm resized server
+        elif state is task_states.RESIZE_VERIFY:
+            entity.attributes['occi.compute.state'] = 'active'
+            entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
+                                                        infrastructure.RESTART]
+        
+        # TODO: create image - do we want this?
+        
+        return instance
+        
     def delete(self, entity, extras):
         # call the management framework to delete this compute instance...
-        print('Removing representation of virtual machine with id: ' 
+        LOG.info('Removing representation of virtual machine with id: ' 
               + entity.identifier)
 
         context = extras['nova_ctx']
@@ -237,21 +309,81 @@ class ComputeBackend(MyBackend):
             self.compute_api.delete(context, instance)
 
     def action(self, entity, action, extras):
+        
+        # TODO: Review: when retrieve is called the representation of the 
+        # resource is rendered. We don't want that!
+        
+        # TODO: Review: as there is no callback mechanism to update the state  
+        # of computes known by occi, a call to get the latest representation 
+        # must be made
+        instance = self._retrieve(entity, extras)
+        
+        context = extras['nova_ctx']
+        
         if action not in entity.actions:
-            raise AttributeError("This action is currently no applicable.")
-        elif action == START:
+            raise AttributeError("This action is not currently applicable.")
+        elif action == infrastructure.START:
+            LOG.info('Starting virtual machine with id' + entity.identifier)
             entity.attributes['occi.compute.state'] = 'active'
-            # read attributes from action and do something with it :-)
-            print('Starting virtual machine with id' + entity.identifier)
-        elif action == STOP:
+            self.compute_api.start(context, instance)
+            # TODO: check that the instance is not paused or suspended
+            
+        elif action == infrastructure.STOP:
+            # TODO: Review semantics
+            # OCCI -> graceful, acpioff, poweroff
+            # OS -> unclear
+            LOG.info('Stopping virtual machine with id' + entity.identifier)
+            if entity.attributes.has_key('method'):
+                LOG.info('OS only allows one type of stop. What is \
+                            specified in the request will be ignored.')
             entity.attributes['occi.compute.state'] = 'inactive'
-            # read attributes from action and do something with it :-)
-            print('Stopping virtual machine with id' + entity.identifier)
-        elif action == RESTART:
+            self.compute_api.stop(context, instance)
+        elif action == infrastructure.RESTART:
+            LOG.info('Restarting virtual machine with id' + entity.identifier)
             entity.attributes['occi.compute.state'] = 'active'
-            # read attributes from action and do something with it :-)
-            print('Restarting virtual machine with id' + entity.identifier)
-        elif action == SUSPEND:
+            #TODO: Review semantics
+            #OS types == SOFT, HARD
+            #OCCI -> graceful, warm and cold
+            #mapping:
+            #  SOFT -> graceful, warm
+            #  HARD -> cold
+            if not entity.attributes.has_key('method'):
+                raise exc.HTTPBadRequest()
+
+            if entity.attributes['method'] in ('graceful', 'warm'):
+                reboot_type = 'SOFT'
+            elif entity.attributes['method'] is 'cold':
+                reboot_type = 'HARD'
+            else:
+                raise exc.HTTPBadRequest()
+            self.compute_api.reboot(context, instance, reboot_type)
+        elif action == infrastructure.SUSPEND:
+            LOG.info('Suspending virtual machine with id' + entity.identifier)
+            if entity.attributes.has_key('method'):
+                LOG.info('OS only allows one type of suspend. What is \
+                            specified in the request will be ignored.')
             entity.attributes['occi.compute.state'] = 'suspended'
-            # read attributes from action and do something with it :-)
-            print('Suspending virtual machine with id' + entity.identifier)
+            self.compute_api.suspend(context, instance)
+        elif action == extensions.OS_CHG_PWD:
+            # TODO: Review
+            if not entity.attributes.has_key('method'):
+                raise exc.HTTPBadRequest()
+            self.compute_api.set_admin_password(context, instance, \
+                                                entity.attributes['method'])
+        elif action == extensions.OS_REBUILD:
+            #TODO: there must be an OsTemplate mixin with the request
+            #TODO: there must be the admin password to the instance
+            raise exc.HTTPNotImplemented()
+            image_href = 'TODO'
+            admin_password = 'TODO'
+            self.compute_api.rebuild(context, instance, image_href, \
+                                            admin_password, None, None, None)
+        elif action == extensions.OS_REVERT_RESIZE:
+            LOG.info('Reverting resized virtual machine with id' + \
+                                                            entity.identifier)
+            self.compute_api.revert_resize(context, instance)
+        elif action == extensions.OS_CONFIRM_RESIZE:
+            LOG.info('Confirming resize of virtual machine with id' + \
+                                                            entity.identifier)
+            self.compute_api.confirm_resize(context, instance)
+            
