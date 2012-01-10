@@ -24,6 +24,28 @@ LOG = log.getLogger('nova.api.occi.extensions')
 
 FLAGS = flags.FLAGS
 
+#OS action extensions
+OS_CHG_PWD = core_model.Action(
+                'http://schemas.openstack.org/instance/action#',
+                 'chg_pwd', 'Removes all data on the server and replaces \
+                                 it with the specified image (via Mixin).',
+                 {'method': ''})
+
+OS_REBUILD = core_model.Action(
+                'http://schemas.openstack.org/instance/action#',
+                 'rebuild', 'Removes all data on the server and replaces \
+                                 it with the specified image (via Mixin).',
+                 {'method': ''})
+OS_REVERT_RESIZE = core_model.Action(
+                'http://schemas.openstack.org/instance/action#',
+                 'revert_resize', 'Revert the resize and roll back to \
+                                                     the original server',
+                 {'method': ''})
+OS_CONFIRM_RESIZE = core_model.Action(
+                'http://schemas.openstack.org/instance/action#',
+                 'confirm_resize', 'Use this to confirm the resize action',
+                 {'method': ''})
+
 # Trusted Compute Pool technology mixin definition
 TCP_ATTRIBUTES = {'eu.fi-ware.compute.tcp': ''}
 TCP = core_model.Mixin(\

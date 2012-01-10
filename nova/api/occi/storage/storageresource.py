@@ -110,6 +110,19 @@ class StorageBackend(MyBackend):
         
 
     def action(self, entity, action, extras):
+        
+        #Semantics:
+        # ONLINE, ready for service, default state of a created volume.
+        # supported in volume API. Maybe use initialize_connection?
+        # OFFLINE, disconnected? disconnection supported in API otherwise
+        # not. Maybe use terminate_connection?
+        # BACKUP: create a complete copy of the volume.
+        # SNAPSHOT: create a time-stamped copy of the volume. Supported in 
+        # OS volume API
+        # RESIZE: increase, decrease size of volume.
+        
+        # NOTE: OCCI has no way to manage snapshots or backups :-(
+        
         if action not in entity.actions:
             raise AttributeError("This action is currently no applicable.")
         elif action == ONLINE:

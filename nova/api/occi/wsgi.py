@@ -104,6 +104,12 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         self.register_backend(infrastructure.STOP, compute_backend)
         self.register_backend(infrastructure.RESTART, compute_backend)
         self.register_backend(infrastructure.SUSPEND, compute_backend)
+        
+        # OS-OCCI Action extensions 
+        self.register_backend(extensions.OS_CHG_PWD, compute_backend)
+        self.register_backend(extensions.OS_REBUILD, compute_backend)
+        self.register_backend(extensions.OS_REVERT_RESIZE, compute_backend)
+        self.register_backend(extensions.OS_CONFIRM_RESIZE, compute_backend)
 
         self.register_backend(infrastructure.NETWORK, network_backend)
         self.register_backend(infrastructure.UP, network_backend)
