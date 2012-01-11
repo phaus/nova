@@ -21,7 +21,7 @@ from nova.scheduler import driver as scheduler_driver
 
 FLAGS = flags.FLAGS
 
-def rpc_cast_wrapper(context, topic, msg, do_cast=True):
+def fake_rpc_cast(context, topic, msg, do_cast=True):
     '''
     The RPC cast wrapper so scheduler returns instances...
     '''
@@ -63,6 +63,7 @@ class TestOcciWsgiApp(test.TestCase):
     def setUp(self):
         super(TestOcciWsgiApp, self).setUp()
 
+        # create sec context
         self.user_id = 'fake'
         self.project_id = 'fake'
         self.context = context.RequestContext(self.user_id,
@@ -72,7 +73,7 @@ class TestOcciWsgiApp(test.TestCase):
         # setup image service...
         self.stubs.Set(image, 'get_image_service', fake_get_image_service)
         self.stubs.Set(fake._FakeImageService, 'show', fake_show)
-        self.stubs.Set(rpc, 'cast', rpc_cast_wrapper)
+        self.stubs.Set(rpc, 'cast', fake_rpc_cast)
 
         # OCCI related setup
         self.os_template = extensions.OsTemplate('http://schemas.openstack.org/template/os#', 'foo', '1')
