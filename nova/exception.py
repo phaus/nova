@@ -24,14 +24,23 @@ SHOULD include dedicated exception logging.
 
 """
 
-from functools import wraps
+import functools
 import sys
 
-from novaclient import exceptions as novaclient_exceptions
+import novaclient.exceptions
+import webob.exc
 
 from nova import log as logging
 
 LOG = logging.getLogger('nova.exception')
+
+
+class ConvertedException(webob.exc.WSGIHTTPException):
+    def __init__(self, code=0, title="", explanation=""):
+        self.code = code
+        self.title = title
+        self.explanation = explanation
+        super(ConvertedException, self).__init__()
 
 
 def novaclient_converter(f):
@@ -42,7 +51,7 @@ def novaclient_converter(f):
         try:
             ret = f(*args, **kwargs)
             return ret
-        except novaclient_exceptions.ClientException, e:
+        except novaclient.exceptions.ClientException, e:
             raise ConvertedException(e.code, e.message, e.details)
     return new_f
 
@@ -50,6 +59,12 @@ def novaclient_converter(f):
 class ProcessExecutionError(IOError):
     def __init__(self, stdout=None, stderr=None, exit_code=None, cmd=None,
                  description=None):
+        self.exit_code = exit_code
+        self.stderr = stderr
+        self.stdout = stdout
+        self.cmd = cmd
+        self.description = description
+
         if description is None:
             description = _('Unexpected error while running command.')
         if exit_code is None:
@@ -141,7 +156,7 @@ def wrap_exception(notifier=None, publisher_id=None, event_type=None,
                 # re-raise original exception since it may have been clobbered
                 raise exc_info[0], exc_info[1], exc_info[2]
 
-        return wraps(f)(wrapped)
+        return functools.wraps(f)(wrapped)
     return inner
 
 
@@ -190,6 +205,10 @@ class NotAuthorized(NovaException):
 
 class AdminRequired(NotAuthorized):
     message = _("User does not have admin privileges")
+
+
+class PolicyNotAllowed(NotAuthorized):
+    message = _("Policy Doesn't allow %(action)s to be performed.")
 
 
 class InstanceBusy(NovaException):
@@ -248,6 +267,11 @@ class InvalidCidr(Invalid):
 # msg needs to be constructed when raised.
 class InvalidParameterValue(Invalid):
     message = _("%(err)s")
+
+
+class InstanceInvalidState(Invalid):
+    message = _("Instance %(instance_uuid)s in %(attr)s %(state)s. Cannot "
+                "%(method)s while the instance is in this state.")
 
 
 class InstanceNotRunning(Invalid):
@@ -315,6 +339,10 @@ class InvalidDevicePath(Invalid):
 
 class InvalidCPUInfo(Invalid):
     message = _("Unacceptable CPU info") + ": %(reason)s"
+
+
+class InvalidIpAddressError(Invalid):
+    message = _("%(address)s is not a valid IP v4/6 address.")
 
 
 class InvalidVLANTag(Invalid):
@@ -511,10 +539,6 @@ class FixedIpNotFoundForSpecificInstance(FixedIpNotFound):
     message = _("Instance %(instance_id)s doesn't have fixed ip '%(ip)s'.")
 
 
-class FixedIpNotFoundForVirtualInterface(FixedIpNotFound):
-    message = _("Virtual interface %(vif_id)s has zero associated fixed ips.")
-
-
 class FixedIpNotFoundForHost(FixedIpNotFound):
     message = _("Host %(host)s has zero fixed ips.")
 
@@ -542,6 +566,10 @@ class NoFixedIpsDefined(NotFound):
 
 class FloatingIpNotFound(NotFound):
     message = _("Floating ip not found for id %(id)s.")
+
+
+class FloatingIpDNSExists(Invalid):
+    message = _("The DNS entry %(name)s already exists in zone %(zone)s.")
 
 
 class FloatingIpNotFoundForAddress(FloatingIpNotFound):
@@ -806,8 +834,8 @@ class MalformedRequestBody(NovaException):
     message = _("Malformed message body: %(reason)s")
 
 
-class PasteConfigNotFound(NotFound):
-    message = _("Could not find paste config at %(path)s")
+class ConfigNotFound(NotFound):
+    message = _("Could not find config at %(path)s")
 
 
 class PasteAppNotFound(NotFound):
@@ -828,10 +856,6 @@ class VirtualStorageArrayNotFoundByName(NotFound):
 
 class CannotResizeToSameSize(NovaException):
     message = _("When resizing, instances must change size!")
-
-
-class CannotResizeToSmallerSize(NovaException):
-    message = _("Resizing to a smaller size is not supported.")
 
 
 class ImageTooLarge(NovaException):

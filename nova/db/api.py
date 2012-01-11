@@ -1,5 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
+# Copyright (c) 2011 X.commerce, a business unit of eBay Inc.
 # Copyright 2010 United States Government as represented by the
 # Administrator of the National Aeronautics and Space Administration.
 # All Rights Reserved.
@@ -172,6 +173,11 @@ def compute_node_get_all(context, session=None):
     return IMPL.compute_node_get_all(context)
 
 
+def compute_node_get_for_service(context, service_id):
+    """Get all computeNodes."""
+    return IMPL.compute_node_get_for_service(context, service_id)
+
+
 def compute_node_create(context, values):
     """Create a computeNode from the values dictionary."""
     return IMPL.compute_node_create(context, values)
@@ -232,13 +238,18 @@ def floating_ip_get(context, id):
     return IMPL.floating_ip_get(context, id)
 
 
-def floating_ip_allocate_address(context, project_id):
-    """Allocate free floating ip and return the address.
+def floating_ip_get_pools(context):
+    """Returns a list of floating ip pools"""
+    return IMPL.floating_ip_get_pools(context)
+
+
+def floating_ip_allocate_address(context, project_id, pool):
+    """Allocate free floating ip from specified pool and return the address.
 
     Raises if one is not available.
 
     """
-    return IMPL.floating_ip_allocate_address(context, project_id)
+    return IMPL.floating_ip_allocate_address(context, project_id, pool)
 
 
 def floating_ip_create(context, values):
@@ -416,9 +427,9 @@ def fixed_ip_get_by_network_host(context, network_id, host):
     return IMPL.fixed_ip_get_by_network_host(context, network_id, host)
 
 
-def fixed_ip_get_by_virtual_interface(context, vif_id):
+def fixed_ips_by_virtual_interface(context, vif_id):
     """Get fixed ips by virtual interface or raise if none exist."""
-    return IMPL.fixed_ip_get_by_virtual_interface(context, vif_id)
+    return IMPL.fixed_ips_by_virtual_interface(context, vif_id)
 
 
 def fixed_ip_get_network(context, address):
@@ -456,11 +467,6 @@ def virtual_interface_get_by_address(context, address):
 def virtual_interface_get_by_uuid(context, vif_uuid):
     """Gets a virtual interface from the table filtering on vif uuid."""
     return IMPL.virtual_interface_get_by_uuid(context, vif_uuid)
-
-
-def virtual_interface_get_by_fixed_ip(context, fixed_ip_id):
-    """Gets the virtual interface fixed_ip is associated with."""
-    return IMPL.virtual_interface_get_by_fixed_ip(context, fixed_ip_id)
 
 
 def virtual_interface_get_by_instance(context, instance_id):
@@ -575,16 +581,6 @@ def instance_get_all_by_reservation(context, reservation_id):
     return IMPL.instance_get_all_by_reservation(context, reservation_id)
 
 
-def instance_get_by_fixed_ip(context, address):
-    """Get an instance for a fixed ip by address."""
-    return IMPL.instance_get_by_fixed_ip(context, address)
-
-
-def instance_get_by_fixed_ipv6(context, address):
-    """Get an instance for a fixed ip by IPv6 address."""
-    return IMPL.instance_get_by_fixed_ipv6(context, address)
-
-
 def instance_get_fixed_addresses(context, instance_id):
     """Get the fixed ip address of an instance."""
     return IMPL.instance_get_fixed_addresses(context, instance_id)
@@ -636,14 +632,54 @@ def instance_action_create(context, values):
     return IMPL.instance_action_create(context, values)
 
 
-def instance_get_actions(context, instance_id):
-    """Get instance actions by instance id."""
-    return IMPL.instance_get_actions(context, instance_id)
+def instance_get_actions(context, instance_uuid):
+    """Get instance actions by instance uuid."""
+    return IMPL.instance_get_actions(context, instance_uuid)
 
 
 def instance_get_id_to_uuid_mapping(context, ids):
     """Return a dictionary containing 'ID: UUID' given the ids"""
     return IMPL.instance_get_id_to_uuid_mapping(context, ids)
+
+
+###################
+
+
+def instance_info_cache_create(context, values):
+    """Create a new instance cache record in the table.
+
+    :param context: = request context object
+    :param values: = dict containing column values
+    """
+    return IMPL.instance_info_cache_create(context, values)
+
+
+def instance_info_cache_get(context, instance_id, session=None):
+    """Gets an instance info cache from the table.
+
+    :param instance_id: = id of the info cache's instance
+    :param session: = optional session object
+    """
+    return IMPL.instance_info_cache_get(context, instance_id, session=None)
+
+
+def instance_info_cache_update(context, instance_id, values,
+                               session=None):
+    """Update an instance info cache record in the table.
+
+    :param instance_id: = id of info cache's instance
+    :param values: = dict containing column values to update
+    """
+    return IMPL.instance_info_cache_update(context, instance_id, values,
+                                           session)
+
+
+def instance_info_cache_delete(context, instance_id, session=None):
+    """Deletes an existing instance_info_cache record
+
+    :param instance_id: = id of the instance tied to the cache record
+    """
+    return IMPL.instance_info_cache_delete(context, instance_id, session)
 
 
 ###################
@@ -1714,3 +1750,16 @@ def sm_volume_get(context, volume_id):
 def sm_volume_get_all(context):
     """Get all child Zones."""
     return IMPL.sm_volume_get_all(context)
+
+
+####################
+
+
+def instance_fault_create(context, values):
+    """Create a new Instance Fault."""
+    return IMPL.instance_fault_create(context, values)
+
+
+def instance_fault_get_by_instance_uuids(context, instance_uuids):
+    """Get all instance faults for the provided instance_uuids."""
+    return IMPL.instance_fault_get_by_instance_uuids(context, instance_uuids)

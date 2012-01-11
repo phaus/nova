@@ -1,6 +1,7 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
 # Copyright 2011 Rackspace
+# Copyright (c) 2011 X.commerce, a business unit of eBay Inc.
 # All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -19,10 +20,13 @@ import mox
 from nova import context
 from nova import db
 from nova import exception
+from nova import flags
 from nova import log as logging
 from nova import rpc
 from nova import test
+from nova import utils
 from nova.network import manager as network_manager
+from nova.network import api as network_api
 from nova.tests import fake_network
 
 
@@ -105,6 +109,8 @@ flavor = {'id': 0,
 
 floating_ip_fields = {'id': 0,
                       'address': '192.168.10.100',
+                      'pool': 'nova',
+                      'interface': 'eth0',
                       'fixed_ip_id': 0,
                       'project_id': None,
                       'auto_assigned': False}
@@ -133,9 +139,15 @@ class FlatNetworkTestCase(test.TestCase):
     def setUp(self):
         super(FlatNetworkTestCase, self).setUp()
         self.network = network_manager.FlatManager(host=HOST)
+        temp = utils.import_object('nova.network.minidns.MiniDNS')
+        self.network.instance_dns_manager = temp
         self.network.db = db
         self.context = context.RequestContext('testuser', 'testproject',
                                               is_admin=False)
+
+    def tearDown(self):
+        super(FlatNetworkTestCase, self).tearDown()
+        self.network.instance_dns_manager.delete_dns_file()
 
     def test_get_instance_nw_info(self):
         fake_get_instance_nw_info = fake_network.fake_get_instance_nw_info
@@ -159,7 +171,7 @@ class FlatNetworkTestCase(test.TestCase):
                      'dhcp_server': '192.168.%d.1' % i,
                      'dns': ['192.168.%d.3' % n, '192.168.%d.4' % n],
                      'gateway': '192.168.%d.1' % i,
-                     'gateway6': '2001:db8:0:%x::1' % i,
+                     'gateway_v6': '2001:db8:0:%x::1' % i,
                      'ip6s': 'DONTCARE',
                      'ips': 'DONTCARE',
                      'label': 'test%d' % i,
@@ -272,6 +284,8 @@ class FlatNetworkTestCase(test.TestCase):
         db.instance_get(mox.IgnoreArg(),
                         mox.IgnoreArg()).AndReturn({'security_groups':
                                                              [{'id': 0}]})
+        db.instance_get(self.context,
+                        1).AndReturn({'display_name': HOST})
         db.fixed_ip_associate_pool(mox.IgnoreArg(),
                                    mox.IgnoreArg(),
                                    mox.IgnoreArg()).AndReturn('192.168.0.101')
@@ -281,6 +295,67 @@ class FlatNetworkTestCase(test.TestCase):
         self.mox.ReplayAll()
         self.network.add_fixed_ip_to_instance(self.context, 1, HOST,
                                               networks[0]['id'])
+
+    def test_mini_dns_driver(self):
+        zone1 = "example.org"
+        zone2 = "example.com"
+        driver = self.network.instance_dns_manager
+        driver.create_entry("hostone", "10.0.0.1", 0, zone1)
+        driver.create_entry("hosttwo", "10.0.0.2", 0, zone1)
+        driver.create_entry("hostthree", "10.0.0.3", 0, zone1)
+        driver.create_entry("hostfour", "10.0.0.4", 0, zone1)
+        driver.create_entry("hostfive", "10.0.0.5", 0, zone2)
+
+        driver.delete_entry("hostone", zone1)
+        driver.modify_address("hostfour", "10.0.0.1", zone1)
+        driver.modify_address("hostthree", "10.0.0.1", zone1)
+        names = driver.get_entries_by_address("10.0.0.1", zone1)
+        self.assertEqual(len(names), 2)
+        self.assertIn('hostthree', names)
+        self.assertIn('hostfour', names)
+
+        names = driver.get_entries_by_address("10.0.0.5", zone2)
+        self.assertEqual(len(names), 1)
+        self.assertIn('hostfive', names)
+
+        addresses = driver.get_entries_by_name("hosttwo", zone1)
+        self.assertEqual(len(addresses), 1)
+        self.assertIn('10.0.0.2', addresses)
+
+    def test_instance_dns(self):
+        fixedip = '192.168.0.101'
+        self.mox.StubOutWithMock(db, 'network_get')
+        self.mox.StubOutWithMock(db, 'network_update')
+        self.mox.StubOutWithMock(db, 'fixed_ip_associate_pool')
+        self.mox.StubOutWithMock(db, 'instance_get')
+        self.mox.StubOutWithMock(db,
+                              'virtual_interface_get_by_instance_and_network')
+        self.mox.StubOutWithMock(db, 'fixed_ip_update')
+
+        db.fixed_ip_update(mox.IgnoreArg(),
+                           mox.IgnoreArg(),
+                           mox.IgnoreArg())
+        db.virtual_interface_get_by_instance_and_network(mox.IgnoreArg(),
+                mox.IgnoreArg(), mox.IgnoreArg()).AndReturn({'id': 0})
+
+        db.instance_get(mox.IgnoreArg(),
+                        mox.IgnoreArg()).AndReturn({'security_groups':
+                                                             [{'id': 0}]})
+
+        db.instance_get(self.context,
+                        1).AndReturn({'display_name': HOST})
+        db.fixed_ip_associate_pool(mox.IgnoreArg(),
+                                   mox.IgnoreArg(),
+                                   mox.IgnoreArg()).AndReturn(fixedip)
+        db.network_get(mox.IgnoreArg(),
+                       mox.IgnoreArg()).AndReturn(networks[0])
+        db.network_update(mox.IgnoreArg(), mox.IgnoreArg(), mox.IgnoreArg())
+        self.mox.ReplayAll()
+        self.network.add_fixed_ip_to_instance(self.context, 1, HOST,
+                                              networks[0]['id'])
+        addresses = self.network.instance_dns_manager.get_entries_by_name(HOST)
+        self.assertEqual(len(addresses), 1)
+        self.assertEqual(addresses[0], fixedip)
 
 
 class VlanNetworkTestCase(test.TestCase):
@@ -509,21 +584,29 @@ class VlanNetworkTestCase(test.TestCase):
         # floating ip that's already associated
         def fake2(*args, **kwargs):
             return {'address': '10.0.0.1',
+                    'pool': 'nova',
+                    'interface': 'eth0',
                     'fixed_ip_id': 1}
 
         # floating ip that isn't associated
         def fake3(*args, **kwargs):
             return {'address': '10.0.0.1',
+                    'pool': 'nova',
+                    'interface': 'eth0',
                     'fixed_ip_id': None}
 
         # fixed ip with remote host
         def fake4(*args, **kwargs):
             return {'address': '10.0.0.1',
+                    'pool': 'nova',
+                    'interface': 'eth0',
                     'network': {'multi_host': False, 'host': 'jibberjabber'}}
 
         # fixed ip with local host
         def fake5(*args, **kwargs):
             return {'address': '10.0.0.1',
+                    'pool': 'nova',
+                    'interface': 'eth0',
                     'network': {'multi_host': False, 'host': 'testhost'}}
 
         def fake6(*args, **kwargs):
@@ -570,21 +653,29 @@ class VlanNetworkTestCase(test.TestCase):
         # floating ip that isn't associated
         def fake2(*args, **kwargs):
             return {'address': '10.0.0.1',
+                    'pool': 'nova',
+                    'interface': 'eth0',
                     'fixed_ip_id': None}
 
         # floating ip that is associated
         def fake3(*args, **kwargs):
             return {'address': '10.0.0.1',
+                    'pool': 'nova',
+                    'interface': 'eth0',
                     'fixed_ip_id': 1}
 
         # fixed ip with remote host
         def fake4(*args, **kwargs):
             return {'address': '10.0.0.1',
+                    'pool': 'nova',
+                    'interface': 'eth0',
                     'network': {'multi_host': False, 'host': 'jibberjabber'}}
 
         # fixed ip with local host
         def fake5(*args, **kwargs):
             return {'address': '10.0.0.1',
+                    'pool': 'nova',
+                    'interface': 'eth0',
                     'network': {'multi_host': False, 'host': 'testhost'}}
 
         def fake6(*args, **kwargs):
@@ -1054,10 +1145,16 @@ class FloatingIPTestCase(test.TestCase):
     def setUp(self):
         super(FloatingIPTestCase, self).setUp()
         self.network = TestFloatingIPManager()
+        temp = utils.import_object('nova.network.minidns.MiniDNS')
+        self.network.floating_dns_manager = temp
         self.network.db = db
         self.project_id = 'testproject'
         self.context = context.RequestContext('testuser', self.project_id,
             is_admin=False)
+
+    def tearDown(self):
+        super(FloatingIPTestCase, self).tearDown()
+        self.network.floating_dns_manager.delete_dns_file()
 
     def test_double_deallocation(self):
         instance_ref = db.api.instance_create(self.context,
@@ -1069,3 +1166,66 @@ class FloatingIPTestCase(test.TestCase):
                 instance_id=instance_ref['id'])
         self.network.deallocate_for_instance(self.context,
                 instance_id=instance_ref['id'])
+
+    def test_floating_dns_zones(self):
+        zone1 = "example.org"
+        zone2 = "example.com"
+        flags.FLAGS.floating_ip_dns_zones = [zone1, zone2]
+
+        zones = self.network.get_dns_zones(self.context)
+        self.assertEqual(len(zones), 2)
+        self.assertEqual(zones[0], zone1)
+        self.assertEqual(zones[1], zone2)
+
+    def test_floating_dns_create_conflict(self):
+        zone = "example.org"
+        address1 = "10.10.10.11"
+        name1 = "foo"
+        name2 = "bar"
+
+        self.network.add_dns_entry(self.context, address1, name1, "A", zone)
+
+        self.assertRaises(exception.FloatingIpDNSExists,
+                          self.network.add_dns_entry, self.context,
+                          address1, name1, "A", zone)
+
+    def test_floating_create_and_get(self):
+        zone = "example.org"
+        address1 = "10.10.10.11"
+        name1 = "foo"
+        name2 = "bar"
+        entries = self.network.get_dns_entries_by_address(self.context,
+                                                          address1, zone)
+        self.assertFalse(entries)
+
+        self.network.add_dns_entry(self.context, address1, name1, "A", zone)
+        self.network.add_dns_entry(self.context, address1, name2, "A", zone)
+        entries = self.network.get_dns_entries_by_address(self.context,
+                                                          address1, zone)
+        self.assertEquals(len(entries), 2)
+        self.assertEquals(entries[0], name1)
+        self.assertEquals(entries[1], name2)
+
+        entries = self.network.get_dns_entries_by_name(self.context,
+                                                       name1, zone)
+        self.assertEquals(len(entries), 1)
+        self.assertEquals(entries[0], address1)
+
+    def test_floating_dns_delete(self):
+        zone = "example.org"
+        address1 = "10.10.10.11"
+        name1 = "foo"
+        name2 = "bar"
+
+        self.network.add_dns_entry(self.context, address1, name1, "A", zone)
+        self.network.add_dns_entry(self.context, address1, name2, "A", zone)
+        self.network.delete_dns_entry(self.context, name1, zone)
+
+        entries = self.network.get_dns_entries_by_address(self.context,
+                                                          address1, zone)
+        self.assertEquals(len(entries), 1)
+        self.assertEquals(entries[0], name2)
+
+        self.assertRaises(exception.NotFound,
+                          self.network.delete_dns_entry, self.context,
+                          name1, zone)

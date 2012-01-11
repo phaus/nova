@@ -22,7 +22,6 @@ from nova.api.openstack import wsgi
 from nova import exception
 from nova import flags
 from nova import image
-from nova import utils
 
 
 FLAGS = flags.FLAGS
@@ -41,12 +40,14 @@ class Controller(object):
             msg = _("Image not found.")
             raise exc.HTTPNotFound(explanation=msg)
 
+    @wsgi.serializers(xml=common.MetadataTemplate)
     def index(self, req, image_id):
         """Returns the list of metadata for a given instance"""
         context = req.environ['nova.context']
         metadata = self._get_image(context, image_id)['properties']
         return dict(metadata=metadata)
 
+    @wsgi.serializers(xml=common.MetaItemTemplate)
     def show(self, req, image_id, id):
         context = req.environ['nova.context']
         metadata = self._get_image(context, image_id)['properties']
@@ -55,6 +56,8 @@ class Controller(object):
         else:
             raise exc.HTTPNotFound()
 
+    @wsgi.serializers(xml=common.MetadataTemplate)
+    @wsgi.deserializers(xml=common.MetadataDeserializer)
     def create(self, req, image_id, body):
         context = req.environ['nova.context']
         image = self._get_image(context, image_id)
@@ -65,6 +68,8 @@ class Controller(object):
         self.image_service.update(context, image_id, image, None)
         return dict(metadata=image['properties'])
 
+    @wsgi.serializers(xml=common.MetaItemTemplate)
+    @wsgi.deserializers(xml=common.MetaItemDeserializer)
     def update(self, req, image_id, id, body):
         context = req.environ['nova.context']
 
@@ -87,6 +92,8 @@ class Controller(object):
         self.image_service.update(context, image_id, image, None)
         return dict(meta=meta)
 
+    @wsgi.serializers(xml=common.MetadataTemplate)
+    @wsgi.deserializers(xml=common.MetadataDeserializer)
     def update_all(self, req, image_id, body):
         context = req.environ['nova.context']
         image = self._get_image(context, image_id)
@@ -96,6 +103,7 @@ class Controller(object):
         self.image_service.update(context, image_id, image, None)
         return dict(metadata=metadata)
 
+    @wsgi.response(204)
     def delete(self, req, image_id, id):
         context = req.environ['nova.context']
         image = self._get_image(context, image_id)
@@ -107,16 +115,4 @@ class Controller(object):
 
 
 def create_resource():
-    headers_serializer = common.MetadataHeadersSerializer()
-
-    body_deserializers = {
-        'application/xml': common.MetadataXMLDeserializer(),
-    }
-
-    body_serializers = {
-        'application/xml': common.MetadataXMLSerializer(),
-    }
-    serializer = wsgi.ResponseSerializer(body_serializers, headers_serializer)
-    deserializer = wsgi.RequestDeserializer(body_deserializers)
-
-    return wsgi.Resource(Controller(), deserializer, serializer)
+    return wsgi.Resource(Controller())

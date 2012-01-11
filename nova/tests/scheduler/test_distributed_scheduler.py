@@ -236,11 +236,11 @@ class DistributedSchedulerTestCase(test.TestCase):
         for weighted_host in weighted_hosts:
             # We set this up so remote hosts have even weights ...
             if int(weighted_host.weight) % 2 == 0:
-                self.assertTrue(weighted_host.zone != None)
-                self.assertTrue(weighted_host.host == None)
+                self.assertTrue(weighted_host.zone is not None)
+                self.assertTrue(weighted_host.host is None)
             else:
-                self.assertTrue(weighted_host.host != None)
-                self.assertTrue(weighted_host.zone == None)
+                self.assertTrue(weighted_host.host is not None)
+                self.assertTrue(weighted_host.zone is None)
 
     def test_schedule_local_zone(self):
         """Test to make sure _schedule makes no call out to zones if
@@ -270,8 +270,8 @@ class DistributedSchedulerTestCase(test.TestCase):
         self.assertEquals(len(weighted_hosts), 10)
         for weighted_host in weighted_hosts:
             # There should be no remote hosts
-            self.assertTrue(weighted_host.host != None)
-            self.assertTrue(weighted_host.zone == None)
+            self.assertTrue(weighted_host.host is not None)
+            self.assertTrue(weighted_host.zone is None)
 
     def test_decrypt_blob(self):
         """Test that the decrypt method works."""
@@ -313,7 +313,7 @@ class DistributedSchedulerTestCase(test.TestCase):
                        _fake_choose_host_filters)
 
         hosts = [('host1', '1info'), ('host2', '2info'), ('host3', '3info')]
-        request_spec = dict(original_host='host2',
+        request_spec = dict(instance_properties=dict(host='host2'),
                             avoid_original_host=True)
 
         filtered = sched._filter_hosts('compute', request_spec, hosts, {})
@@ -333,7 +333,7 @@ class DistributedSchedulerTestCase(test.TestCase):
                        _fake_choose_host_filters)
 
         hosts = [('host1', '1info'), ('host2', '2info'), ('host3', '3info')]
-        request_spec = dict(original_host='host2',
+        request_spec = dict(instance_properties=dict(host='host2'),
                             avoid_original_host=False)
 
         filtered = sched._filter_hosts('compute', request_spec, hosts, {})

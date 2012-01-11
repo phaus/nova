@@ -30,22 +30,21 @@ import tempfile
 import time
 import urllib
 
+from nova.api.ec2 import ec2utils
+from nova.compute import instance_types
 from nova import block_device
 from nova import compute
-
+from nova.compute import vm_states
 from nova import crypto
 from nova import db
 from nova import exception
 from nova import flags
+from nova.image import s3
 from nova import log as logging
 from nova import network
 from nova import rpc
 from nova import utils
 from nova import volume
-from nova.api.ec2 import ec2utils
-from nova.compute import instance_types
-from nova.compute import vm_states
-from nova.image import s3
 
 
 FLAGS = flags.FLAGS
@@ -389,26 +388,39 @@ class CloudController(object):
                 'keyMaterial': data['private_key']}
         # TODO(vish): when context is no longer an object, pass it here
 
-    def import_public_key(self, context, key_name, public_key,
-                         fingerprint=None):
+    def _get_fingerprint(self, public_key):
+        tmpdir = tempfile.mkdtemp()
+        pubfile = os.path.join(tmpdir, 'temp.pub')
+        fh = open(pubfile, 'w')
+        fh.write(public_key)
+        fh.close()
+        try:
+            (out, err) = utils.execute('ssh-keygen', '-l', '-f',
+                                       '%s' % (pubfile))
+            return out.split(' ')[1]
+        except Exception:
+            raise
+        finally:
+            shutil.rmtree(tmpdir)
+
+    def import_key_pair(self, context, key_name, public_key_material,
+                        **kwargs):
         LOG.audit(_("Import key %s"), key_name, context=context)
+        try:
+            db.key_pair_get(context, context.user_id, key_name)
+            raise exception.KeyPairExists(key_name=key_name)
+        except exception.NotFound:
+            pass
+        public_key = base64.b64decode(public_key_material)
+        fingerprint = self._get_fingerprint(public_key)
         key = {}
         key['user_id'] = context.user_id
         key['name'] = key_name
         key['public_key'] = public_key
-        if fingerprint is None:
-            tmpdir = tempfile.mkdtemp()
-            pubfile = os.path.join(tmpdir, 'temp.pub')
-            fh = open(pubfile, 'w')
-            fh.write(public_key)
-            fh.close()
-            (out, err) = utils.execute('ssh-keygen', '-q', '-l', '-f',
-                                       '%s' % (pubfile))
-            fingerprint = out.split(' ')[1]
-            shutil.rmtree(tmpdir)
         key['fingerprint'] = fingerprint
         db.key_pair_create(context, key)
-        return True
+        return {'keyName': key_name,
+                'keyFingerprint': fingerprint}
 
     def delete_key_pair(self, context, key_name, **kwargs):
         LOG.audit(_("Delete key pair %s"), key_name, context=context)
@@ -800,7 +812,7 @@ class CloudController(object):
         LOG.audit(_("Get console output for instance %s"), instance_id,
                   context=context)
         # instance_id may be passed in as a list of instances
-        if type(instance_id) == list:
+        if isinstance(instance_id, list):
             ec2_id = instance_id[0]
         else:
             ec2_id = instance_id
@@ -813,13 +825,18 @@ class CloudController(object):
                 "output": base64.b64encode(output)}
 
     def get_ajax_console(self, context, instance_id, **kwargs):
+        """Web based ajax terminal for vm.
+
+        This is an extension to the normal ec2_api"""
         ec2_id = instance_id[0]
         instance_id = ec2utils.ec2_id_to_id(ec2_id)
         instance = self.compute_api.get(context, instance_id)
         return self.compute_api.get_ajax_console(context, instance)
 
     def get_vnc_console(self, context, instance_id, **kwargs):
-        """Returns vnc browser url.  Used by OS dashboard."""
+        """Returns vnc browser url.
+
+        This is an extension to the normal ec2_api"""
         ec2_id = instance_id
         instance_id = ec2utils.ec2_id_to_id(ec2_id)
         instance = self.compute_api.get(context, instance_id)
@@ -867,7 +884,7 @@ class CloudController(object):
                                    'volumeId': v['volumeId']}]
         else:
             v['attachmentSet'] = [{}]
-        if volume.get('snapshot_id') != None:
+        if volume.get('snapshot_id') is not None:
             v['snapshotId'] = ec2utils.id_to_ec2_snap_id(volume['snapshot_id'])
         else:
             v['snapshotId'] = None
@@ -878,7 +895,7 @@ class CloudController(object):
 
     def create_volume(self, context, **kwargs):
         size = kwargs.get('size')
-        if kwargs.get('snapshot_id') != None:
+        if kwargs.get('snapshot_id') is not None:
             snapshot_id = ec2utils.ec2_id_to_id(kwargs['snapshot_id'])
             LOG.audit(_("Create volume from snapshot %s"), snapshot_id,
                       context=context)
@@ -1238,8 +1255,9 @@ class CloudController(object):
         LOG.audit(_("Associate address %(public_ip)s to"
                 " instance %(instance_id)s") % locals(), context=context)
         instance_id = ec2utils.ec2_id_to_id(instance_id)
+        instance = self.compute_api.get(context, instance_id)
         self.compute_api.associate_floating_ip(context,
-                                               instance_id=instance_id,
+                                               instance,
                                                address=public_ip)
         return {'associateResponse': ["Address associated."]}
 
@@ -1289,14 +1307,6 @@ class CloudController(object):
             block_device_mapping=kwargs.get('block_device_mapping', {}))
         return self._format_run_instances(context, resv_id)
 
-    def _do_instance(self, action, context, ec2_id):
-        instance_id = ec2utils.ec2_id_to_id(ec2_id)
-        action(context, instance_id=instance_id)
-
-    def _do_instances(self, action, context, instance_id):
-        for ec2_id in instance_id:
-            self._do_instance(action, context, ec2_id)
-
     def terminate_instances(self, context, instance_id, **kwargs):
         """Terminate each instance in instance_id, which is a list of ec2 ids.
         instance_id is a kwarg so its name cannot be modified."""
@@ -1338,15 +1348,22 @@ class CloudController(object):
 
     def rescue_instance(self, context, instance_id, **kwargs):
         """This is an extension to the normal ec2_api"""
-        self._do_instance(self.compute_api.rescue, context, instance_id)
+        LOG.debug(_("Going to rescue instance %s") % instance_id)
+        _instance_id = ec2utils.ec2_id_to_id(instance_id)
+        instance = self.compute_api.get(context, _instance_id)
+        self.compute_api.rescue(context, instance)
         return True
 
     def unrescue_instance(self, context, instance_id, **kwargs):
         """This is an extension to the normal ec2_api"""
-        self._do_instance(self.compute_api.unrescue, context, instance_id)
+        LOG.debug(_("Going to unrescue instance %s") % instance_id)
+        _instance_id = ec2utils.ec2_id_to_id(instance_id)
+        instance = self.compute_api.get(context, _instance_id)
+        self.compute_api.unrescue(context, instance)
         return True
 
     def update_instance(self, context, instance_id, **kwargs):
+        """This is an extension to the normal ec2_api"""
         updatable_fields = ['display_name', 'display_description']
         changes = {}
         for field in updatable_fields:
@@ -1408,7 +1425,7 @@ class CloudController(object):
                            'ari': 'ramdisk',
                            'ami': 'machine'}
         i['imageType'] = display_mapping.get(image_type)
-        i['isPublic'] = image.get('is_public') == True
+        i['isPublic'] = not not image.get('is_public')
         i['architecture'] = image['properties'].get('architecture')
 
         properties = image['properties']

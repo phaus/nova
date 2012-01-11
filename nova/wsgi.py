@@ -19,19 +19,15 @@
 
 """Utility methods for working with WSGI servers."""
 
-import os
 import sys
-
-from xml.dom import minidom
 
 import eventlet
 import eventlet.wsgi
 import greenlet
+from paste import deploy
 import routes.middleware
 import webob.dec
 import webob.exc
-
-from paste import deploy
 
 from nova import exception
 from nova import flags
@@ -375,29 +371,7 @@ class Loader(object):
 
         """
         config_path = config_path or FLAGS.api_paste_config
-        self.config_path = self._find_config(config_path)
-
-    def _find_config(self, config_path):
-        """Find the paste configuration file using the given hint.
-
-        :param config_path: Full or relative path to the paste config.
-        :returns: Full path of the paste config, if it exists.
-        :raises: `nova.exception.PasteConfigNotFound`
-
-        """
-        possible_locations = [
-            config_path,
-            os.path.join(FLAGS.state_path, "etc", "nova", config_path),
-            os.path.join(FLAGS.state_path, "etc", config_path),
-            os.path.join(FLAGS.state_path, config_path),
-            "/etc/nova/%s" % config_path,
-        ]
-
-        for path in possible_locations:
-            if os.path.exists(path):
-                return os.path.abspath(path)
-
-        raise exception.PasteConfigNotFound(path=os.path.abspath(config_path))
+        self.config_path = utils.find_config(config_path)
 
     def load_app(self, name):
         """Return the paste URLMap wrapped WSGI application.

@@ -9,8 +9,8 @@ build/*
 build-stamp
 nova.egg-info
 .nova-venv
+.venv
 *.sqlite
 *.log
-.project
+po/*.pot.project
 .pydevproject
-.settings

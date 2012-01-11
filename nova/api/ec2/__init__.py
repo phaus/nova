@@ -25,16 +25,16 @@ import webob
 import webob.dec
 import webob.exc
 
+from nova.api.ec2 import apirequest
+from nova.api.ec2 import ec2utils
+from nova.api.ec2 import faults
+from nova.auth import manager
 from nova import context
 from nova import exception
 from nova import flags
 from nova import log as logging
 from nova import utils
 from nova import wsgi
-from nova.api.ec2 import apirequest
-from nova.api.ec2 import ec2utils
-from nova.api.ec2 import faults
-from nova.auth import manager
 
 FLAGS = flags.FLAGS
 LOG = logging.getLogger("nova.api")
@@ -120,7 +120,7 @@ class Lockout(wsgi.Middleware):
         if FLAGS.memcached_servers:
             import memcache
         else:
-            from nova import fakememcache as memcache
+            from nova.testing.fake import memcache
         self.mc = memcache.Client(FLAGS.memcached_servers,
                                   debug=0)
         super(Lockout, self).__init__(application)
@@ -278,7 +278,7 @@ class Authorizer(wsgi.Middleware):
                 'CreateKeyPair': ['all'],
                 'DeleteKeyPair': ['all'],
                 'DescribeSecurityGroups': ['all'],
-                'ImportPublicKey': ['all'],
+                'ImportKeyPair': ['all'],
                 'AuthorizeSecurityGroupIngress': ['netadmin'],
                 'RevokeSecurityGroupIngress': ['netadmin'],
                 'CreateSecurityGroup': ['netadmin'],

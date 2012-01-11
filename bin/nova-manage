@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
+# Copyright (c) 2011 X.commerce, a business unit of eBay Inc.
 # Copyright 2010 United States Government as represented by the
 # Administrator of the National Aeronautics and Space Administration.
 # All Rights Reserved.
@@ -88,6 +89,7 @@ from nova import rpc
 from nova import utils
 from nova import version
 from nova import vsa
+from nova.api.ec2 import admin
 from nova.api.ec2 import ec2utils
 from nova.auth import manager
 from nova.cloudpipe import pipelib
@@ -96,13 +98,14 @@ from nova.db import migration
 from nova.volume import volume_types
 
 FLAGS = flags.FLAGS
-flags.DECLARE('fixed_range', 'nova.network.manager')
+flags.DECLARE('flat_network_bridge', 'nova.network.manager')
 flags.DECLARE('num_networks', 'nova.network.manager')
+flags.DECLARE('multi_host', 'nova.network.manager')
 flags.DECLARE('network_size', 'nova.network.manager')
 flags.DECLARE('vlan_start', 'nova.network.manager')
 flags.DECLARE('vpn_start', 'nova.network.manager')
-flags.DECLARE('fixed_range_v6', 'nova.network.manager')
-flags.DECLARE('gateway_v6', 'nova.network.manager')
+flags.DECLARE('default_floating_pool', 'nova.network.manager')
+flags.DECLARE('public_interface', 'nova.network.linux_net')
 flags.DECLARE('libvirt_type', 'nova.virt.libvirt.connection')
 flags.DEFINE_flag(flags.HelpFlag())
 flags.DEFINE_flag(flags.HelpshortFlag())
@@ -175,8 +178,9 @@ class VpnCommands(object):
     def spawn(self):
         """Run all VPNs."""
         print "WARNING: This method only works with deprecated auth"
+        ctxt = context.get_admin_context()
         for p in reversed(self.manager.get_projects()):
-            if not self._vpn_for(p.id):
+            if self._vpn_for(ctxt, p.id):
                 print 'spawning %s' % p.id
                 self.pipe.launch_vpn_instance(p.id, p.project_manager_id)
                 time.sleep(10)
@@ -211,6 +215,9 @@ class VpnCommands(object):
                               network['id'],
                               {'vpn_public_address': ip,
                                'vpn_public_port': int(port)})
+
+    def _vpn_for(self, context, project_id):
+        return admin.AdminController()._vpn_for(context, project_id)
 
 
 class ShellCommands(object):
@@ -680,12 +687,23 @@ class FixedIpCommands(object):
 class FloatingIpCommands(object):
     """Class for managing floating ip."""
 
-    @args('--ip_range', dest="range", metavar='<range>', help='IP range')
-    def create(self, range):
+    @args('--ip_range', dest="ip_range", metavar='<range>', help='IP range')
+    @args('--pool', dest="pool", metavar='<pool>', help='Optional pool')
+    @args('--interface', dest="interface", metavar='<interface>',
+          help='Optional interface')
+    def create(self, ip_range, pool=None, interface=None):
         """Creates floating ips for zone by range"""
-        for address in netaddr.IPNetwork(range):
-            db.floating_ip_create(context.get_admin_context(),
-                                  {'address': str(address)})
+        addresses = netaddr.IPNetwork(ip_range)
+        admin_context = context.get_admin_context()
+        if not pool:
+            pool = FLAGS.default_floating_pool
+        if not interface:
+            interface = FLAGS.public_interface
+        for address in addresses.iter_hosts():
+            db.floating_ip_create(admin_context,
+                                  {'address': str(address),
+                                   'pool': pool,
+                                   'interface': interface})
 
     @args('--ip_range', dest="ip_range", metavar='<range>', help='IP range')
     def delete(self, ip_range):
@@ -1078,7 +1096,7 @@ class ServiceCommands(object):
                      {"method": "show_host_resources",
                       "args": {"host": host}})
 
-        if type(result) != dict:
+        if not isinstance(result, dict):
             print _('An unexpected error has occurred.')
             print _('[Result]'), result
         else:
@@ -1379,7 +1397,7 @@ class VsaCommands(object):
                 raise
 
         is_admin = self.manager.is_admin(user_id)
-        ctxt = context.RequestContext(user_id, project_id, is_admin)
+        ctxt = context.RequestContext(user_id, project_id, is_admin=is_admin)
         if not is_admin and \
            not self.manager.is_project_member(user_id, project_id):
             msg = _("%(user_id)s must be an admin or a "
@@ -1392,7 +1410,7 @@ class VsaCommands(object):
         if storage is not None:
             try:
                 storage_list = ast.literal_eval(storage)
-            except:
+            except Exception:
                 print _("Invalid string format %s") % storage
                 raise
 
@@ -1581,7 +1599,7 @@ class VsaDriveTypeCommands(object):
         except exception.DBError, e:
             print "DB Error: %s" % e
             sys.exit(2)
-        except:
+        except Exception:
             sys.exit(3)
         else:
             print "%s %s" % (name, verb)
@@ -1599,7 +1617,7 @@ class VsaDriveTypeCommands(object):
         if name is not None:
             search_opts['extra_specs']['name'] = name
 
-        if all == False:
+        if not all:
             search_opts['extra_specs']['visible'] = '1'
 
         drives = volume_types.get_all_types(self.context,
@@ -1706,10 +1724,9 @@ class InstanceTypeCommands(object):
     def _print_instance_types(self, name, val):
         deleted = ('', ', inactive')[val["deleted"] == 1]
         print ("%s: Memory: %sMB, VCPUS: %s, Storage: %sGB, FlavorID: %s, "
-            "Swap: %sMB, RXTX Quota: %sGB, RXTX Cap: %sMB%s") % (
+            "Swap: %sMB, RXTX Factor: %s") % (
             name, val["memory_mb"], val["vcpus"], val["local_gb"],
-            val["flavorid"], val["swap"], val["rxtx_quota"],
-            val["rxtx_cap"], deleted)
+            val["flavorid"], val["swap"], val["rxtx_factor"])
 
     @args('--name', dest='name', metavar='<name>',
             help='Name of instance type/flavor')
@@ -1721,16 +1738,14 @@ class InstanceTypeCommands(object):
     @args('--flavor', dest='flavorid', metavar='<flavor  id>',
             help='Flavor ID')
     @args('--swap', dest='swap', metavar='<swap>', help='Swap')
-    @args('--rxtx_quota', dest='rxtx_quota', metavar='<rxtx_quota>',
-            help='rxtx_quota')
-    @args('--rxtx_cap', dest='rxtx_cap', metavar='<rxtx_cap>',
-            help='rxtx_cap')
+    @args('--rxtx_factor', dest='rxtx_factor', metavar='<rxtx_factor>',
+            help='rxtx_factor')
     def create(self, name, memory, vcpus, local_gb, flavorid,
-               swap=0, rxtx_quota=0, rxtx_cap=0):
+               swap=0, rxtx_factor=1):
         """Creates instance types / flavors"""
         try:
             instance_types.create(name, memory, vcpus, local_gb,
-                                  flavorid, swap, rxtx_quota, rxtx_cap)
+                                  flavorid, swap, rxtx_factor)
         except exception.InvalidInput, e:
             print "Must supply valid parameters to create instance_type"
             print e
@@ -1744,7 +1759,7 @@ class InstanceTypeCommands(object):
             print "Currently defined instance_type names and flavorids:"
             self.list("--all")
             sys.exit(2)
-        except:
+        except Exception:
             print "Unknown error"
             sys.exit(3)
         else:
@@ -1769,7 +1784,7 @@ class InstanceTypeCommands(object):
         except exception.DBError, e:
             print "DB Error: %s" % e
             sys.exit(2)
-        except:
+        except Exception:
             sys.exit(3)
         else:
             print "%s %s" % (name, verb)
@@ -1970,7 +1985,7 @@ class StorageManagerCommands(object):
         ctxt = context.get_admin_context()
 
         try:
-            if flavor == None:
+            if flavor is None:
                 flavors = db.sm_flavor_get_all(ctxt)
             else:
                 flavors = db.sm_flavor_get(ctxt, flavor)
@@ -2012,7 +2027,7 @@ class StorageManagerCommands(object):
         ctxt = context.get_admin_context()
 
         try:
-            if backend_conf_id == None:
+            if backend_conf_id is None:
                 backends = db.sm_backend_conf_get_all(ctxt)
             else:
                 backends = db.sm_backend_conf_get(ctxt, backend_conf_id)
@@ -2072,7 +2087,7 @@ class StorageManagerCommands(object):
         print '(WARNING: Creating will destroy all data on backend!!!)'
         c = raw_input('Proceed? (y/n) ')
         if c == 'y' or c == 'Y':
-            if flavor_label == None:
+            if flavor_label is None:
                 print "error: backend needs to be associated with flavor"
                 sys.exit(2)
 

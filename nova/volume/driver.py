@@ -537,8 +537,11 @@ class SheepdogDriver(VolumeDriver):
     def check_for_setup_error(self):
         """Returns an error if prerequisites aren't met"""
         try:
+            #NOTE(francois-charlier) Since 0.24 'collie cluster info -r'
+            #  gives short output, but for compatibility reason we won't
+            #  use it and just check if 'running' is in the output.
             (out, err) = self._execute('collie', 'cluster', 'info')
-            if not out.startswith('running'):
+            if not 'running' in out.split():
                 raise exception.Error(_("Sheepdog is not working: %s") % out)
         except exception.ProcessExecutionError:
             raise exception.Error(_("Sheepdog is not working"))
@@ -778,9 +781,14 @@ class ZadaraBEDriver(ISCSIDriver):
 
         self._iscsiadm_update(iscsi_properties, "node.startup", "automatic")
 
-        mount_device = ("/dev/disk/by-path/ip-%s-iscsi-%s-lun-0" %
-                        (iscsi_properties['target_portal'],
-                         iscsi_properties['target_iqn']))
+        if FLAGS.iscsi_helper == 'tgtadm':
+            mount_device = ("/dev/disk/by-path/ip-%s-iscsi-%s-lun-1" %
+                            (iscsi_properties['target_portal'],
+                             iscsi_properties['target_iqn']))
+        else:
+            mount_device = ("/dev/disk/by-path/ip-%s-iscsi-%s-lun-0" %
+                            (iscsi_properties['target_portal'],
+                             iscsi_properties['target_iqn']))
 
         # The /dev/disk/by-path/... node is not always present immediately
         # TODO(justinsb): This retry-with-delay is a pattern, move to utils?
@@ -862,7 +870,7 @@ class ZadaraBEDriver(ISCSIDriver):
                                                           volume['host'])
         try:
             ret = self._common_be_export(context, volume, iscsi_target)
-        except:
+        except Exception:
             raise exception.ProcessExecutionError
         return ret
 

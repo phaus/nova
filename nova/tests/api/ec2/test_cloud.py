@@ -1,5 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
+# Copyright (c) 2011 X.commerce, a business unit of eBay Inc.
 # Copyright 2010 United States Government as represented by the
 # Administrator of the National Aeronautics and Space Administration.
 # All Rights Reserved.
@@ -21,7 +22,6 @@ import copy
 import functools
 import os
 
-from eventlet import greenthread
 from M2Crypto import BIO
 from M2Crypto import RSA
 
@@ -106,7 +106,7 @@ class CloudTestCase(test.TestCase):
         self.project_id = 'fake'
         self.context = context.RequestContext(self.user_id,
                                               self.project_id,
-                                              True)
+                                              is_admin=True)
 
         def fake_show(meh, context, id):
             return {'id': id,
@@ -154,7 +154,7 @@ class CloudTestCase(test.TestCase):
         address = "10.10.10.10"
         db.floating_ip_create(self.context,
                               {'address': address,
-                               'host': self.network.host})
+                               'pool': 'nova'})
         self.cloud.allocate_address(self.context)
         self.cloud.describe_addresses(self.context)
         self.cloud.release_address(self.context,
@@ -166,7 +166,7 @@ class CloudTestCase(test.TestCase):
         allocate = self.cloud.allocate_address
         db.floating_ip_create(self.context,
                               {'address': address,
-                               'host': self.network.host})
+                               'pool': 'nova'})
         self.assertEqual(allocate(self.context)['publicIp'], address)
         db.floating_ip_destroy(self.context, address)
         self.assertRaises(exception.NoMoreFloatingIps,
@@ -178,7 +178,7 @@ class CloudTestCase(test.TestCase):
         allocate = self.cloud.allocate_address
         db.floating_ip_create(self.context,
                               {'address': address,
-                               'host': self.network.host,
+                               'pool': 'nova',
                                'project_id': self.project_id})
         result = self.cloud.release_address(self.context, address)
         self.assertEqual(result['releaseResponse'], ['Address released.'])
@@ -186,7 +186,9 @@ class CloudTestCase(test.TestCase):
     def test_associate_disassociate_address(self):
         """Verifies associate runs cleanly without raising an exception"""
         address = "10.10.10.10"
-        db.floating_ip_create(self.context, {'address': address})
+        db.floating_ip_create(self.context,
+                              {'address': address,
+                               'pool': 'nova'})
         self.cloud.allocate_address(self.context)
         # TODO(jkoelker) Probably need to query for instance_type_id and
         #                make sure we get a valid one
@@ -200,6 +202,7 @@ class CloudTestCase(test.TestCase):
         type_id = inst['instance_type_id']
         ips = self.network.allocate_for_instance(self.context,
                                                  instance_id=inst['id'],
+                                                 instance_uuid='',
                                                  host=inst['host'],
                                                  vpn=None,
                                                  instance_type_id=type_id,
@@ -1128,7 +1131,7 @@ class CloudTestCase(test.TestCase):
         output = self.cloud.get_console_output(context=self.context,
                                                instance_id=[instance_id])
         self.assertEquals(base64.b64decode(output['output']),
-                'FAKE CONSOLE?OUTPUT')
+                'FAKE CONSOLE OUTPUT\nANOTHER\nLAST LINE')
         # TODO(soren): We need this until we can stop polling in the rpc code
         #              for unit tests.
         rv = self.cloud.terminate_instances(self.context, [instance_id])
@@ -1165,19 +1168,7 @@ class CloudTestCase(test.TestCase):
         self.assertTrue(filter(lambda k: k['keyName'] == 'test1', keys))
         self.assertTrue(filter(lambda k: k['keyName'] == 'test2', keys))
 
-    def test_import_public_key(self):
-        # test when user provides all values
-        result1 = self.cloud.import_public_key(self.context,
-                                               'testimportkey1',
-                                               'mytestpubkey',
-                                               'mytestfprint')
-        self.assertTrue(result1)
-        keydata = db.key_pair_get(self.context,
-                                  self.context.user_id,
-                                  'testimportkey1')
-        self.assertEqual('mytestpubkey', keydata['public_key'])
-        self.assertEqual('mytestfprint', keydata['fingerprint'])
-        # test when user omits fingerprint
+    def test_import_key_pair(self):
         pubkey_path = os.path.join(os.path.dirname(__file__), 'public_key')
         f = open(pubkey_path + '/dummy.pub', 'r')
         dummypub = f.readline().rstrip()
@@ -1185,13 +1176,16 @@ class CloudTestCase(test.TestCase):
         f = open(pubkey_path + '/dummy.fingerprint', 'r')
         dummyfprint = f.readline().rstrip()
         f.close
-        result2 = self.cloud.import_public_key(self.context,
-                                               'testimportkey2',
-                                               dummypub)
-        self.assertTrue(result2)
+        key_name = 'testimportkey'
+        public_key_material = base64.b64encode(dummypub)
+        result = self.cloud.import_key_pair(self.context,
+                                            key_name,
+                                            public_key_material)
+        self.assertEqual(result['keyName'], key_name)
+        self.assertEqual(result['keyFingerprint'], dummyfprint)
         keydata = db.key_pair_get(self.context,
                                   self.context.user_id,
-                                  'testimportkey2')
+                                  key_name)
         self.assertEqual(dummypub, keydata['public_key'])
         self.assertEqual(dummyfprint, keydata['fingerprint'])
 
@@ -1379,6 +1373,38 @@ class CloudTestCase(test.TestCase):
         else:
             self.compute = self.start_service('compute')
 
+    def test_rescue_instances(self):
+        kwargs = {'image_id': 'ami-1',
+                  'instance_type': FLAGS.default_instance_type,
+                  'max_count': 1, }
+        instance_id = self._run_instance(**kwargs)
+
+        result = self.cloud.stop_instances(self.context, [instance_id])
+        self.assertTrue(result)
+
+        result = self.cloud.rescue_instance(self.context, instance_id)
+        self.assertTrue(result)
+
+        result = self.cloud.terminate_instances(self.context, [instance_id])
+        self.assertTrue(result)
+        self._restart_compute_service()
+
+    def test_unrescue_instances(self):
+        kwargs = {'image_id': 'ami-1',
+                  'instance_type': FLAGS.default_instance_type,
+                  'max_count': 1, }
+        instance_id = self._run_instance(**kwargs)
+
+        result = self.cloud.rescue_instance(self.context, instance_id)
+        self.assertTrue(result)
+
+        result = self.cloud.unrescue_instance(self.context, instance_id)
+        self.assertTrue(result)
+
+        result = self.cloud.terminate_instances(self.context, [instance_id])
+        self.assertTrue(result)
+        self._restart_compute_service()
+
     def test_stop_start_instance(self):
         """Makes sure stop/start instance works"""
         # enforce periodic tasks run in short time to avoid wait for 60s.
@@ -1389,9 +1415,10 @@ class CloudTestCase(test.TestCase):
                   'max_count': 1, }
         instance_id = self._run_instance(**kwargs)
 
-        # a running instance can't be started. It is just ignored.
-        result = self.cloud.start_instances(self.context, [instance_id])
-        self.assertTrue(result)
+        # a running instance can't be started.
+        self.assertRaises(exception.InstanceInvalidState,
+                          self.cloud.start_instances,
+                          self.context, [instance_id])
 
         result = self.cloud.stop_instances(self.context, [instance_id])
         self.assertTrue(result)
@@ -1440,9 +1467,10 @@ class CloudTestCase(test.TestCase):
                   'max_count': 1, }
         instance_id = self._run_instance(**kwargs)
 
-        # a running instance can't be started. It is just ignored.
-        result = self.cloud.start_instances(self.context, [instance_id])
-        self.assertTrue(result)
+        # a running instance can't be started.
+        self.assertRaises(exception.InstanceInvalidState,
+                          self.cloud.start_instances,
+                          self.context, [instance_id])
 
         result = self.cloud.terminate_instances(self.context, [instance_id])
         self.assertTrue(result)
@@ -1454,9 +1482,10 @@ class CloudTestCase(test.TestCase):
                   'max_count': 1, }
         instance_id = self._run_instance(**kwargs)
 
-        # a running instance can't be started. It is just ignored.
-        result = self.cloud.start_instances(self.context, [instance_id])
-        self.assertTrue(result)
+        # a running instance can't be started.
+        self.assertRaises(exception.InstanceInvalidState,
+                          self.cloud.start_instances,
+                          self.context, [instance_id])
 
         result = self.cloud.reboot_instances(self.context, [instance_id])
         self.assertTrue(result)
@@ -1535,12 +1564,12 @@ class CloudTestCase(test.TestCase):
 
         self.cloud.terminate_instances(self.context, [ec2_instance_id])
 
-        admin_ctxt = context.get_admin_context(read_deleted=False)
+        admin_ctxt = context.get_admin_context(read_deleted="no")
         vol = db.volume_get(admin_ctxt, vol1['id'])
         self.assertFalse(vol['deleted'])
         db.volume_destroy(self.context, vol1['id'])
 
-        admin_ctxt = context.get_admin_context(read_deleted=True)
+        admin_ctxt = context.get_admin_context(read_deleted="only")
         vol = db.volume_get(admin_ctxt, vol2['id'])
         self.assertTrue(vol['deleted'])
 
@@ -1660,13 +1689,13 @@ class CloudTestCase(test.TestCase):
 
         self.cloud.terminate_instances(self.context, [ec2_instance_id])
 
-        admin_ctxt = context.get_admin_context(read_deleted=False)
+        admin_ctxt = context.get_admin_context(read_deleted="no")
         vol = db.volume_get(admin_ctxt, vol1_id)
         self._assert_volume_detached(vol)
         self.assertFalse(vol['deleted'])
         db.volume_destroy(self.context, vol1_id)
 
-        admin_ctxt = context.get_admin_context(read_deleted=True)
+        admin_ctxt = context.get_admin_context(read_deleted="only")
         vol = db.volume_get(admin_ctxt, vol2_id)
         self.assertTrue(vol['deleted'])
 

@@ -14,9 +14,6 @@
 
 """The Extended Status Admin API extension."""
 
-import traceback
-
-import webob
 from webob import exc
 
 from nova.api.openstack.v2 import extensions
@@ -36,8 +33,10 @@ class Extended_status(extensions.ExtensionDescriptor):
 
     name = "ExtendedStatus"
     alias = "OS-EXT-STS"
-    namespace = "http://docs.openstack.org/ext/extended_status/api/v1.1"
+    namespace = "http://docs.openstack.org/compute/ext/" \
+                "extended_status/api/v1.1"
     updated = "2011-11-03T00:00:00+00:00"
+    admin_only = True
 
     def get_request_extensions(self):
         request_extensions = []
@@ -47,6 +46,7 @@ class Extended_status(extensions.ExtensionDescriptor):
             try:
                 inst_ref = compute_api.routing_get(context, server_id)
             except exception.NotFound:
+                LOG.warn("Instance %s not found (one)" % server_id)
                 explanation = _("Server not found.")
                 raise exc.HTTPNotFound(explanation=explanation)
 
@@ -62,13 +62,21 @@ class Extended_status(extensions.ExtensionDescriptor):
             # and whatever else elements and find each individual.
             compute_api = compute.API()
 
-            for server in body['servers']:
+            for server in list(body['servers']):
                 try:
                     inst_ref = compute_api.routing_get(context, server['id'])
                 except exception.NotFound:
-                    explanation = _("Server not found.")
-                    raise exc.HTTPNotFound(explanation=explanation)
+                    # NOTE(dtroyer): A NotFound exception at this point
+                    # happens because a delete was in progress and the
+                    # server that was present in the original call to
+                    # compute.api.get_all() is no longer present.
+                    # Delete it from the response and move on.
+                    LOG.warn("Instance %s not found (all)" % server['id'])
+                    body['servers'].remove(server)
+                    continue
 
+                #TODO(bcwaldon): these attributes should be prefixed with
+                # something specific to this extension
                 for state in ['task_state', 'vm_state', 'power_state']:
                     key = "%s:%s" % (Extended_status.alias, state)
                     server[key] = inst_ref[state]
@@ -87,11 +95,10 @@ class Extended_status(extensions.ExtensionDescriptor):
                 _get_and_extend_all(context, body)
             return res
 
-        if FLAGS.allow_admin_api:
-            req_ext = extensions.RequestExtension('GET',
-                                    '/:(project_id)/servers/:(id)',
-                                    _extended_status_handler)
-            request_extensions.append(req_ext)
+        req_ext = extensions.RequestExtension('GET',
+                                '/:(project_id)/servers/:(id)',
+                                _extended_status_handler)
+        request_extensions.append(req_ext)
 
         return request_extensions
 

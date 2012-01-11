@@ -36,7 +36,7 @@ from nova import utils
 from nova.api.ec2 import cloud
 from nova.compute import power_state
 from nova.compute import vm_states
-from nova.virt import disk
+from nova.virt.disk import api as disk
 from nova.virt import images
 from nova.virt import driver
 from nova.virt.libvirt import connection
@@ -104,14 +104,15 @@ class FakeVirtDomain(object):
 
 class LibvirtVolumeTestCase(test.TestCase):
 
-    @staticmethod
-    def fake_execute(*cmd, **kwargs):
-        LOG.debug("FAKE EXECUTE: %s" % ' '.join(cmd))
-        return None, None
-
     def setUp(self):
         super(LibvirtVolumeTestCase, self).setUp()
-        self.stubs.Set(utils, 'execute', self.fake_execute)
+        self.executes = []
+
+        def fake_execute(*cmd, **kwargs):
+            self.executes.append(cmd)
+            return None, None
+
+        self.stubs.Set(utils, 'execute', fake_execute)
 
         class FakeLibvirtConnection(object):
             def __init__(self, hyperv="QEMU"):
@@ -126,22 +127,38 @@ class LibvirtVolumeTestCase(test.TestCase):
         self.stubs.Set(os.path, 'exists', lambda x: True)
         vol_driver = volume_driver.ISCSIDriver()
         libvirt_driver = volume.LibvirtISCSIVolumeDriver(self.fake_conn)
+        location = '10.0.2.15:3260'
         name = 'volume-00000001'
+        iqn = 'iqn.2010-10.org.openstack:%s' % name
         vol = {'id': 1,
                'name': name,
                'provider_auth': None,
-               'provider_location': '10.0.2.15:3260,fake '
-                        'iqn.2010-10.org.openstack:volume-00000001'}
+               'provider_location': '%s,fake %s' % (location, iqn)}
         address = '127.0.0.1'
-        connection_info = vol_driver.initialize_connection(vol, address)
+        connection_info = vol_driver.initialize_connection(vol, '127.0.0.1')
         mount_device = "vde"
         xml = libvirt_driver.connect_volume(connection_info, mount_device)
         tree = xml_to_tree(xml)
-        dev_str = '/dev/disk/by-path/ip-10.0.2.15:3260-iscsi-iqn.' \
-                  '2010-10.org.openstack:%s-lun-0' % name
+        dev_str = '/dev/disk/by-path/ip-%s-iscsi-%s-lun-0' % (location, iqn)
         self.assertEqual(tree.get('type'), 'block')
         self.assertEqual(tree.find('./source').get('dev'), dev_str)
         libvirt_driver.disconnect_volume(connection_info, mount_device)
+        connection_info = vol_driver.terminate_connection(vol, '127.0.0.1')
+        expected_commands = [('iscsiadm', '-m', 'node', '-T', iqn,
+                              '-p', location),
+                             ('iscsiadm', '-m', 'node', '-T', iqn,
+                              '-p', location, '--login'),
+                             ('iscsiadm', '-m', 'node', '-T', iqn,
+                              '-p', location, '--op', 'update',
+                              '-n', 'node.startup', '-v', 'automatic'),
+                             ('iscsiadm', '-m', 'node', '-T', iqn,
+                              '-p', location, '--op', 'update',
+                              '-n', 'node.startup', '-v', 'manual'),
+                             ('iscsiadm', '-m', 'node', '-T', iqn,
+                              '-p', location, '--logout'),
+                             ('iscsiadm', '-m', 'node', '-T', iqn,
+                              '-p', location, '--op', 'delete')]
+        self.assertEqual(self.executes, expected_commands)
 
     def test_libvirt_sheepdog_driver(self):
         vol_driver = volume_driver.SheepdogDriver()
@@ -157,6 +174,7 @@ class LibvirtVolumeTestCase(test.TestCase):
         self.assertEqual(tree.find('./source').get('protocol'), 'sheepdog')
         self.assertEqual(tree.find('./source').get('name'), name)
         libvirt_driver.disconnect_volume(connection_info, mount_device)
+        connection_info = vol_driver.terminate_connection(vol, '127.0.0.1')
 
     def test_libvirt_rbd_driver(self):
         vol_driver = volume_driver.RBDDriver()
@@ -173,6 +191,7 @@ class LibvirtVolumeTestCase(test.TestCase):
         rbd_name = '%s/%s' % (FLAGS.rbd_pool, name)
         self.assertEqual(tree.find('./source').get('name'), rbd_name)
         libvirt_driver.disconnect_volume(connection_info, mount_device)
+        connection_info = vol_driver.terminate_connection(vol, '127.0.0.1')
 
 
 class CacheConcurrencyTestCase(test.TestCase):
@@ -328,12 +347,12 @@ class LibvirtConnTestCase(test.TestCase):
 
         result = conn._prepare_xml_info(instance_ref,
                                         _fake_network_info(self.stubs, 1),
-                                        False)
+                                        None, False)
         self.assertTrue(len(result['nics']) == 1)
 
         result = conn._prepare_xml_info(instance_ref,
                                         _fake_network_info(self.stubs, 2),
-                                        False)
+                                        None, False)
         self.assertTrue(len(result['nics']) == 2)
 
     def test_xml_and_uri_no_ramdisk_no_kernel(self):
@@ -374,6 +393,14 @@ class LibvirtConnTestCase(test.TestCase):
     def test_xml_disk_prefix(self):
         instance_data = dict(self.test_instance)
         self._check_xml_and_disk_prefix(instance_data)
+
+    def test_xml_disk_bus_virtio(self):
+        self._check_xml_and_disk_bus({"disk_format": "raw"},
+                                     "disk", "virtio")
+
+    def test_xml_disk_bus_ide(self):
+        self._check_xml_and_disk_bus({"disk_format": "iso"},
+                                     "cdrom", "ide")
 
     @test.skip_if(missing_libvirt(), "Test requires libvirt")
     def test_snapshot_in_ami_format(self):
@@ -536,7 +563,7 @@ class LibvirtConnTestCase(test.TestCase):
         network_info = _fake_network_info(self.stubs, 2)
         conn = connection.LibvirtConnection(True)
         instance_ref = db.instance_create(self.context, instance_data)
-        xml = conn.to_xml(instance_ref, network_info, False)
+        xml = conn.to_xml(instance_ref, network_info, None, False)
         tree = xml_to_tree(xml)
         interfaces = tree.findall("./devices/interface")
         self.assertEquals(len(interfaces), 2)
@@ -555,8 +582,7 @@ class LibvirtConnTestCase(test.TestCase):
         self.flags(libvirt_type='lxc')
         conn = connection.LibvirtConnection(True)
 
-        uri = conn.get_uri()
-        self.assertEquals(uri, 'lxc:///')
+        self.assertEquals(conn.uri, 'lxc:///')
 
         network_info = _fake_network_info(self.stubs, 1)
         xml = conn.to_xml(instance_ref, network_info)
@@ -608,6 +634,19 @@ class LibvirtConnTestCase(test.TestCase):
                                  expected_result,
                                  '%s != %s failed check %d' %
                                  (check(tree), expected_result, i))
+
+    def _check_xml_and_disk_bus(self, image_meta, device_type, bus):
+        user_context = context.RequestContext(self.user_id, self.project_id)
+        instance_ref = db.instance_create(user_context, self.test_instance)
+        network_info = _fake_network_info(self.stubs, 1)
+
+        xml = connection.LibvirtConnection(True).to_xml(instance_ref,
+                                                        network_info,
+                                                        image_meta)
+        tree = xml_to_tree(xml)
+        self.assertEqual(tree.find('./devices/disk').get('device'),
+                         device_type)
+        self.assertEqual(tree.find('./devices/disk/target').get('bus'), bus)
 
     def _check_xml_and_uri(self, instance, expect_ramdisk, expect_kernel,
                            rescue=False):
@@ -687,11 +726,10 @@ class LibvirtConnTestCase(test.TestCase):
             self.flags(libvirt_type=libvirt_type)
             conn = connection.LibvirtConnection(True)
 
-            uri = conn.get_uri()
-            self.assertEquals(uri, expected_uri)
+            self.assertEquals(conn.uri, expected_uri)
 
             network_info = _fake_network_info(self.stubs, 1)
-            xml = conn.to_xml(instance_ref, network_info, rescue)
+            xml = conn.to_xml(instance_ref, network_info, None, rescue)
             tree = xml_to_tree(xml)
             for i, (check, expected_result) in enumerate(checks):
                 self.assertEqual(check(tree),
@@ -716,8 +754,7 @@ class LibvirtConnTestCase(test.TestCase):
         for (libvirt_type, (expected_uri, checks)) in type_uri_map.iteritems():
             self.flags(libvirt_type=libvirt_type)
             conn = connection.LibvirtConnection(True)
-            uri = conn.get_uri()
-            self.assertEquals(uri, testuri)
+            self.assertEquals(conn.uri, testuri)
         db.instance_destroy(user_context, instance_ref['id'])
 
     def test_update_available_resource_works_correctly(self):
@@ -1615,8 +1652,7 @@ class NWFilterTestCase(test.TestCase):
         inst['local_gb'] = '20'
         inst['flavorid'] = '1'
         inst['swap'] = '2048'
-        inst['rxtx_quota'] = 100
-        inst['rxtx_cap'] = 200
+        inst['rxtx_factor'] = 1
         inst.update(params)
         return db.instance_type_create(context, inst)['id']
 

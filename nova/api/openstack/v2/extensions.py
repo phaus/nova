@@ -16,19 +16,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import functools
-import imp
-import inspect
-import os
-import sys
-
-from lxml import etree
 import routes
 import webob.dec
 import webob.exc
 
 import nova.api.openstack.v2
-from nova.api.openstack import common
 from nova.api.openstack import wsgi
 from nova.api.openstack import xmlutil
 from nova import exception
@@ -67,6 +59,10 @@ class ExtensionDescriptor(object):
     # The timestamp when the extension was last updated, e.g.,
     # '2011-01-22T13:25:27-06:00'
     updated = None
+
+    # This attribute causes the extension to load only when
+    # the admin api is enabled
+    admin_only = False
 
     def __init__(self, ext_mgr):
         """Register extension with the extension manager."""
@@ -140,7 +136,9 @@ class ActionExtensionResource(wsgi.Resource):
 
     def __init__(self, application):
         controller = ActionExtensionController(application)
-        wsgi.Resource.__init__(self, controller)
+        wsgi.Resource.__init__(self, controller,
+                               serializer=wsgi.ResponseSerializer(),
+                               deserializer=wsgi.RequestDeserializer())
 
     def add_action(self, action_name, handler):
         self.controller.add_action(action_name, handler)
@@ -191,7 +189,9 @@ class RequestExtensionResource(wsgi.Resource):
 
     def __init__(self, application):
         controller = RequestExtensionController(application)
-        wsgi.Resource.__init__(self, controller)
+        wsgi.Resource.__init__(self, controller,
+                               serializer=wsgi.ResponseSerializer(),
+                               deserializer=wsgi.RequestDeserializer())
 
     def add_handler(self, handler):
         self.controller.add_handler(handler)
@@ -200,10 +200,42 @@ class RequestExtensionResource(wsgi.Resource):
         self.controller.add_pre_handler(pre_handler)
 
 
+def make_ext(elem):
+    elem.set('name')
+    elem.set('namespace')
+    elem.set('alias')
+    elem.set('updated')
+
+    desc = xmlutil.SubTemplateElement(elem, 'description')
+    desc.text = 'description'
+
+    xmlutil.make_links(elem, 'links')
+
+
+ext_nsmap = {None: xmlutil.XMLNS_V11, 'atom': xmlutil.XMLNS_ATOM}
+
+
+class ExtensionTemplate(xmlutil.TemplateBuilder):
+    def construct(self):
+        root = xmlutil.TemplateElement('extension', selector='extension')
+        make_ext(root)
+        return xmlutil.MasterTemplate(root, 1, nsmap=ext_nsmap)
+
+
+class ExtensionsTemplate(xmlutil.TemplateBuilder):
+    def construct(self):
+        root = xmlutil.TemplateElement('extensions')
+        elem = xmlutil.SubTemplateElement(root, 'extension',
+                                          selector='extensions')
+        make_ext(elem)
+        return xmlutil.MasterTemplate(root, 1, nsmap=ext_nsmap)
+
+
 class ExtensionsResource(wsgi.Resource):
 
     def __init__(self, extension_manager):
         self.extension_manager = extension_manager
+        super(ExtensionsResource, self).__init__(None)
 
     def _translate(self, ext):
         ext_data = {}
@@ -215,12 +247,14 @@ class ExtensionsResource(wsgi.Resource):
         ext_data['links'] = []  # TODO(dprince): implement extension links
         return ext_data
 
+    @wsgi.serializers(xml=ExtensionsTemplate)
     def index(self, req):
         extensions = []
         for _alias, ext in self.extension_manager.extensions.iteritems():
             extensions.append(self._translate(ext))
         return dict(extensions=extensions)
 
+    @wsgi.serializers(xml=ExtensionTemplate)
     def show(self, req, id):
         try:
             # NOTE(dprince): the extensions alias is used as the 'id' for show
@@ -293,27 +327,6 @@ class ExtensionMiddleware(base_wsgi.Middleware):
 
         mapper = nova.api.openstack.v2.ProjectMapper()
 
-        serializer = wsgi.ResponseSerializer(
-            {'application/xml': wsgi.XMLDictSerializer()})
-        # extended resources
-        for resource in ext_mgr.get_resources():
-            LOG.debug(_('Extended resource: %s'),
-                        resource.collection)
-            if resource.serializer is None:
-                resource.serializer = serializer
-
-            kargs = dict(
-                controller=wsgi.Resource(
-                    resource.controller, resource.deserializer,
-                    resource.serializer),
-                collection=resource.collection_actions,
-                member=resource.member_actions)
-
-            if resource.parent:
-                kargs['parent_resource'] = resource.parent
-
-            mapper.resource(resource.collection, resource.collection, **kargs)
-
         # extended actions
         action_resources = self._action_ext_resources(application, ext_mgr,
                                                         mapper)
@@ -368,11 +381,22 @@ class ExtensionManager(object):
 
     """
 
-    def __init__(self):
-        LOG.audit(_('Initializing extension manager.'))
+    _ext_mgr = None
 
-        self.extensions = {}
-        self._load_extensions()
+    @classmethod
+    def reset(cls):
+        cls._ext_mgr = None
+
+    def __new__(cls):
+        if cls._ext_mgr is None:
+            LOG.audit(_('Initializing extension manager.'))
+
+            cls._ext_mgr = super(ExtensionManager, cls).__new__(cls)
+
+            cls._ext_mgr.extensions = {}
+            cls._ext_mgr._load_extensions()
+
+        return cls._ext_mgr
 
     def register(self, ext):
         # Do nothing if the extension doesn't check out
@@ -388,12 +412,11 @@ class ExtensionManager(object):
 
     def get_resources(self):
         """Returns a list of ResourceExtension objects."""
+
         resources = []
-        serializer = wsgi.ResponseSerializer(
-            {'application/xml': ExtensionsXMLSerializer()})
         resources.append(ResourceExtension('extensions',
-                                           ExtensionsResource(self),
-                                           serializer=serializer))
+                                           ExtensionsResource(self)))
+
         for ext in self.extensions.values():
             try:
                 resources.extend(ext.get_resources())
@@ -436,9 +459,15 @@ class ExtensionManager(object):
                       ' '.join(extension.__doc__.strip().split()))
             LOG.debug(_('Ext namespace: %s'), extension.namespace)
             LOG.debug(_('Ext updated: %s'), extension.updated)
+            LOG.debug(_('Ext admin_only: %s'), extension.admin_only)
         except AttributeError as ex:
             LOG.exception(_("Exception loading extension: %s"), unicode(ex))
             return False
+
+        # Don't load admin api extensions if the admin api isn't enabled
+        if not FLAGS.allow_admin_api and extension.admin_only:
+            return False
+
         return True
 
     def load_extension(self, ext_factory):
@@ -453,6 +482,7 @@ class ExtensionManager(object):
         LOG.debug(_("Loading extension %s"), ext_factory)
 
         # Load the factory
+
         factory = utils.import_class(ext_factory)
 
         # Call it
@@ -462,7 +492,9 @@ class ExtensionManager(object):
     def _load_extensions(self):
         """Load extensions specified on the command line."""
 
-        for ext_factory in FLAGS.osapi_extension:
+        extensions = list(FLAGS.osapi_extension)
+
+        for ext_factory in extensions:
             try:
                 self.load_extension(ext_factory)
             except Exception as exc:
@@ -513,53 +545,12 @@ class ResourceExtension(object):
         self.serializer = serializer
 
 
-def make_ext(elem):
-    elem.set('name')
-    elem.set('namespace')
-    elem.set('alias')
-    elem.set('updated')
-
-    desc = xmlutil.SubTemplateElement(elem, 'description')
-    desc.text = 'description'
-
-    xmlutil.make_links(elem, 'links')
-
-
-ext_nsmap = {None: xmlutil.XMLNS_V11, 'atom': xmlutil.XMLNS_ATOM}
-
-
-class ExtensionTemplate(xmlutil.TemplateBuilder):
-    def construct(self):
-        root = xmlutil.TemplateElement('extension', selector='extension')
-        make_ext(root)
-        return xmlutil.MasterTemplate(root, 1, nsmap=ext_nsmap)
-
-
-class ExtensionsTemplate(xmlutil.TemplateBuilder):
-    def construct(self):
-        root = xmlutil.TemplateElement('extensions')
-        elem = xmlutil.SubTemplateElement(root, 'extension',
-                                          selector='extensions')
-        make_ext(elem)
-        return xmlutil.MasterTemplate(root, 1, nsmap=ext_nsmap)
-
-
 class ExtensionsXMLSerializer(xmlutil.XMLTemplateSerializer):
     def index(self):
         return ExtensionsTemplate()
 
     def show(self):
         return ExtensionTemplate()
-
-
-def admin_only(fnc):
-    @functools.wraps(fnc)
-    def _wrapped(self, *args, **kwargs):
-        if FLAGS.allow_admin_api:
-            return fnc(self, *args, **kwargs)
-        raise webob.exc.HTTPNotFound()
-    _wrapped.func_name = fnc.func_name
-    return _wrapped
 
 
 def wrap_errors(fn):

@@ -47,34 +47,16 @@ class ProjectTestCase(test.TestCase):
         missing = set()
         contributors = set()
         mailmap = parse_mailmap(os.path.join(topdir, '.mailmap'))
-        authors_file = open(os.path.join(topdir, 'Authors'), 'r').read()
+        authors_file = open(os.path.join(topdir,
+                                         'Authors'), 'r').read().lower()
 
-        if os.path.exists(os.path.join(topdir, '.bzr')):
-            import bzrlib.workingtree
-            tree = bzrlib.workingtree.WorkingTree.open(topdir)
-            tree.lock_read()
-            try:
-                parents = tree.get_parent_ids()
-                g = tree.branch.repository.get_graph()
-                for p in parents:
-                    rev_ids = [r for r, _ in g.iter_ancestry(parents)
-                               if r != "null:"]
-                    revs = tree.branch.repository.get_revisions(rev_ids)
-                    for r in revs:
-                        for author in r.get_apparent_authors():
-                            email = author.split(' ')[-1]
-                            contributors.add(str_dict_replace(email,
-                                                              mailmap))
-            finally:
-                tree.unlock()
-
-        elif os.path.exists(os.path.join(topdir, '.git')):
+        if os.path.exists(os.path.join(topdir, '.git')):
             for email in commands.getoutput('git log --format=%ae').split():
                 if not email:
                     continue
                 if "jenkins" in email and "openstack.org" in email:
                     continue
-                email = '<' + email + '>'
+                email = '<' + email.lower() + '>'
                 contributors.add(str_dict_replace(email, mailmap))
         else:
             return
