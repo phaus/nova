@@ -211,42 +211,84 @@ class ComputeBackend(MyBackend):
 
     def _retrieve(self, entity, extras):
         context = extras['nova_ctx']
-
+        
         # TODO: Review: when a new resource is added to the registry its UUID
         # is prepended with it's location. Is this necessary? See extensions.py
         uid = entity.attributes['occi.core.id']
         if uid.find(entity.kind.location) > -1:
             uid = uid.replace(entity.kind.location, '')
-
+        
         try:
             instance = self.compute_api.routing_get(context, uid)
         except exception.NotFound:
             raise exc.HTTPNotFound()
-
+        
         # TODO: Review, IMPORTANT: OpenStack supports differenet states. 
         # Do we map them to OCCI states or do we expose the OS state values 
         # through occi.compute.state? 
         #   - see nova/compute/vm_states.py nova/compute/task_states.py
         state = instance['vm_state']
-        LOG.info('State of is ' + state)
-
-        # TODO: update possible states - I removed the task states...
-
+        
         # handle the user actions that are made available by OS & OCCI
-        if state == vm_states.ACTIVE:
+        if state is vm_states.ACTIVE:
+            entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
+                                                        infrastructure.RESTART]
+        # change password - OS 
+        elif state == task_states.UPDATING_PASSWORD:
             entity.attributes['occi.compute.state'] = 'active'
             entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
                                                         infrastructure.RESTART]
-        elif state == vm_states.ERROR:
-            entity.attributes['occi.compute.state'] = 'error'
+        # reboot server - OS, OCCI
+        elif state in (task_states.REBOOTING, task_states.REBOOTING_HARD):
+            entity.attributes['occi.compute.state'] = 'active'
             entity.actions = []
-        else:
+        # pause server - OCCI
+        elif state == task_states.PAUSING:
             entity.attributes['occi.compute.state'] = 'inactive'
+            entity.actions = [infrastructure.START]
+        # suspend server - OCCI
+        elif state == task_states.SUSPENDING:
+            entity.attributes['occi.compute.state'] = 'inactive'
+            entity.actions = [infrastructure.START]
+        # resume server - OCCI
+        elif state == task_states.RESUMING:
+            entity.attributes['occi.compute.state'] = 'active'
             entity.actions = []
-
+        # stop server - OCCI
+        elif state in (task_states.STOPPING, task_states.POWERING_OFF):
+            entity.attributes['occi.compute.state'] = 'inactive'
+            entity.actions = [infrastructure.START]
+        # start server - OCCI
+        elif state == (task_states.STARTING, task_states.POWERING_ON):
+            entity.attributes['occi.compute.state'] = 'active'
+            entity.actions = []
+        # rebuild server - OS
+        elif state == vm_states.REBUILDING:
+            entity.attributes['occi.compute.state'] = 'active'
+            entity.actions = []
+        # resize server confirm rebuild
+        # TODO: implement in update()
+        elif state in (task_states.RESIZE_CONFIRMING,
+                       task_states.RESIZE_FINISH,
+                       task_states.RESIZE_MIGRATED,
+                       task_states.RESIZE_MIGRATING,
+                       task_states.RESIZE_PREP):
+            entity.attributes['occi.compute.state'] = 'active'
+            entity.actions = []
+        # revert resized server - OS (indirectly OCCI)
+        # TODO: implement OS-OCCI extension or can be done via update()
+        elif state == task_states.RESIZE_REVERTING:
+            entity.attributes['occi.compute.state'] = 'active'
+            entity.actions = []
+        # confirm resized server
+        elif state == task_states.RESIZE_VERIFY:
+            entity.attributes['occi.compute.state'] = 'active'
+            entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
+                                                        infrastructure.RESTART]
+        
         # TODO: create image - do we want this?
-
-        #return instance
+        
+        return instance
 
     def delete(self, entity, extras):
         # call the management framework to delete this compute instance...
