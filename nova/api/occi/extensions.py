@@ -17,7 +17,6 @@ from nova import log
 
 from occi import backend
 from occi import core_model
-from occi import registry
 from occi.extensions import infrastructure
 
 #Hi I'm a logger, use me! :-)
@@ -85,7 +84,7 @@ class OsTemplate(core_model.Mixin):
             LOG.warn('There are more than one glance host. Using the first: '
                       + glance_hosts[0])
         #TODO: note there is an explicit API string here!
-        #TODO: glance can also simply accept self.os_id where the image is local 
+        #TODO: glance can also simply accept self.os_id if it is local img
         return 'http://' + glance_hosts[0] + '/v1/images/' + str(self.os_id)
 
 
@@ -96,14 +95,3 @@ class ResourceTemplate(core_model.Mixin):
     '''
 
     pass
-
-
-class OpenStackOCCIRegistry(registry.NonePersistentRegistry):
-
-    def add_resource(self, key, resource):
-        '''
-        Make sure OS keys get used!
-        '''
-        key = resource.kind.location + resource.attributes['occi.core.id']
-        resource.identifier = key
-        registry.NonePersistentRegistry.add_resource(self, key, resource)

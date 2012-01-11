@@ -12,5 +12,12 @@ nova.egg-info
 .venv
 *.sqlite
 *.log
+<<<<<<< HEAD
 po/*.pot.project
 .pydevproject
+=======
+.project
+.pydevproject
+.settings
+po/*.pot
+>>>>>>> tmetsch-upstream/master
