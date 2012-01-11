@@ -49,7 +49,7 @@ class ComputeBackend(MyBackend):
         LOG.info('Creating the virtual machine with id: ' + entity.identifier)
 
         #TODO: should be taken from the OCCI request
-        name = 'an_occi_vm' 
+        name = 'an_occi_vm'
         key_name = None
         metadata = {}
         access_ip_v4 = None
@@ -72,7 +72,7 @@ class ComputeBackend(MyBackend):
         # its assembled in AuthMiddleware - we can pipeline this with the 
         # OCCI service
         context = extras['nova_ctx']
-        
+
         #essential, required to get a vm image e.g. 
         #            image_href = 'http://10.211.55.20:9292/v1/images/1'
         #extract resource template from entity and get the flavor name. 
@@ -88,7 +88,7 @@ class ComputeBackend(MyBackend):
                 elif isinstance(mixin, OsTemplate):
                     o = mixin
                     oc += 1
-            
+
             if rc > 1:
                 msg = 'There is more than one resource template in the request'
                 LOG.error(msg)
@@ -96,11 +96,11 @@ class ComputeBackend(MyBackend):
             if oc > 1:
                 msg = 'There is more than one resource template in the request'
                 LOG.error(msg)
-                raise AttributeError()            
-            
+                raise AttributeError()
+
             flavor_name = r.term
             os_tpl_url = o.os_url()
-            
+
         try:
             if flavor_name:
                 inst_type = \
@@ -109,7 +109,7 @@ class ComputeBackend(MyBackend):
                 inst_type = instance_types.get_default_instance_type()
                 LOG.warn('No resource template was found in the request. \
                                 Using the default: ' + inst_type['name'])
-            
+
             if not os_tpl_url: #possibly an edge case
                 msg = 'No URL to an image file has been found.'
                 LOG.error(msg)
@@ -158,7 +158,7 @@ class ComputeBackend(MyBackend):
             msg = "%(err_type)s: %(err_msg)s" % \
                   {'err_type': err.exc_type, 'err_msg': err.value}
             raise exc.HTTPBadRequest(explanation=msg)
-        
+
         entity.attributes['occi.core.id'] = instances[0]['uuid']
         entity.attributes['occi.compute.hostname'] = instances[0]['hostname']
         # TODO: can't we tell this from the image used?
@@ -167,22 +167,22 @@ class ComputeBackend(MyBackend):
         #this is not available in instances
         # TODO: could possible be retreived from flavour info 
         # if not where?
-        entity.attributes['occi.compute.speed'] = str(2.4) 
+        entity.attributes['occi.compute.speed'] = str(2.4)
         entity.attributes['occi.compute.memory'] = \
                                 str(float(instances[0]['memory_mb']) / 1024)
-        
-        
+
+
         # TODO: is this sufficent or should we check the state param in 
         # instance?
         entity.attributes['occi.compute.state'] = 'inactive'
-        
+
         # TODO: Once created, the VM is attached to a public network with an 
         # addresses allocated by DHCP
         # Then create link to this network (IP) and set the ip to that of the
         # allocated ip
         # To create an OS floating IP then dhcp would be switched to static
-        
-    
+
+
     # TODO: best import this from openstack api? it was taken from there
     def _handle_quota_error(self, error):
         """
@@ -208,29 +208,30 @@ class ComputeBackend(MyBackend):
 
     def retrieve(self, entity, extras):
         self._retrieve(entity, extras)
-    
+
     def _retrieve(self, entity, extras):
         context = extras['nova_ctx']
-        
+
         # TODO: Review: when a new resource is added to the registry its UUID
         # is prepended with it's location. Is this necessary? See extensions.py
         uid = entity.attributes['occi.core.id']
         if uid.find(entity.kind.location) > -1:
             uid = uid.replace(entity.kind.location, '')
-        
+
         try:
             instance = self.compute_api.routing_get(context, uid)
         except exception.NotFound:
             raise exc.HTTPNotFound()
-        
+
         # TODO: Review, IMPORTANT: OpenStack supports differenet states. 
         # Do we map them to OCCI states or do we expose the OS state values 
         # through occi.compute.state? 
         #   - see nova/compute/vm_states.py nova/compute/task_states.py
         state = instance['vm_state']
-        
+
         # handle the user actions that are made available by OS & OCCI
         if state is vm_states.ACTIVE:
+            entity.attributes['occi.compute.state'] = 'active'
             entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
                                                         infrastructure.RESTART]
         # change password - OS 
@@ -285,14 +286,14 @@ class ComputeBackend(MyBackend):
             entity.attributes['occi.compute.state'] = 'active'
             entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
                                                         infrastructure.RESTART]
-        
+
         # TODO: create image - do we want this?
-        
+
         return instance
-        
+
     def delete(self, entity, extras):
         # call the management framework to delete this compute instance...
-        LOG.info('Removing representation of virtual machine with id: ' 
+        LOG.info('Removing representation of virtual machine with id: '
               + entity.identifier)
 
         context = extras['nova_ctx']
@@ -309,17 +310,17 @@ class ComputeBackend(MyBackend):
             self.compute_api.delete(context, instance)
 
     def action(self, entity, action, extras):
-        
+
         # TODO: Review: when retrieve is called the representation of the 
         # resource is rendered. We don't want that!
-        
+
         # TODO: Review: as there is no callback mechanism to update the state  
         # of computes known by occi, a call to get the latest representation 
         # must be made
         instance = self._retrieve(entity, extras)
-        
+
         context = extras['nova_ctx']
-        
+
         if action not in entity.actions:
             raise AttributeError("This action is not currently applicable.")
         elif action == infrastructure.START:
@@ -329,7 +330,7 @@ class ComputeBackend(MyBackend):
             # TODO: check that the instance is not paused or suspended
             # self.compute_api.unpause(context, instance)
             # self.compute_api.resume(context, instance)
-            
+
         elif action == infrastructure.STOP:
             # TODO: Review semantics
             # OCCI -> graceful, acpioff, poweroff
@@ -388,4 +389,4 @@ class ComputeBackend(MyBackend):
             LOG.info('Confirming resize of virtual machine with id' + \
                                                             entity.identifier)
             self.compute_api.confirm_resize(context, instance)
-            
+
