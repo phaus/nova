@@ -25,7 +25,6 @@ import functools
 import inspect
 import json
 import lockfile
-import netaddr
 import os
 import random
 import re
@@ -34,21 +33,19 @@ import socket
 import struct
 import sys
 import time
-import types
 import uuid
 import pyclbr
-import netaddr
 from xml.sax import saxutils
 
 from eventlet import event
 from eventlet import greenthread
 from eventlet import semaphore
 from eventlet.green import subprocess
+import netaddr
 
 from nova import exception
 from nova import flags
 from nova import log as logging
-from nova import version
 
 
 LOG = logging.getLogger("nova.utils")
@@ -76,6 +73,29 @@ def import_object(import_str):
     except ImportError:
         cls = import_class(import_str)
         return cls()
+
+
+def find_config(config_path):
+    """Find a configuration file using the given hint.
+
+    :param config_path: Full or relative path to the config.
+    :returns: Full path of the config, if it exists.
+    :raises: `nova.exception.ConfigNotFound`
+
+    """
+    possible_locations = [
+        config_path,
+        os.path.join(FLAGS.state_path, "etc", "nova", config_path),
+        os.path.join(FLAGS.state_path, "etc", config_path),
+        os.path.join(FLAGS.state_path, config_path),
+        "/etc/nova/%s" % config_path,
+    ]
+
+    for path in possible_locations:
+        if os.path.exists(path):
+            return os.path.abspath(path)
+
+    raise exception.ConfigNotFound(path=os.path.abspath(config_path))
 
 
 def vpn_ping(address, port, timeout=0.05, session_id=None):
@@ -135,8 +155,9 @@ def execute(*cmd, **kwargs):
 
     :cmd                Passed to subprocess.Popen.
     :process_input      Send to opened process.
-    :check_exit_code    Defaults to 0. Raise exception.ProcessExecutionError
-                        unless program exits with this code.
+    :check_exit_code    Single bool, int, or list of allowed exit codes.
+                        Defaults to [0].  Raise exception.ProcessExecutionError
+                        unless program exits with one of these code.
     :delay_on_retry     True | False. Defaults to True. If set to True, wait a
                         short amount of time before retrying.
     :attempts           How many times to retry cmd.
@@ -146,10 +167,19 @@ def execute(*cmd, **kwargs):
 
     :raises exception.Error on receiving unknown arguments
     :raises exception.ProcessExecutionError
+
+    :returns a tuple, (stdout, stderr) from the spawned process, or None if
+             the command fails.
     """
 
     process_input = kwargs.pop('process_input', None)
-    check_exit_code = kwargs.pop('check_exit_code', 0)
+    check_exit_code = kwargs.pop('check_exit_code', [0])
+    ignore_exit_code = False
+    if isinstance(check_exit_code, bool):
+        ignore_exit_code = not check_exit_code
+        check_exit_code = [0]
+    elif isinstance(check_exit_code, int):
+        check_exit_code = [check_exit_code]
     delay_on_retry = kwargs.pop('delay_on_retry', True)
     attempts = kwargs.pop('attempts', 1)
     run_as_root = kwargs.pop('run_as_root', False)
@@ -183,8 +213,8 @@ def execute(*cmd, **kwargs):
             _returncode = obj.returncode  # pylint: disable=E1101
             if _returncode:
                 LOG.debug(_('Result was %s') % _returncode)
-                if type(check_exit_code) == types.IntType \
-                        and _returncode != check_exit_code:
+                if not ignore_exit_code \
+                    and _returncode not in check_exit_code:
                     (stdout, stderr) = result
                     raise exception.ProcessExecutionError(
                             exit_code=_returncode,
@@ -204,6 +234,36 @@ def execute(*cmd, **kwargs):
             #               call clean something up in between calls, without
             #               it two execute calls in a row hangs the second one
             greenthread.sleep(0)
+
+
+def trycmd(*args, **kwargs):
+    """
+    A wrapper around execute() to more easily handle warnings and errors.
+
+    Returns an (out, err) tuple of strings containing the output of
+    the command's stdout and stderr.  If 'err' is not empty then the
+    command can be considered to have failed.
+
+    :discard_warnings   True | False. Defaults to False. If set to True,
+                        then for succeeding commands, stderr is cleared
+
+    """
+    discard_warnings = kwargs.pop('discard_warnings', False)
+
+    try:
+        out, err = execute(*args, **kwargs)
+        failed = False
+    except exception.ProcessExecutionError, exn:
+        out, err = '', str(exn)
+        LOG.debug(err)
+        failed = True
+
+    if not failed and discard_warnings and err:
+        # Handle commands that output to stderr but otherwise succeed
+        LOG.debug(err)
+        err = ''
+
+    return out, err
 
 
 def ssh_execute(ssh, cmd, process_input=None,
@@ -289,13 +349,13 @@ def generate_uid(topic, size=8):
 
 # Default symbols to use for passwords. Avoids visually confusing characters.
 # ~6 bits per symbol
-DEFAULT_PASSWORD_SYMBOLS = ('23456789'  # Removed: 0,1
-                            'ABCDEFGHJKLMNPQRSTUVWXYZ'  # Removed: I, O
+DEFAULT_PASSWORD_SYMBOLS = ('23456789',  # Removed: 0,1
+                            'ABCDEFGHJKLMNPQRSTUVWXYZ',   # Removed: I, O
                             'abcdefghijkmnopqrstuvwxyz')  # Removed: l
 
 
 # ~5 bits per symbol
-EASIER_PASSWORD_SYMBOLS = ('23456789'  # Removed: 0, 1
+EASIER_PASSWORD_SYMBOLS = ('23456789',  # Removed: 0, 1
                            'ABCDEFGHJKLMNPQRSTUVWXYZ')  # Removed: I, O
 
 
@@ -359,14 +419,37 @@ def usage_from_instance(instance_ref, **kw):
     return usage_info
 
 
-def generate_password(length=20, symbols=DEFAULT_PASSWORD_SYMBOLS):
-    """Generate a random password from the supplied symbols.
+def generate_password(length=20, symbolgroups=DEFAULT_PASSWORD_SYMBOLS):
+    """Generate a random password from the supplied symbol groups.
+
+    At least one symbol from each group will be included. Unpredictable
+    results if length is less than the number of symbol groups.
 
     Believed to be reasonably secure (with a reasonable password length!)
 
     """
     r = random.SystemRandom()
-    return ''.join([r.choice(symbols) for _i in xrange(length)])
+
+    # NOTE(jerdfelt): Some password policies require at least one character
+    # from each group of symbols, so start off with one random character
+    # from each symbol group
+    password = [r.choice(s) for s in symbolgroups]
+    # If length < len(symbolgroups), the leading characters will only
+    # be from the first length groups. Try our best to not be predictable
+    # by shuffling and then truncating.
+    r.shuffle(password)
+    password = password[:length]
+    length -= len(password)
+
+    # then fill with random characters from all symbol groups
+    symbols = ''.join(symbolgroups)
+    password.extend([r.choice(symbols) for _i in xrange(length)])
+
+    # finally shuffle to ensure first x characters aren't from a
+    # predictable group
+    r.shuffle(password)
+
+    return ''.join(password)
 
 
 def last_octet(address):
@@ -460,7 +543,7 @@ def parse_mailmap(mailmap='.mailmap'):
             l = l.strip()
             if not l.startswith('#') and ' ' in l:
                 canonical_email, alias = l.split(' ')
-                mapping[alias] = canonical_email
+                mapping[alias.lower()] = canonical_email.lower()
     return mapping
 
 
@@ -485,7 +568,7 @@ class LazyPluggable(object):
                 raise exception.Error(_('Invalid backend: %s') % backend_name)
 
             backend = self.__backends[backend_name]
-            if type(backend) == type(tuple()):
+            if isinstance(backend, tuple):
                 name = backend[0]
                 fromlist = backend[1]
             else:
@@ -606,19 +689,27 @@ def to_primitive(value, convert_instances=False, level=0):
         if test(value):
             return unicode(value)
 
+    # FIXME(vish): Workaround for LP bug 852095. Without this workaround,
+    #              tests that raise an exception in a mocked method that
+    #              has a @wrap_exception with a notifier will fail. If
+    #              we up the dependency to 0.5.4 (when it is released) we
+    #              can remove this workaround.
+    if getattr(value, '__module__', None) == 'mox':
+        return 'mock'
+
     if level > 3:
         return '?'
 
     # The try block may not be necessary after the class check above,
     # but just in case ...
     try:
-        if type(value) is type([]) or type(value) is type((None,)):
+        if isinstance(value, (list, tuple)):
             o = []
             for v in value:
                 o.append(to_primitive(v, convert_instances=convert_instances,
                                       level=level))
             return o
-        elif type(value) is type({}):
+        elif isinstance(value, dict):
             o = {}
             for k, v in value.iteritems():
                 o[k] = to_primitive(v, convert_instances=convert_instances,
@@ -720,6 +811,9 @@ def synchronized(name, external=False):
                         '"%(method)s"...' % {'lock': name,
                                              'method': f.__name__}))
             with sem:
+                LOG.debug(_('Got semaphore "%(lock)s" for method '
+                            '"%(method)s"...' % {'lock': name,
+                                                 'method': f.__name__}))
                 if external:
                     LOG.debug(_('Attempting to grab file lock "%(lock)s" for '
                                 'method "%(method)s"...' %
@@ -731,6 +825,10 @@ def synchronized(name, external=False):
                     lock = _NoopContextManager()
 
                 with lock:
+                    if external:
+                        LOG.debug(_('Got file lock "%(lock)s" for '
+                                    'method "%(method)s"...' %
+                                    {'lock': name, 'method': f.__name__}))
                     retval = f(*args, **kwargs)
 
             # If no-one else is waiting for it, delete it.
@@ -767,7 +865,7 @@ def get_from_path(items, path):
     if items is None:
         return results
 
-    if not isinstance(items, types.ListType):
+    if not isinstance(items, list):
         # Wrap single objects in a list
         items = [items]
 
@@ -780,7 +878,7 @@ def get_from_path(items, path):
         child = get_method(first_token)
         if child is None:
             continue
-        if isinstance(child, types.ListType):
+        if isinstance(child, list):
             # Flatten intermediate lists
             for x in child:
                 results.append(x)
@@ -880,9 +978,11 @@ def is_uuid_like(val):
 
         aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
     """
-    if not isinstance(val, basestring):
+    try:
+        uuid.UUID(val)
+        return True
+    except (TypeError, ValueError, AttributeError):
         return False
-    return (len(val) == 36) and (val.count('-') == 4)
 
 
 def bool_from_str(val):
@@ -1019,7 +1119,7 @@ def save_and_reraise_exception():
     type_, value, traceback = sys.exc_info()
     try:
         yield
-    except:
+    except Exception:
         LOG.exception(_('Original exception being dropped'),
                       exc_info=(type_, value, traceback))
         raise
@@ -1074,3 +1174,51 @@ def sanitize_hostname(hostname):
     hostname = hostname.strip('.-')
 
     return hostname
+
+
+def read_cached_file(filename, cache_info, reload_func=None):
+    """Read from a file if it has been modified.
+
+    :param cache_info: dictionary to hold opaque cache.
+    :param reload_func: optional function to be called with data when
+                        file is reloaded due to a modification.
+
+    :returns: data from file
+
+    """
+    mtime = os.path.getmtime(filename)
+    if not cache_info or mtime != cache_info.get('mtime'):
+        with open(filename) as fap:
+            cache_info['data'] = fap.read()
+        cache_info['mtime'] = mtime
+        if reload_func:
+            reload_func(cache_info['data'])
+    return cache_info['data']
+
+
+@contextlib.contextmanager
+def temporary_mutation(obj, **kwargs):
+    """Temporarily set the attr on a particular object to a given value then
+    revert when finished.
+
+    One use of this is to temporarily set the read_deleted flag on a context
+    object:
+
+        with temporary_mutation(context, read_deleted="yes"):
+            do_something_that_needed_deleted_objects()
+    """
+    NOT_PRESENT = object()
+
+    old_values = {}
+    for attr, new_value in kwargs.items():
+        old_values[attr] = getattr(obj, attr, NOT_PRESENT)
+        setattr(obj, attr, new_value)
+
+    try:
+        yield
+    finally:
+        for attr, old_value in old_values.items():
+            if old_value is NOT_PRESENT:
+                del obj[attr]
+            else:
+                setattr(obj, attr, old_value)

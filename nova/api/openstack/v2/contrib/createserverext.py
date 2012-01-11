@@ -45,30 +45,16 @@ class Createserverext(extensions.ExtensionDescriptor):
 
     name = "Createserverext"
     alias = "os-create-server-ext"
-    namespace = "http://docs.openstack.org/ext/createserverext/api/v1.1"
+    namespace = "http://docs.openstack.org/compute/ext/" \
+                "createserverext/api/v1.1"
     updated = "2011-07-19T00:00:00+00:00"
 
     def get_resources(self):
         resources = []
-
-        headers_serializer = servers.HeadersSerializer()
-        body_serializers = {
-            'application/xml': servers.ServerXMLSerializer(),
-        }
-
-        body_deserializers = {
-            'application/xml': servers.ServerXMLDeserializer(),
-        }
-
-        serializer = wsgi.ResponseSerializer(body_serializers,
-                                             headers_serializer)
-        deserializer = wsgi.RequestDeserializer(body_deserializers)
         controller = Controller()
 
         res = extensions.ResourceExtension('os-create-server-ext',
-                                        controller=controller,
-                                        deserializer=deserializer,
-                                        serializer=serializer)
+                                           controller=controller)
         resources.append(res)
 
         return resources

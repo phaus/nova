@@ -18,11 +18,25 @@
 from nova.api.openstack import common
 from nova.api.openstack.v2 import extensions
 from nova.api.openstack import wsgi
+from nova.api.openstack import xmlutil
 from nova import log as logging
 from nova import network
 
 
 LOG = logging.getLogger("nova.api.openstack.v2.contrib.virtual_interfaces")
+
+
+vif_nsmap = {None: wsgi.XMLNS_V11}
+
+
+class VirtualInterfaceTemplate(xmlutil.TemplateBuilder):
+    def construct(self):
+        root = xmlutil.TemplateElement('virtual_interfaces')
+        elem = xmlutil.SubTemplateElement(root, 'virtual_interface',
+                                          selector='virtual_interfaces')
+        elem.set('id')
+        elem.set('mac_address')
+        return xmlutil.MasterTemplate(root, 1, nsmap=vif_nsmap)
 
 
 def _translate_vif_summary_view(_context, vif):
@@ -31,13 +45,6 @@ def _translate_vif_summary_view(_context, vif):
     d['id'] = vif['uuid']
     d['mac_address'] = vif['address']
     return d
-
-
-def _get_metadata():
-    metadata = {
-        "attributes": {
-                'virtual_interface': ["id", "mac_address"]}}
-    return metadata
 
 
 class ServerVirtualInterfaceController(object):
@@ -57,6 +64,7 @@ class ServerVirtualInterfaceController(object):
         res = [entity_maker(context, vif) for vif in limited_list]
         return {'virtual_interfaces': res}
 
+    @wsgi.serializers(xml=VirtualInterfaceTemplate)
     def index(self, req, server_id):
         """Returns the list of VIFs for a given instance."""
         return self._items(req, server_id,
@@ -68,22 +76,17 @@ class Virtual_interfaces(extensions.ExtensionDescriptor):
 
     name = "VirtualInterfaces"
     alias = "virtual_interfaces"
-    namespace = "http://docs.openstack.org/ext/virtual_interfaces/api/v1.1"
+    namespace = "http://docs.openstack.org/compute/ext/" \
+                "virtual_interfaces/api/v1.1"
     updated = "2011-08-17T00:00:00+00:00"
 
     def get_resources(self):
         resources = []
 
-        metadata = _get_metadata()
-        body_serializers = {
-            'application/xml': wsgi.XMLDictSerializer(metadata=metadata,
-                                                      xmlns=wsgi.XMLNS_V11)}
-        serializer = wsgi.ResponseSerializer(body_serializers, None)
         res = extensions.ResourceExtension(
             'os-virtual-interfaces',
             controller=ServerVirtualInterfaceController(),
-            parent=dict(member_name='server', collection_name='servers'),
-            serializer=serializer)
+            parent=dict(member_name='server', collection_name='servers'))
         resources.append(res)
 
         return resources

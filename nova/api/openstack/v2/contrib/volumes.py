@@ -21,12 +21,12 @@ import webob
 from nova.api.openstack import common
 from nova.api.openstack.v2 import extensions
 from nova.api.openstack.v2 import servers
+from nova.api.openstack import wsgi
+from nova.api.openstack import xmlutil
 from nova import compute
-from nova import db
 from nova import exception
 from nova import flags
 from nova import log as logging
-from nova import quota
 from nova import volume
 from nova.volume import volume_types
 
@@ -70,6 +70,7 @@ def _translate_volume_summary_view(context, vol):
     else:
         d['volumeType'] = vol['volume_type_id']
 
+    d['snapshotId'] = vol['snapshot_id']
     LOG.audit(_("vol=%s"), vol, context=context)
 
     if vol.get('volume_metadata'):
@@ -83,28 +84,49 @@ def _translate_volume_summary_view(context, vol):
     return d
 
 
+def make_volume(elem):
+    elem.set('id')
+    elem.set('status')
+    elem.set('size')
+    elem.set('availabilityZone')
+    elem.set('createdAt')
+    elem.set('displayName')
+    elem.set('displayDescription')
+    elem.set('volumeType')
+    elem.set('snapshotId')
+
+    attachments = xmlutil.SubTemplateElement(elem, 'attachments')
+    attachment = xmlutil.SubTemplateElement(attachments, 'attachment',
+                                            selector='attachments')
+    make_attachment(attachment)
+
+    metadata = xmlutil.make_flat_dict('metadata')
+    elem.append(metadata)
+
+
+class VolumeTemplate(xmlutil.TemplateBuilder):
+    def construct(self):
+        root = xmlutil.TemplateElement('volume', selector='volume')
+        make_volume(root)
+        return xmlutil.MasterTemplate(root, 1)
+
+
+class VolumesTemplate(xmlutil.TemplateBuilder):
+    def construct(self):
+        root = xmlutil.TemplateElement('volumes')
+        elem = xmlutil.SubTemplateElement(root, 'volume', selector='volumes')
+        make_volume(elem)
+        return xmlutil.MasterTemplate(root, 1)
+
+
 class VolumeController(object):
     """The Volumes API controller for the OpenStack API."""
-
-    _serialization_metadata = {
-        'application/xml': {
-            "attributes": {
-                "volume": [
-                    "id",
-                    "status",
-                    "size",
-                    "availabilityZone",
-                    "createdAt",
-                    "displayName",
-                    "displayDescription",
-                    "volumeType",
-                    "metadata",
-                    ]}}}
 
     def __init__(self):
         self.volume_api = volume.API()
         super(VolumeController, self).__init__()
 
+    @wsgi.serializers(xml=VolumeTemplate)
     def show(self, req, id):
         """Return data about the given volume."""
         context = req.environ['nova.context']
@@ -128,10 +150,12 @@ class VolumeController(object):
             raise exc.HTTPNotFound()
         return webob.Response(status_int=202)
 
+    @wsgi.serializers(xml=VolumesTemplate)
     def index(self, req):
         """Returns a summary list of volumes."""
         return self._items(req, entity_maker=_translate_volume_summary_view)
 
+    @wsgi.serializers(xml=VolumesTemplate)
     def detail(self, req):
         """Returns a detailed list of volumes."""
         return self._items(req, entity_maker=_translate_volume_detail_view)
@@ -145,6 +169,7 @@ class VolumeController(object):
         res = [entity_maker(context, vol) for vol in limited_list]
         return {'volumes': res}
 
+    @wsgi.serializers(xml=VolumeTemplate)
     def create(self, req, body):
         """Creates a new volume."""
         context = req.environ['nova.context']
@@ -166,7 +191,8 @@ class VolumeController(object):
 
         metadata = vol.get('metadata', None)
 
-        new_volume = self.volume_api.create(context, size, None,
+        new_volume = self.volume_api.create(context, size,
+                                            vol.get('snapshot_id'),
                                             vol.get('display_name'),
                                             vol.get('display_description'),
                                             volume_type=vol_type,
@@ -208,6 +234,30 @@ def _translate_attachment_summary_view(_context, vol):
     return d
 
 
+def make_attachment(elem):
+    elem.set('id')
+    elem.set('serverId')
+    elem.set('volumeId')
+    elem.set('device')
+
+
+class VolumeAttachmentTemplate(xmlutil.TemplateBuilder):
+    def construct(self):
+        root = xmlutil.TemplateElement('volumeAttachment',
+                                       selector='volumeAttachment')
+        make_attachment(root)
+        return xmlutil.MasterTemplate(root, 1)
+
+
+class VolumeAttachmentsTemplate(xmlutil.TemplateBuilder):
+    def construct(self):
+        root = xmlutil.TemplateElement('volumeAttachments')
+        elem = xmlutil.SubTemplateElement(root, 'volumeAttachment',
+                                          selector='volumeAttachments')
+        make_attachment(elem)
+        return xmlutil.MasterTemplate(root, 1)
+
+
 class VolumeAttachmentController(object):
     """The volume attachment API controller for the Openstack API.
 
@@ -216,24 +266,18 @@ class VolumeAttachmentController(object):
 
     """
 
-    _serialization_metadata = {
-        'application/xml': {
-            'attributes': {
-                'volumeAttachment': ['id',
-                                     'serverId',
-                                     'volumeId',
-                                     'device']}}}
-
     def __init__(self):
         self.compute_api = compute.API()
         self.volume_api = volume.API()
         super(VolumeAttachmentController, self).__init__()
 
+    @wsgi.serializers(xml=VolumeAttachmentsTemplate)
     def index(self, req, server_id):
         """Returns the list of volume attachments for a given instance."""
         return self._items(req, server_id,
                            entity_maker=_translate_attachment_summary_view)
 
+    @wsgi.serializers(xml=VolumeAttachmentTemplate)
     def show(self, req, server_id, id):
         """Return data about the given volume attachment."""
         context = req.environ['nova.context']
@@ -253,6 +297,7 @@ class VolumeAttachmentController(object):
         return {'volumeAttachment': _translate_attachment_detail_view(context,
                                                                       vol)}
 
+    @wsgi.serializers(xml=VolumeAttachmentTemplate)
     def create(self, req, server_id, body):
         """Attach a volume to an instance."""
         context = req.environ['nova.context']
@@ -338,12 +383,142 @@ class BootFromVolumeController(servers.Controller):
         return data.get('block_device_mapping')
 
 
+def _translate_snapshot_detail_view(context, vol):
+    """Maps keys for snapshots details view."""
+
+    d = _translate_snapshot_summary_view(context, vol)
+
+    # NOTE(gagupta): No additional data / lookups at the moment
+    return d
+
+
+def _translate_snapshot_summary_view(context, vol):
+    """Maps keys for snapshots summary view."""
+    d = {}
+
+    d['id'] = vol['id']
+    d['volumeId'] = vol['volume_id']
+    d['status'] = vol['status']
+    # NOTE(gagupta): We map volume_size as the snapshot size
+    d['size'] = vol['volume_size']
+    d['createdAt'] = vol['created_at']
+    d['displayName'] = vol['display_name']
+    d['displayDescription'] = vol['display_description']
+    return d
+
+
+def make_snapshot(elem):
+    elem.set('id')
+    elem.set('status')
+    elem.set('size')
+    elem.set('createdAt')
+    elem.set('displayName')
+    elem.set('displayDescription')
+    elem.set('volumeId')
+
+
+class SnapshotTemplate(xmlutil.TemplateBuilder):
+    def construct(self):
+        root = xmlutil.TemplateElement('snapshot', selector='snapshot')
+        make_snapshot(root)
+        return xmlutil.MasterTemplate(root, 1)
+
+
+class SnapshotsTemplate(xmlutil.TemplateBuilder):
+    def construct(self):
+        root = xmlutil.TemplateElement('snapshots')
+        elem = xmlutil.SubTemplateElement(root, 'snapshot',
+                                          selector='snapshots')
+        make_snapshot(elem)
+        return xmlutil.MasterTemplate(root, 1)
+
+
+class SnapshotController(object):
+    """The Volumes API controller for the OpenStack API."""
+
+    def __init__(self):
+        self.volume_api = volume.API()
+        super(SnapshotController, self).__init__()
+
+    @wsgi.serializers(xml=SnapshotTemplate)
+    def show(self, req, id):
+        """Return data about the given snapshot."""
+        context = req.environ['nova.context']
+
+        try:
+            vol = self.volume_api.get_snapshot(context, id)
+        except exception.NotFound:
+            return exc.HTTPNotFound()
+
+        return {'snapshot': _translate_snapshot_detail_view(context, vol)}
+
+    def delete(self, req, id):
+        """Delete a snapshot."""
+        context = req.environ['nova.context']
+
+        LOG.audit(_("Delete snapshot with id: %s"), id, context=context)
+
+        try:
+            self.volume_api.delete_snapshot(context, snapshot_id=id)
+        except exception.NotFound:
+            return exc.HTTPNotFound()
+        return webob.Response(status_int=202)
+
+    @wsgi.serializers(xml=SnapshotsTemplate)
+    def index(self, req):
+        """Returns a summary list of snapshots."""
+        return self._items(req, entity_maker=_translate_snapshot_summary_view)
+
+    @wsgi.serializers(xml=SnapshotsTemplate)
+    def detail(self, req):
+        """Returns a detailed list of snapshots."""
+        return self._items(req, entity_maker=_translate_snapshot_detail_view)
+
+    def _items(self, req, entity_maker):
+        """Returns a list of snapshots, transformed through entity_maker."""
+        context = req.environ['nova.context']
+
+        snapshots = self.volume_api.get_all_snapshots(context)
+        limited_list = common.limited(snapshots, req)
+        res = [entity_maker(context, snapshot) for snapshot in limited_list]
+        return {'snapshots': res}
+
+    @wsgi.serializers(xml=SnapshotTemplate)
+    def create(self, req, body):
+        """Creates a new snapshot."""
+        context = req.environ['nova.context']
+
+        if not body:
+            return exc.HTTPUnprocessableEntity()
+
+        snapshot = body['snapshot']
+        volume_id = snapshot['volume_id']
+        force = snapshot.get('force', False)
+        LOG.audit(_("Create snapshot from volume %s"), volume_id,
+                context=context)
+
+        if force:
+            new_snapshot = self.volume_api.create_snapshot_force(context,
+                                        volume_id,
+                                        snapshot.get('display_name'),
+                                        snapshot.get('display_description'))
+        else:
+            new_snapshot = self.volume_api.create_snapshot(context,
+                                        volume_id,
+                                        snapshot.get('display_name'),
+                                        snapshot.get('display_description'))
+
+        retval = _translate_snapshot_detail_view(context, new_snapshot)
+
+        return {'snapshot': retval}
+
+
 class Volumes(extensions.ExtensionDescriptor):
     """Volumes support"""
 
     name = "Volumes"
     alias = "os-volumes"
-    namespace = "http://docs.openstack.org/ext/volumes/api/v1.1"
+    namespace = "http://docs.openstack.org/compute/ext/volumes/api/v1.1"
     updated = "2011-03-25T00:00:00+00:00"
 
     def get_resources(self):
@@ -365,6 +540,11 @@ class Volumes(extensions.ExtensionDescriptor):
 
         res = extensions.ResourceExtension('os-volumes_boot',
                                            BootFromVolumeController())
+        resources.append(res)
+
+        res = extensions.ResourceExtension('os-snapshots',
+                                        SnapshotController(),
+                                        collection_actions={'detail': 'GET'})
         resources.append(res)
 
         return resources

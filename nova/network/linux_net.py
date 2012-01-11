@@ -1,5 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
+# Copyright (c) 2011 X.commerce, a business unit of eBay Inc.
 # Copyright 2010 United States Government as represented by the
 # Administrator of the National Aeronautics and Space Administration.
 # All Rights Reserved.
@@ -46,14 +47,13 @@ flags.DEFINE_string('networks_path', '$state_path/networks',
                     'Location to keep network config files')
 flags.DEFINE_string('public_interface', 'eth0',
                     'Interface for public IP addresses')
+flags.DEFINE_string('network_device_mtu', None, 'MTU setting for vlan')
 flags.DEFINE_string('dhcpbridge', _bin_file('nova-dhcpbridge'),
                         'location of nova-dhcpbridge')
 flags.DEFINE_string('routing_source_ip', '$my_ip',
                     'Public IP of network host')
-flags.DEFINE_string('input_chain', 'INPUT',
-                    'chain to add nova_input to')
 flags.DEFINE_integer('dhcp_lease_time', 120,
-                     'Lifetime of a DHCP lease')
+                     'Lifetime of a DHCP lease in seconds')
 flags.DEFINE_string('dns_server', None,
                     'if set, uses specific dns server for dnsmasq')
 flags.DEFINE_string('dmz_cidr', '10.128.0.0/24',
@@ -371,6 +371,18 @@ class IptablesManager(object):
         return new_filter
 
 
+# NOTE(jkoelker) This is just a nice little stub point since mocking
+#                builtins with mox is a nightmare
+def write_to_file(file, data, mode='w'):
+    with open(file, mode) as f:
+        f.write(data)
+
+
+def ensure_path(path):
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+
 def metadata_forward():
     """Create forwarding rule for metadata."""
     iptables_manager.ipv4['nat'].add_rule('PREROUTING',
@@ -393,41 +405,49 @@ def metadata_accept():
     iptables_manager.apply()
 
 
-def init_host():
+def add_snat_rule(ip_range):
+    iptables_manager.ipv4['nat'].add_rule('snat',
+                                          '-s %s -j SNAT --to-source %s' % \
+                                           (ip_range,
+                                            FLAGS.routing_source_ip))
+    iptables_manager.apply()
+
+
+def init_host(ip_range=None):
     """Basic networking setup goes here."""
     # NOTE(devcamcar): Cloud public SNAT entries and the default
     # SNAT rule for outbound traffic.
-    iptables_manager.ipv4['nat'].add_rule('snat',
-                                          '-s %s -j SNAT --to-source %s' % \
-                                           (FLAGS.fixed_range,
-                                            FLAGS.routing_source_ip))
+    if not ip_range:
+        ip_range = FLAGS.fixed_range
+
+    add_snat_rule(ip_range)
 
     iptables_manager.ipv4['nat'].add_rule('POSTROUTING',
                                           '-s %s -d %s -j ACCEPT' % \
-                                          (FLAGS.fixed_range, FLAGS.dmz_cidr))
+                                          (ip_range, FLAGS.dmz_cidr))
 
     iptables_manager.ipv4['nat'].add_rule('POSTROUTING',
                                           '-s %(range)s -d %(range)s '
                                           '-j ACCEPT' % \
-                                          {'range': FLAGS.fixed_range})
+                                          {'range': ip_range})
     iptables_manager.apply()
 
 
-def bind_floating_ip(floating_ip, check_exit_code=True):
+def bind_floating_ip(floating_ip, device, check_exit_code=True):
     """Bind ip to public interface."""
     _execute('ip', 'addr', 'add', str(floating_ip) + '/32',
-             'dev', FLAGS.public_interface,
+             'dev', device,
              run_as_root=True, check_exit_code=check_exit_code)
     if FLAGS.send_arp_for_ha:
         _execute('arping', '-U', floating_ip,
-                 '-A', '-I', FLAGS.public_interface,
+                 '-A', '-I', device,
                  '-c', 1, run_as_root=True, check_exit_code=False)
 
 
-def unbind_floating_ip(floating_ip):
+def unbind_floating_ip(floating_ip, device):
     """Unbind a public ip from public interface."""
     _execute('ip', 'addr', 'del', str(floating_ip) + '/32',
-             'dev', FLAGS.public_interface, run_as_root=True)
+             'dev', device, run_as_root=True)
 
 
 def ensure_metadata_ip():
@@ -598,15 +618,13 @@ def release_dhcp(dev, address, mac_address):
 
 def update_dhcp(context, dev, network_ref):
     conffile = _dhcp_file(dev, 'conf')
-    with open(conffile, 'w') as f:
-        f.write(get_dhcp_hosts(context, network_ref))
+    write_to_file(conffile, get_dhcp_hosts(context, network_ref))
     restart_dhcp(context, dev, network_ref)
 
 
 def update_dhcp_hostfile_with_text(dev, hosts_text):
     conffile = _dhcp_file(dev, 'conf')
-    with open(conffile, 'w') as f:
-        f.write(hosts_text)
+    write_to_file(conffile, hosts_text)
 
 
 def kill_dhcp(dev):
@@ -629,8 +647,7 @@ def restart_dhcp(context, dev, network_ref):
 
     if FLAGS.use_single_default_gateway:
         optsfile = _dhcp_file(dev, 'opts')
-        with open(optsfile, 'w') as f:
-            f.write(get_dhcp_opts(context, network_ref))
+        write_to_file(optsfile, get_dhcp_opts(context, network_ref))
         os.chmod(optsfile, 0644)
 
     # Make sure dnsmasq can actually read it (it setuid()s to "nobody")
@@ -663,7 +680,8 @@ def restart_dhcp(context, dev, network_ref):
            '--pid-file=%s' % _dhcp_file(dev, 'pid'),
            '--listen-address=%s' % network_ref['dhcp_server'],
            '--except-interface=lo',
-           '--dhcp-range=%s,static,120s' % network_ref['dhcp_start'],
+           '--dhcp-range=%s,static,%ss' % (network_ref['dhcp_start'],
+                                           FLAGS.dhcp_lease_time),
            '--dhcp-lease-max=%s' % len(netaddr.IPNetwork(network_ref['cidr'])),
            '--dhcp-hostsfile=%s' % _dhcp_file(dev, 'conf'),
            '--dhcp-script=%s' % FLAGS.dhcpbridge,
@@ -682,8 +700,7 @@ def restart_dhcp(context, dev, network_ref):
 @utils.synchronized('radvd_start')
 def update_ra(context, dev, network_ref):
     conffile = _ra_file(dev, 'conf')
-    with open(conffile, 'w') as f:
-        conf_str = """
+    conf_str = """
 interface %s
 {
    AdvSendAdvert on;
@@ -696,7 +713,7 @@ interface %s
    };
 };
 """ % (dev, network_ref['cidr_v6'])
-        f.write(conf_str)
+    write_to_file(conffile, conf_str)
 
     # Make sure radvd can actually read it (it setuid()s to "nobody")
     os.chmod(conffile, 0644)
@@ -784,8 +801,7 @@ def _device_exists(device):
 
 def _dhcp_file(dev, kind):
     """Return path to a pid, leases or conf file for a bridge/device."""
-    if not os.path.exists(FLAGS.networks_path):
-        os.makedirs(FLAGS.networks_path)
+    ensure_path(FLAGS.networks_path)
     return os.path.abspath('%s/nova-%s.%s' % (FLAGS.networks_path,
                                               dev,
                                               kind))
@@ -793,9 +809,7 @@ def _dhcp_file(dev, kind):
 
 def _ra_file(dev, kind):
     """Return path to a pid or conf file for a bridge/device."""
-
-    if not os.path.exists(FLAGS.networks_path):
-        os.makedirs(FLAGS.networks_path)
+    ensure_path(FLAGS.networks_path)
     return os.path.abspath('%s/nova-ra-%s.%s' % (FLAGS.networks_path,
                                               dev,
                                               kind))
@@ -930,6 +944,9 @@ class LinuxBridgeInterfaceDriver(LinuxNetInterfaceDriver):
                 _execute('ip', 'link', 'set', interface, "address",
                             mac_address, run_as_root=True)
             _execute('ip', 'link', 'set', interface, 'up', run_as_root=True)
+            if FLAGS.network_device_mtu:
+                _execute('ip', 'link', 'set', interface, 'mtu',
+                         FLAGS.network_device_mtu, run_as_root=True)
         return interface
 
     @classmethod
@@ -1030,6 +1047,9 @@ class LinuxOVSInterfaceDriver(LinuxNetInterfaceDriver):
                         run_as_root=True)
             _execute('ip', 'link', 'set', dev, "address", mac_address,
                         run_as_root=True)
+            if FLAGS.network_device_mtu:
+                _execute('ip', 'link', 'set', dev, 'mtu',
+                         FLAGS.network_device_mtu, run_as_root=True)
             _execute('ip', 'link', 'set', dev, 'up', run_as_root=True)
             if not gateway:
                 # If we weren't instructed to act as a gateway then add the
@@ -1039,6 +1059,16 @@ class LinuxOVSInterfaceDriver(LinuxNetInterfaceDriver):
                 _execute('ovs-ofctl', 'add-flow', bridge,
                     "udp,tp_dst=67,dl_dst=%s,priority=2,actions=normal" %
                     mac_address)
+                # .. and make sure iptbles won't forward it as well.
+                iptables_manager.ipv4['filter'].add_rule('FORWARD',
+                        '--in-interface %s -j DROP' % bridge)
+                iptables_manager.ipv4['filter'].add_rule('FORWARD',
+                        '--out-interface %s -j DROP' % bridge)
+            else:
+                iptables_manager.ipv4['filter'].add_rule('FORWARD',
+                        '--in-interface %s -j ACCEPT' % bridge)
+                iptables_manager.ipv4['filter'].add_rule('FORWARD',
+                        '--out-interface %s -j ACCEPT' % bridge)
 
         return dev
 

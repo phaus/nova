@@ -32,6 +32,21 @@ from nova import db
 from nova import exception
 
 
+class KeypairTemplate(xmlutil.TemplateBuilder):
+    def construct(self):
+        return xmlutil.MasterTemplate(xmlutil.make_flat_dict('keypair'), 1)
+
+
+class KeypairsTemplate(xmlutil.TemplateBuilder):
+    def construct(self):
+        root = xmlutil.TemplateElement('keypairs')
+        elem = xmlutil.make_flat_dict('keypair', selector='keypairs',
+                                      subselector='keypair')
+        root.append(elem)
+
+        return xmlutil.MasterTemplate(root, 1)
+
+
 class KeypairController(object):
     """ Keypair API controller for the Openstack API """
 
@@ -47,6 +62,7 @@ class KeypairController(object):
                 'public_key': public_key,
                 'fingerprint': fingerprint}
 
+    @wsgi.serializers(xml=KeypairTemplate)
     def create(self, req, body):
         """
         Create or import keypair.
@@ -102,6 +118,7 @@ class KeypairController(object):
         db.key_pair_destroy(context, context.user_id, id)
         return webob.Response(status_int=202)
 
+    @wsgi.serializers(xml=KeypairsTemplate)
     def index(self, req):
         """
         List of keypairs for a user
@@ -119,21 +136,6 @@ class KeypairController(object):
         return {'keypairs': rval}
 
 
-class KeypairTemplate(xmlutil.TemplateBuilder):
-    def construct(self):
-        return xmlutil.MasterTemplate(xmlutil.make_flat_dict('keypair'), 1)
-
-
-class KeypairsTemplate(xmlutil.TemplateBuilder):
-    def construct(self):
-        root = xmlutil.TemplateElement('keypairs')
-        elem = xmlutil.make_flat_dict('keypair', selector='keypairs',
-                                      subselector='keypair')
-        root.append(elem)
-
-        return xmlutil.MasterTemplate(root, 1)
-
-
 class KeypairsSerializer(xmlutil.XMLTemplateSerializer):
     def index(self):
         return KeypairsTemplate()
@@ -147,21 +149,15 @@ class Keypairs(extensions.ExtensionDescriptor):
 
     name = "Keypairs"
     alias = "os-keypairs"
-    namespace = "http://docs.openstack.org/ext/keypairs/api/v1.1"
+    namespace = "http://docs.openstack.org/compute/ext/keypairs/api/v1.1"
     updated = "2011-08-08T00:00:00+00:00"
 
     def get_resources(self):
         resources = []
 
-        body_serializers = {
-            'application/xml': KeypairsSerializer(),
-            }
-        serializer = wsgi.ResponseSerializer(body_serializers)
-
         res = extensions.ResourceExtension(
                 'os-keypairs',
-                KeypairController(),
-                serializer=serializer)
+                KeypairController())
 
         resources.append(res)
         return resources

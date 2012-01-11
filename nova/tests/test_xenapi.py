@@ -16,13 +16,14 @@
 
 """Test suite for XenAPI."""
 
+import ast
 import contextlib
+import datetime
 import functools
 import json
 import os
 import re
 import stubout
-import ast
 
 from nova import db
 from nova import context
@@ -188,7 +189,7 @@ class XenAPIVolumeTestCase(test.TestCase):
         self.stubs.UnsetAll()
 
 
-def reset_network(*args):
+def configure_instance(*args):
     pass
 
 
@@ -214,7 +215,8 @@ class XenAPIVMTestCase(test.TestCase):
         stubs.stubout_get_this_vm_uuid(self.stubs)
         stubs.stubout_stream_disk(self.stubs)
         stubs.stubout_is_vdi_pv(self.stubs)
-        self.stubs.Set(vmops.VMOps, 'reset_network', reset_network)
+        self.stubs.Set(vmops.VMOps, '_configure_instance',
+                configure_instance)
         self.stubs.Set(vmops.VMOps, '_find_rescue_vbd_ref',
                 _find_rescue_vbd_ref)
         stubs.stub_out_vm_methods(self.stubs)
@@ -331,7 +333,7 @@ class XenAPIVMTestCase(test.TestCase):
                               {'broadcast': '192.168.0.255',
                                'dns': ['192.168.0.1'],
                                'gateway': '192.168.0.1',
-                               'gateway6': 'dead:beef::1',
+                               'gateway_v6': 'dead:beef::1',
                                'ip6s': [{'enabled': '1',
                                          'ip': 'dead:beef::dcad:beff:feef:0',
                                                'netmask': '64'}],
@@ -339,7 +341,8 @@ class XenAPIVMTestCase(test.TestCase):
                                         'ip': '192.168.0.100',
                                         'netmask': '255.255.255.0'}],
                                'label': 'fake',
-                               'mac': 'DE:AD:BE:EF:00:00'})
+                               'mac': 'DE:AD:BE:EF:00:00',
+                               'rxtx_cap': 3})
 
     def check_vm_params_for_windows(self):
         self.assertEquals(self.vm['platform']['nx'], 'true')
@@ -410,7 +413,7 @@ class XenAPIVMTestCase(test.TestCase):
                           {'broadcast': '192.168.0.255',
                            'dns': ['192.168.0.1'],
                            'gateway': '192.168.0.1',
-                           'gateway6': 'dead:beef::1',
+                           'gateway_v6': 'dead:beef::1',
                            'ip6s': [{'enabled': '1',
                                      'ip': 'dead:beef::dcad:beff:feef:0',
                                            'netmask': '64'}],
@@ -616,11 +619,12 @@ class XenAPIVMTestCase(test.TestCase):
             self.network.set_network_host(ctxt, network)
 
         self.network.allocate_for_instance(ctxt,
-                                           instance_id=2,
-                                           host=FLAGS.host,
-                                           vpn=None,
-                                           instance_type_id=1,
-                                           project_id=self.project_id)
+                          instance_id=2,
+                          instance_uuid="00000000-0000-0000-0000-000000000000",
+                          host=FLAGS.host,
+                          vpn=None,
+                          instance_type_id=1,
+                          project_id=self.project_id)
         self._test_spawn(glance_stubs.FakeGlance.IMAGE_MACHINE,
                          glance_stubs.FakeGlance.IMAGE_KERNEL,
                          glance_stubs.FakeGlance.IMAGE_RAMDISK,
@@ -686,7 +690,7 @@ class XenAPIVMTestCase(test.TestCase):
                           {'broadcast': '192.168.0.255',
                            'dns': ['192.168.0.1'],
                            'gateway': '192.168.0.1',
-                           'gateway6': 'dead:beef::1',
+                           'gateway_v6': 'dead:beef::1',
                            'ip6s': [{'enabled': '1',
                                      'ip': 'dead:beef::dcad:beff:feef:0',
                                            'netmask': '64'}],
@@ -803,17 +807,20 @@ class XenAPIMigrateInstance(test.TestCase):
                               product_version=(6, 0, 0))
         stubs.stubout_loopingcall_start(self.stubs)
         conn = xenapi_conn.get_connection(False)
-        conn._vmops.resize_instance(instance, '')
+        conn._vmops._resize_instance(instance, '')
         self.assertEqual(called['resize'], True)
 
     def test_migrate_disk_and_power_off(self):
         instance = db.instance_create(self.context, self.instance_values)
+        instance_type = db.instance_type_get_by_name(self.context, 'm1.large')
         stubs.stubout_session(self.stubs, stubs.FakeSessionForMigrationTests)
         conn = xenapi_conn.get_connection(False)
-        conn.migrate_disk_and_power_off(self.context, instance, '127.0.0.1')
+        conn.migrate_disk_and_power_off(self.context, instance,
+                                        '127.0.0.1', instance_type)
 
     def test_migrate_disk_and_power_off_passes_exceptions(self):
         instance = db.instance_create(self.context, self.instance_values)
+        instance_type = db.instance_type_get_by_name(self.context, 'm1.large')
         stubs.stubout_session(self.stubs, stubs.FakeSessionForMigrationTests)
 
         def fake_raise(*args, **kwargs):
@@ -823,7 +830,7 @@ class XenAPIMigrateInstance(test.TestCase):
         conn = xenapi_conn.get_connection(False)
         self.assertRaises(exception.MigrationError,
                           conn.migrate_disk_and_power_off,
-                          self.context, instance, '127.0.0.1')
+                          self.context, instance, '127.0.0.1', instance_type)
 
     def test_revert_migrate(self):
         instance = db.instance_create(self.context, self.instance_values)
@@ -853,7 +860,7 @@ class XenAPIMigrateInstance(test.TestCase):
                           {'broadcast': '192.168.0.255',
                            'dns': ['192.168.0.1'],
                            'gateway': '192.168.0.1',
-                           'gateway6': 'dead:beef::1',
+                           'gateway_v6': 'dead:beef::1',
                            'ip6s': [{'enabled': '1',
                                      'ip': 'dead:beef::dcad:beff:feef:0',
                                            'netmask': '64'}],
@@ -895,7 +902,7 @@ class XenAPIMigrateInstance(test.TestCase):
                           {'broadcast': '192.168.0.255',
                            'dns': ['192.168.0.1'],
                            'gateway': '192.168.0.1',
-                           'gateway6': 'dead:beef::1',
+                           'gateway_v6': 'dead:beef::1',
                            'ip6s': [{'enabled': '1',
                                      'ip': 'dead:beef::dcad:beff:feef:0',
                                            'netmask': '64'}],
@@ -931,7 +938,7 @@ class XenAPIMigrateInstance(test.TestCase):
                           {'broadcast': '192.168.0.255',
                            'dns': ['192.168.0.1'],
                            'gateway': '192.168.0.1',
-                           'gateway6': 'dead:beef::1',
+                           'gateway_v6': 'dead:beef::1',
                            'ip6s': [{'enabled': '1',
                                      'ip': 'dead:beef::dcad:beff:feef:0',
                                            'netmask': '64'}],
@@ -961,7 +968,7 @@ class XenAPIMigrateInstance(test.TestCase):
                           {'broadcast': '192.168.0.255',
                            'dns': ['192.168.0.1'],
                            'gateway': '192.168.0.1',
-                           'gateway6': 'dead:beef::1',
+                           'gateway_v6': 'dead:beef::1',
                            'ip6s': [{'enabled': '1',
                                      'ip': 'dead:beef::dcad:beff:feef:0',
                                            'netmask': '64'}],
@@ -1107,13 +1114,15 @@ class HostStateTestCase(test.TestCase):
     """Tests HostState, which holds metrics from XenServer that get
     reported back to the Schedulers."""
 
-    def _fake_safe_find_sr(self, session):
+    @classmethod
+    def _fake_safe_find_sr(cls, session):
         """None SR ref since we're ignoring it in FakeSR."""
         return None
 
     def test_host_state(self):
         self.stubs = stubout.StubOutForTesting()
-        self.stubs.Set(vm_utils, 'safe_find_sr', self._fake_safe_find_sr)
+        self.stubs.Set(vm_utils.VMHelper, 'safe_find_sr',
+                       self._fake_safe_find_sr)
         host_state = xenapi_conn.HostState(FakeSession())
         stats = host_state._stats
         self.assertEquals(stats['disk_total'], 10000)
@@ -1163,12 +1172,10 @@ class XenAPIAutoDiskConfigTestCase(test.TestCase):
     def assertIsPartitionCalled(self, called):
         marker = {"partition_called": False}
 
-        @classmethod
-        def fake_resize_partition_fs(cls, dev_path, partition_path):
+        def fake_resize_part_and_fs(dev, start, old, new):
             marker["partition_called"] = True
-
-        self.stubs.Set(vm_utils.VMHelper, "_resize_partition_and_fs",
-                       fake_resize_partition_fs)
+        self.stubs.Set(vm_utils, "_resize_part_and_fs",
+                       fake_resize_part_and_fs)
 
         instance = db.instance_create(self.context, self.instance_values)
         disk_image_type = vm_utils.ImageType.DISK_VHD
@@ -1193,12 +1200,10 @@ class XenAPIAutoDiskConfigTestCase(test.TestCase):
         """Should not partition unless fail safes pass"""
         self.instance_values['auto_disk_config'] = True
 
-        @classmethod
-        def fake_resize_partition_allowed(cls, dev_path, partition_path):
-            return False
-
-        self.stubs.Set(vm_utils.VMHelper, "_resize_partition_allowed",
-                       fake_resize_partition_allowed)
+        def fake_get_partitions(dev):
+            return [(1, 0, 100, 'ext4'), (2, 100, 200, 'ext4')]
+        self.stubs.Set(vm_utils, "_get_partitions",
+                       fake_get_partitions)
 
         self.assertIsPartitionCalled(False)
 
@@ -1209,10 +1214,34 @@ class XenAPIAutoDiskConfigTestCase(test.TestCase):
         """
         self.instance_values['auto_disk_config'] = True
 
-        @classmethod
-        def fake_resize_partition_allowed(cls, dev_path, partition_path):
-            return True
-        self.stubs.Set(vm_utils.VMHelper, "_resize_partition_allowed",
-                       fake_resize_partition_allowed)
+        def fake_get_partitions(dev):
+            return [(1, 0, 100, 'ext4')]
+        self.stubs.Set(vm_utils, "_get_partitions",
+                       fake_get_partitions)
 
         self.assertIsPartitionCalled(True)
+
+
+class XenAPIBWUsageTestCase(test.TestCase):
+    def setUp(self):
+        super(XenAPIBWUsageTestCase, self).setUp()
+        self.stubs = stubout.StubOutForTesting()
+        self.stubs.Set(vm_utils.VMHelper, "compile_metrics",
+                       XenAPIBWUsageTestCase._fake_compile_metrics)
+        self.flags(target_host='127.0.0.1',
+                   xenapi_connection_url='test_url',
+                   xenapi_connection_password='test_pass')
+        stubs.stubout_session(self.stubs, stubs.FakeSessionForVMTests)
+        xenapi_fake.reset()
+        self.conn = xenapi_conn.get_connection(False)
+
+    @classmethod
+    def _fake_compile_metrics(cls, session, start_time, stop_time=None):
+        raise exception.CouldNotFetchMetrics()
+
+    def test_get_all_bw_usage_in_failure_case(self):
+        """Test that get_all_bw_usage returns an empty list when metrics
+        compilation failed.  c.f. bug #910045.
+        """
+        result = self.conn.get_all_bw_usage(datetime.datetime.utcnow())
+        self.assertEqual(result, [])

@@ -34,10 +34,12 @@ class ChanceScheduler(driver.Scheduler):
         """Filter a list of hosts based on request_spec."""
 
         # Filter out excluded host
-        if (request_spec and 'original_host' in request_spec and
-            request_spec.get('avoid_original_host', True)):
-            hosts = [host for host in hosts
-                     if host != request_spec['original_host']]
+        try:
+            if request_spec['avoid_original_host']:
+                original_host = request_spec['instance_properties']['host']
+                hosts = [host for host in hosts if host != original_host]
+        except (KeyError, TypeError):
+            pass
 
         return hosts
 
@@ -74,7 +76,10 @@ class ChanceScheduler(driver.Scheduler):
             driver.cast_to_compute_host(context, host,
                     'run_instance', instance_uuid=instance['uuid'], **kwargs)
             instances.append(driver.encode_instance(instance))
-
+            # So if we loop around, create_instance_db_entry will actually
+            # create a new entry, instead of assume it's been created
+            # already
+            del request_spec['instance_properties']['uuid']
         return instances
 
     def schedule_prep_resize(self, context, request_spec, *args, **kwargs):

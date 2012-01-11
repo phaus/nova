@@ -19,17 +19,49 @@ from datetime import datetime
 import urlparse
 
 import webob
-from webob import exc
 
 from nova.api.openstack.v2 import extensions
-from nova.api.openstack.v2 import views
+from nova.api.openstack import wsgi
+from nova.api.openstack import xmlutil
 from nova.compute import api
-from nova.db.sqlalchemy.session import get_session
 from nova import exception
 from nova import flags
 
 
 FLAGS = flags.FLAGS
+
+
+def make_usage(elem):
+    for subelem_tag in ('tenant_id', 'total_local_gb_usage',
+                        'total_vcpus_usage', 'total_memory_mb_usage',
+                        'total_hours', 'start', 'stop'):
+        subelem = xmlutil.SubTemplateElement(elem, subelem_tag)
+        subelem.text = subelem_tag
+
+    server_usages = xmlutil.SubTemplateElement(elem, 'server_usages')
+    server_usage = xmlutil.SubTemplateElement(server_usages, 'server_usage',
+                                              selector='server_usages')
+    for subelem_tag in ('name', 'hours', 'memory_mb', 'local_gb', 'vcpus',
+                        'tenant_id', 'flavor', 'started_at', 'ended_at',
+                        'state', 'uptime'):
+        subelem = xmlutil.SubTemplateElement(server_usage, subelem_tag)
+        subelem.text = subelem_tag
+
+
+class SimpleTenantUsageTemplate(xmlutil.TemplateBuilder):
+    def construct(self):
+        root = xmlutil.TemplateElement('tenant_usage', selector='tenant_usage')
+        make_usage(root)
+        return xmlutil.MasterTemplate(root, 1)
+
+
+class SimpleTenantUsagesTemplate(xmlutil.TemplateBuilder):
+    def construct(self):
+        root = xmlutil.TemplateElement('tenant_usages')
+        elem = xmlutil.SubTemplateElement(root, 'tenant_usage',
+                                          selector='tenant_usages')
+        make_usage(elem)
+        return xmlutil.MasterTemplate(root, 1)
 
 
 class SimpleTenantUsageController(object):
@@ -158,10 +190,10 @@ class SimpleTenantUsageController(object):
             return dtstr
         try:
             return datetime.strptime(dtstr, "%Y-%m-%dT%H:%M:%S")
-        except:
+        except Exception:
             try:
                 return datetime.strptime(dtstr, "%Y-%m-%dT%H:%M:%S.%f")
-            except:
+            except Exception:
                 return datetime.strptime(dtstr, "%Y-%m-%d %H:%M:%S.%f")
 
     def _get_datetime_range(self, req):
@@ -175,11 +207,12 @@ class SimpleTenantUsageController(object):
         detailed = bool(env.get('detailed', False))
         return (period_start, period_stop, detailed)
 
+    @wsgi.serializers(xml=SimpleTenantUsagesTemplate)
     def index(self, req):
         """Retrive tenant_usage for all tenants"""
         context = req.environ['nova.context']
 
-        if not context.is_admin and FLAGS.allow_admin_api:
+        if not context.is_admin:
             return webob.Response(status_int=403)
 
         (period_start, period_stop, detailed) = self._get_datetime_range(req)
@@ -189,12 +222,13 @@ class SimpleTenantUsageController(object):
                                                 detailed=detailed)
         return {'tenant_usages': usages}
 
+    @wsgi.serializers(xml=SimpleTenantUsageTemplate)
     def show(self, req, id):
         """Retrive tenant_usage for a specified tenant"""
         tenant_id = id
         context = req.environ['nova.context']
 
-        if not context.is_admin and FLAGS.allow_admin_api:
+        if not context.is_admin:
             if tenant_id != context.project_id:
                 return webob.Response(status_int=403)
 
@@ -216,14 +250,16 @@ class Simple_tenant_usage(extensions.ExtensionDescriptor):
 
     name = "SimpleTenantUsage"
     alias = "os-simple-tenant-usage"
-    namespace = "http://docs.openstack.org/ext/os-simple-tenant-usage/api/v1.1"
+    namespace = "http://docs.openstack.org/compute/ext/" \
+                "os-simple-tenant-usage/api/v1.1"
     updated = "2011-08-19T00:00:00+00:00"
+    admin_only = True
 
     def get_resources(self):
         resources = []
 
         res = extensions.ResourceExtension('os-simple-tenant-usage',
-                                            SimpleTenantUsageController())
+                                           SimpleTenantUsageController())
         resources.append(res)
 
         return resources

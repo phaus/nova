@@ -42,7 +42,7 @@ function process_option {
   esac
 }
 
-venv=.nova-venv
+venv=.venv
 with_venv=tools/with_venv.sh
 always_venv=0
 never_venv=0
@@ -112,12 +112,11 @@ function run_pep8 {
   #     other than what the PEP8 tool claims. It is deprecated in Python 3, so,
   #     perhaps the mistake was thinking that the deprecation applied to Python 2
   #     as well.
-  ${wrapper} pep8 --repeat --show-pep8 --show-source \
-    --ignore=E202,W602 \
-    --exclude=vcsversion.py ${srcfiles}
+  pep8_opts="--ignore=E202,W602 --repeat"
+  ${wrapper} pep8 ${pep8_opts} ${srcfiles}
 }
 
-NOSETESTS="python run_tests.py $noseopts $noseargs"
+NOSETESTS="python nova/testing/runner.py $noseopts $noseargs"
 
 if [ $never_venv -eq 0 ]
 then

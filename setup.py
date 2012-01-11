@@ -40,34 +40,9 @@ except ImportError:
 
 gettext.install('nova', unicode=1)
 
-from nova.utils import parse_mailmap, str_dict_replace
 from nova import version
 
-if os.path.isdir('.bzr'):
-    with open("nova/vcsversion.py", 'w') as version_file:
-        vcs_cmd = subprocess.Popen(["bzr", "version-info", "--python"],
-                                   stdout=subprocess.PIPE)
-        vcsversion = vcs_cmd.communicate()[0]
-        version_file.write(vcsversion)
-
-
-class local_sdist(sdist):
-    """Customized sdist hook - builds the ChangeLog file from VC first"""
-
-    def run(self):
-        if os.path.isdir('.bzr'):
-            # We're in a bzr branch
-            env = os.environ.copy()
-            env['BZR_PLUGIN_PATH'] = os.path.abspath('./bzrplugins')
-            log_cmd = subprocess.Popen(["bzr", "log", "--novalog"],
-                                       stdout=subprocess.PIPE, env=env)
-            changelog = log_cmd.communicate()[0]
-            mailmap = parse_mailmap()
-            with open("ChangeLog", "w") as changelog_file:
-                changelog_file.write(str_dict_replace(changelog, mailmap))
-        sdist.run(self)
-nova_cmdclass = {'sdist': local_sdist}
-
+nova_cmdclass = {}
 
 try:
     from sphinx.setup_command import BuildDoc
@@ -80,17 +55,7 @@ try:
                 BuildDoc.run(self)
     nova_cmdclass['build_sphinx'] = local_BuildDoc
 
-except:
-    pass
-
-
-try:
-    from babel.messages import frontend as babel
-    nova_cmdclass['compile_catalog'] = babel.compile_catalog
-    nova_cmdclass['extract_messages'] = babel.extract_messages
-    nova_cmdclass['init_catalog'] = babel.init_catalog
-    nova_cmdclass['update_catalog'] = babel.update_catalog
-except:
+except Exception:
     pass
 
 
@@ -105,6 +70,7 @@ def find_data_files(destdir, srcdir):
             files += [d]
     package_data += [(destdir, files)]
     return package_data
+
 
 setup(name='nova',
       version=version.canonical_version_string(),
@@ -130,6 +96,7 @@ setup(name='nova',
                'bin/nova-manage',
                'bin/nova-network',
                'bin/nova-objectstore',
+               'bin/nova-rootwrap',
                'bin/nova-scheduler',
                'bin/nova-spoolsentry',
                'bin/stack',
