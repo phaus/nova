@@ -99,7 +99,7 @@ class ComputeBackend(MyBackend):
                 raise AttributeError()
 
             flavor_name = r.term
-            os_tpl_url = o.os_url()
+            os_tpl_url = o.os_id
 
         try:
             if flavor_name:
@@ -107,8 +107,9 @@ class ComputeBackend(MyBackend):
                         instance_types.get_instance_type_by_name(flavor_name)
             else:
                 inst_type = instance_types.get_default_instance_type()
-                LOG.warn('No resource template was found in the request. \
-                                Using the default: ' + inst_type['name'])
+                msg = 'No resource template was found in the request. \
+                                Using the default: ' + inst_type['name']
+                LOG.warn(msg)
 
             if not os_tpl_url: #possibly an edge case
                 msg = 'No URL to an image file has been found.'
@@ -228,7 +229,6 @@ class ComputeBackend(MyBackend):
         # through occi.compute.state? 
         #   - see nova/compute/vm_states.py nova/compute/task_states.py
         state = instance['vm_state']
-        LOG.info('State of is ' + state)
 
         # TODO: update possible states - I removed the task states...
 

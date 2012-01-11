@@ -24,7 +24,6 @@ from nova.api.occi.network import networkresource
 from nova.api.occi.storage import storagelink
 from nova.api.occi.storage import storageresource
 from nova.compute import instance_types
-from nova.image import glance
 
 from occi import registry
 from occi import wsgi as occi_wsgi
@@ -104,7 +103,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         self.register_backend(infrastructure.STOP, compute_backend)
         self.register_backend(infrastructure.RESTART, compute_backend)
         self.register_backend(infrastructure.SUSPEND, compute_backend)
-        
+
         # OS-OCCI Action extensions 
         self.register_backend(extensions.OS_CHG_PWD, compute_backend)
         self.register_backend(extensions.OS_REBUILD, compute_backend)
@@ -166,8 +165,8 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
             #this is a HTTP call out to the image service
             image_service = image.get_default_image_service()
             images = image_service.detail(context)
-        except glance.glance_exception as ge:
-            raise ge
+        except Exception as e:
+            raise e
 
         for img in images:
             os_template = extensions.OsTemplate(term=img['name'],
