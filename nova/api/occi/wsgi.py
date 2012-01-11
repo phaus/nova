@@ -140,13 +140,14 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         os_flavours = instance_types.get_all_types()
 
         for itype in os_flavours:
+            #TODO: Attributes should be constructed correctly
             resource_template = extensions.ResourceTemplate(term=itype,
                 scheme=template_schema,
                 related=[resource_schema],
                 attributes=os_flavours[itype],
                 title='This is an openstack ' + itype + ' flavor.',
                 location=itype)
-            LOG.debug('Regsitering an OpeStack flavour/instance type as: ' + \
+            LOG.debug('Regsitering an OpenStack flavour/instance type as: ' + \
                                                         str(resource_template))
             #TODO:(dizz) - no check is done to see if the template is exists
             self.register_backend(resource_template, resource_mixin_backend)
@@ -155,27 +156,29 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         '''
         Register the os mixins from information retrieved frrom glance.
         '''
-        #TODO: kernel images should NOT be listed
 
         template_schema = 'http://schemas.openstack.org/template/os#'
         os_schema = 'http://schemas.ogf.org/occi/infrastructure#os_tpl'
 
         images = []
         try:
-            #this is a HTTP call out to the image service
             image_service = image.get_default_image_service()
             images = image_service.detail(context)
         except Exception as e:
             raise e
 
         for img in images:
-            os_template = extensions.OsTemplate(term=img['name'],
-                                    scheme=template_schema, \
-                os_id=img['id'], related=[os_schema], \
-                attributes=None, title='This is an OS ' + img['name'] + \
-                                            ' image', location=img['name'])
-            LOG.debug('Registering an OS image type as: ' + str(os_template))
-            self.register_backend(os_template, os_mixin_backend)
+            # filter out ram and kernel images
+            # TODO: make configurable, to filter or not?        
+            if (img['container_format'] or img['disk_format']) not in ('ari', 'aki'):
+            
+                os_template = extensions.OsTemplate(term=img['name'],
+                                        scheme=template_schema, \
+                    os_id=img['id'], related=[os_schema], \
+                    attributes=None, title='This is an OS ' + img['name'] + \
+                                                ' image', location=img['name'])
+                LOG.debug('Registering an OS image type as: ' + str(os_template))
+                self.register_backend(os_template, os_mixin_backend)
 
     def _register_occi_extensions(self):
         '''
