@@ -99,7 +99,7 @@ class ComputeBackend(MyBackend):
                 raise AttributeError()
 
             flavor_name = r.term
-            os_tpl_url = o.os_url()
+            os_tpl_url = o.os_id
 
         try:
             if flavor_name:
@@ -107,8 +107,9 @@ class ComputeBackend(MyBackend):
                         instance_types.get_instance_type_by_name(flavor_name)
             else:
                 inst_type = instance_types.get_default_instance_type()
-                LOG.warn('No resource template was found in the request. \
-                                Using the default: ' + inst_type['name'])
+                msg = 'No resource template was found in the request. \
+                                Using the default: ' + inst_type['name']
+                LOG.warn(msg)
 
             if not os_tpl_url: #possibly an edge case
                 msg = 'No URL to an image file has been found.'
@@ -234,7 +235,7 @@ class ComputeBackend(MyBackend):
             entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
                                                         infrastructure.RESTART]
         # change password - OS 
-        elif state == task_states.UPDATING_PASSWORD:
+        elif state is task_states.UPDATING_PASSWORD:
             entity.attributes['occi.compute.state'] = 'active'
             entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
                                                         infrastructure.RESTART]
@@ -243,15 +244,15 @@ class ComputeBackend(MyBackend):
             entity.attributes['occi.compute.state'] = 'active'
             entity.actions = []
         # pause server - OCCI
-        elif state == task_states.PAUSING:
+        elif state is task_states.PAUSING:
             entity.attributes['occi.compute.state'] = 'inactive'
             entity.actions = [infrastructure.START]
         # suspend server - OCCI
-        elif state == task_states.SUSPENDING:
+        elif state is task_states.SUSPENDING:
             entity.attributes['occi.compute.state'] = 'inactive'
             entity.actions = [infrastructure.START]
         # resume server - OCCI
-        elif state == task_states.RESUMING:
+        elif state is task_states.RESUMING:
             entity.attributes['occi.compute.state'] = 'active'
             entity.actions = []
         # stop server - OCCI
@@ -259,11 +260,11 @@ class ComputeBackend(MyBackend):
             entity.attributes['occi.compute.state'] = 'inactive'
             entity.actions = [infrastructure.START]
         # start server - OCCI
-        elif state == (task_states.STARTING, task_states.POWERING_ON):
+        elif state in (task_states.STARTING, task_states.POWERING_ON):
             entity.attributes['occi.compute.state'] = 'active'
             entity.actions = []
         # rebuild server - OS
-        elif state == vm_states.REBUILDING:
+        elif state is vm_states.REBUILDING:
             entity.attributes['occi.compute.state'] = 'active'
             entity.actions = []
         # resize server confirm rebuild
@@ -277,11 +278,11 @@ class ComputeBackend(MyBackend):
             entity.actions = []
         # revert resized server - OS (indirectly OCCI)
         # TODO: implement OS-OCCI extension or can be done via update()
-        elif state == task_states.RESIZE_REVERTING:
+        elif state is task_states.RESIZE_REVERTING:
             entity.attributes['occi.compute.state'] = 'active'
             entity.actions = []
         # confirm resized server
-        elif state == task_states.RESIZE_VERIFY:
+        elif state is task_states.RESIZE_VERIFY:
             entity.attributes['occi.compute.state'] = 'active'
             entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
                                                         infrastructure.RESTART]
