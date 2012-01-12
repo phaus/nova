@@ -138,9 +138,9 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                     'http://schemas.ogf.org/occi/infrastructure#resource_tpl'
 
         os_flavours = instance_types.get_all_types()
-
+        
+        #TODO: attributes are not constructed correctly
         for itype in os_flavours:
-            #TODO: Attributes should be constructed correctly
             resource_template = extensions.ResourceTemplate(term=itype,
                 scheme=template_schema,
                 related=[resource_schema],
@@ -156,22 +156,19 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         '''
         Register the os mixins from information retrieved frrom glance.
         '''
+        #TODO: kernel, ramdisk images should NOT be listed
 
         template_schema = 'http://schemas.openstack.org/template/os#'
         os_schema = 'http://schemas.ogf.org/occi/infrastructure#os_tpl'
 
-        images = []
-        try:
-            image_service = image.get_default_image_service()
-            images = image_service.detail(context)
-        except Exception as e:
-            raise e
+        #this is a HTTP call out to the image service
+        image_service = image.get_default_image_service()
+        images = image_service.detail(context)
 
         for img in images:
             # filter out ram and kernel images
             # TODO: make configurable, to filter or not?        
             if (img['container_format'] or img['disk_format']) not in ('ari', 'aki'):
-            
                 os_template = extensions.OsTemplate(term=img['name'],
                                         scheme=template_schema, \
                     os_id=img['id'], related=[os_schema], \
@@ -185,4 +182,5 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         Register some other OCCI extensions.
         '''
         # TODO:(dizz) scan all classes in extensions.py and load dynamically
-        self.register_backend(extensions.TCP, extensions.TCPBackend())
+        # self.register_backend(extensions.TCP, extensions.TCPBackend())
+        pass
