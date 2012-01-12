@@ -19,6 +19,8 @@ from occi.core_model import Entity
 
 from nova.scheduler import driver as scheduler_driver
 
+from nova.tests.api import occi
+
 FLAGS = flags.FLAGS
 
 def fake_rpc_cast(context, topic, msg, do_cast=True):
@@ -40,28 +42,11 @@ def fake_rpc_cast(context, topic, msg, do_cast=True):
     else:
         pass
 
-def fake_get_image_service(context, image_href):
-    '''
-    Make sure fake image service is used.
-    '''
-    tmp = image.fake.FakeImageService(), image_href
-    return tmp
 
-def fake_show(meh, context, id):
-    '''
-    Returns a single image...
-    '''
-    return {'id': id,
-            'container_format': 'ami',
-            'properties': {
-                           'kernel_id': 1,
-                           'ramdisk_id': 1}
-            }
-
-class TestOcciWsgiApp(test.TestCase):
+class TestOcciComputeResource(test.TestCase):
 
     def setUp(self):
-        super(TestOcciWsgiApp, self).setUp()
+        super(TestOcciComputeResource, self).setUp()
 
         # create sec context
         self.user_id = 'fake'
@@ -71,8 +56,8 @@ class TestOcciWsgiApp(test.TestCase):
                                               is_admin=True)
 
         # setup image service...
-        self.stubs.Set(image, 'get_image_service', fake_get_image_service)
-        self.stubs.Set(fake._FakeImageService, 'show', fake_show)
+        self.stubs.Set(image, 'get_image_service', occi.fake_get_image_service)
+        self.stubs.Set(fake._FakeImageService, 'show', occi.fake_show)
         self.stubs.Set(rpc, 'cast', fake_rpc_cast)
 
         # OCCI related setup

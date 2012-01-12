@@ -146,7 +146,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                 attributes=os_flavours[itype],
                 title='This is an openstack ' + itype + ' flavor.',
                 location=itype)
-            LOG.debug('Regsitering an OpeStack flavour/instance type as: ' + \
+            LOG.debug('Regsitering an OpenStack flavour/instance type as: ' + \
                                                         str(resource_template))
             #TODO:(dizz) - no check is done to see if the template is exists
             self.register_backend(resource_template, resource_mixin_backend)
@@ -155,18 +155,14 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         '''
         Register the os mixins from information retrieved frrom glance.
         '''
-        #TODO: kernel images should NOT be listed
+        #TODO: kernel, ramdisk images should NOT be listed
 
         template_schema = 'http://schemas.openstack.org/template/os#'
         os_schema = 'http://schemas.ogf.org/occi/infrastructure#os_tpl'
 
-        images = []
-        try:
-            #this is a HTTP call out to the image service
-            image_service = image.get_default_image_service()
-            images = image_service.detail(context)
-        except Exception as e:
-            raise e
+        #this is a HTTP call out to the image service
+        image_service = image.get_default_image_service()
+        images = image_service.detail(context)
 
         for img in images:
             os_template = extensions.OsTemplate(term=img['name'],
@@ -182,4 +178,5 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         Register some other OCCI extensions.
         '''
         # TODO:(dizz) scan all classes in extensions.py and load dynamically
-        self.register_backend(extensions.TCP, extensions.TCPBackend())
+        # self.register_backend(extensions.TCP, extensions.TCPBackend())
+        pass
