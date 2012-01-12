@@ -26,6 +26,10 @@ class MyBackend(KindBackend, ActionBackend):
     '''
 
     def update(self, old, new, extras):
+        
+        # TODO: if updating a compute and it's a vertical scaling
+        # use the resize functionality to do so.
+        
         # here you can check what information from new_entity you wanna bring
         # into old_entity
 
