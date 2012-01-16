@@ -52,8 +52,11 @@ class ComputeBackend(MyBackend):
 
         LOG.info('Creating the virtual machine with id: ' + entity.identifier)
 
-        #TODO: name should be taken from the OCCI request -> title
-        name = 'an_occi_vm'
+        try:
+            name = entity.attributes['occi.core.title']
+        except KeyError:
+            name = 'Default Title (OCCI)'
+        
         key_name = None
         metadata = {}
         access_ip_v4 = None
@@ -77,10 +80,6 @@ class ComputeBackend(MyBackend):
         # OCCI service
         context = extras['nova_ctx']
         
-        # TODO: query for correct project_id based on auth token?
-        context.project_id = '1'
-        
-
         #essential, required to get a vm image e.g. 
         #            image_href = 'http: // 10.211.55.20:9292 / v1 / images / 1'
         #extract resource template from entity and get the flavor name. 
@@ -168,16 +167,21 @@ class ComputeBackend(MyBackend):
                   {'err_type': err.exc_type, 'err_msg': err.value}
             raise exc.HTTPBadRequest(explanation=msg)
         
-        import ipdb
-        ipdb.set_trace()
         entity.attributes['occi.core.id'] = instances[0]['uuid']
         entity.attributes['occi.compute.hostname'] = instances[0]['hostname']
         # TODO: can't we tell this from the image used?
+        # architecture is sometimes encoded in the image file's name
+        # This is not reliable. db::glance::image_properties could be used
+        # reliably so long as the information is supplied.
         entity.attributes['occi.compute.architecture'] = 'x86'
         entity.attributes['occi.compute.cores'] = str(instances[0]['vcpus'])
         # occi.compute.speed is not available in instances by default
-        # could possible be retreived from flavour info 
-        # if not where?
+        # cpu speed is not available but could be made available through
+        # db::nova::compute_nodes::cpu_info
+        # additional code is required in 
+        #     nova/nova/virt/libvirt/connection.py::get_cpu_info()
+        # note: this would be the physical node's speed not necessarily
+        #     the VMs.
         entity.attributes['occi.compute.speed'] = str(2.4)
         entity.attributes['occi.compute.memory'] = \
                                 str(float(instances[0]['memory_mb']) / 1024)
@@ -217,14 +221,12 @@ class ComputeBackend(MyBackend):
     def _retrieve(self, entity, extras):
         context = extras['nova_ctx']
         
-        # TODO: Review: when a new resource is added to the registry its UUID
-        # is prepended with it's location. Is this necessary? See extensions.py
-        import ipdb
-        ipdb.set_trace()
         uid = entity.attributes['occi.core.id']
+        
+        # TODO: at some stage the uid gets munged with location.
         if uid.find(entity.kind.location) > -1:
             uid = uid.replace(entity.kind.location, '')
-        
+  
         try:
             instance = self.compute_api.routing_get(context, uid)
         except exception.NotFound:
@@ -291,10 +293,14 @@ class ComputeBackend(MyBackend):
               + entity.identifier)
 
         context = extras['nova_ctx']
-
+        
+        uid = entity.attributes['occi.core.id']
+        # TODO: at some stage the uid gets munged with location.
+        if uid.find(entity.kind.location) > -1:
+            uid = uid.replace(entity.kind.location, '')
+        
         try:
-            instance = self.compute_api.routing_get(context,
-                                            entity.attributes['occi.core.id'])
+            instance = self.compute_api.routing_get(context, uid)
         except exception.NotFound:
             raise exc.HTTPNotFound()
 
@@ -364,8 +370,8 @@ class ComputeBackend(MyBackend):
             self.compute_api.set_admin_password(context, instance, \
                                                 entity.attributes['method'])
         elif action == extensions.OS_REBUILD:
-            #TODO: there must be an OsTemplate mixin with the request
-            #TODO: there must be the admin password to the instance
+            #TODO: there must be an OsTemplate mixin with the request and
+            #      there must be the admin password to the instance
             raise exc.HTTPNotImplemented()
             image_href = 'TODO'
             admin_password = 'TODO'

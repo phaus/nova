@@ -79,6 +79,10 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         response -- The response.
         '''
         nova_ctx = environ['nova.context']
+        
+        # TODO: query for correct project_id based on auth token?
+        nova_ctx.project_id = '1'
+        
         # TODO:(dizz) this is not optimal
         self._register_os_mixins(backends.OsMixinBackend(), nova_ctx)
         return self._call_occi(environ, response, nova_ctx=nova_ctx)
