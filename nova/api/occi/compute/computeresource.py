@@ -13,8 +13,6 @@
 #    under the License.
 
 
-# TODO: implement update
-
 from nova import flags
 from nova import compute, exception, log as logging
 from nova.compute import task_states
@@ -40,6 +38,8 @@ class ComputeBackend(MyBackend):
     A Backend for compute instances.
     '''
 
+    # TODO: implement update in super class
+
     def __init__(self):
         self.compute_api = compute.API()
         #self.network_api = network.API()
@@ -48,7 +48,7 @@ class ComputeBackend(MyBackend):
 
         LOG.info('Creating the virtual machine with id: ' + entity.identifier)
 
-        #TODO: should be taken from the OCCI request
+        #TODO: name should be taken from the OCCI request -> title
         name = 'an_occi_vm'
         key_name = None
         metadata = {}
@@ -165,17 +165,13 @@ class ComputeBackend(MyBackend):
         # TODO: can't we tell this from the image used?
         entity.attributes['occi.compute.architecture'] = 'x86'
         entity.attributes['occi.compute.cores'] = str(instances[0]['vcpus'])
-        #this is not available in instances
-        # TODO: could possible be retreived from flavour info 
+        # occi.compute.speed is not available in instances by default
+        # could possible be retreived from flavour info 
         # if not where?
         entity.attributes['occi.compute.speed'] = str(2.4)
         entity.attributes['occi.compute.memory'] = \
                                 str(float(instances[0]['memory_mb']) / 1024)
-
-
-        # TODO: is this sufficent or should we check the state param in 
-        # instance?
-        entity.attributes['occi.compute.state'] = 'inactive'
+        entity.attributes['occi.compute.state'] = 'active'
 
         # TODO: Once created, the VM is attached to a public network with an 
         # addresses allocated by DHCP
@@ -183,8 +179,6 @@ class ComputeBackend(MyBackend):
         # allocated ip
         # To create an OS floating IP then dhcp would be switched to static
 
-
-    # TODO: best import this from openstack api? it was taken from there
     def _handle_quota_error(self, error):
         """
         Reraise quota errors as api-specific http exceptions
@@ -224,70 +218,58 @@ class ComputeBackend(MyBackend):
         except exception.NotFound:
             raise exc.HTTPNotFound()
         
-        # TODO: Review, IMPORTANT: OpenStack supports differenet states. 
-        # Do we map them to OCCI states or do we expose the OS state values 
-        # through occi.compute.state? 
-        #   - see nova/compute/vm_states.py nova/compute/task_states.py
-        state = instance['vm_state']
-        
-        # handle the user actions that are made available by OS & OCCI
-        if state is vm_states.ACTIVE:
-            entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
-                                                        infrastructure.RESTART]
+        # See nova/compute/vm_states.py nova/compute/task_states.py
+        #
+        # Mapping assumptions:
+        #  - active == VM can service requests from network. These requests
+        #            can be from users or VMs
+        #  - inactive == the oppose! :-)
+        #  - suspended == machine in a frozen state e.g. via suspend or pause
+        #
+        # TODO expose OS specific states by mixin
+         
         # change password - OS 
-        elif state == task_states.UPDATING_PASSWORD:
+        # confirm resized server
+        if instance['vm_state'] in (vm_states.ACTIVE, task_states.UPDATING_PASSWORD, \
+                     task_states.RESIZE_VERIFY):
             entity.attributes['occi.compute.state'] = 'active'
             entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
                                                         infrastructure.RESTART]
+        
         # reboot server - OS, OCCI
-        elif state in (task_states.REBOOTING, task_states.REBOOTING_HARD):
-            entity.attributes['occi.compute.state'] = 'active'
-            entity.actions = []
-        # pause server - OCCI
-        elif state == task_states.PAUSING:
-            entity.attributes['occi.compute.state'] = 'inactive'
-            entity.actions = [infrastructure.START]
-        # suspend server - OCCI
-        elif state == task_states.SUSPENDING:
-            entity.attributes['occi.compute.state'] = 'inactive'
-            entity.actions = [infrastructure.START]
-        # resume server - OCCI
-        elif state == task_states.RESUMING:
-            entity.attributes['occi.compute.state'] = 'active'
-            entity.actions = []
-        # stop server - OCCI
-        elif state in (task_states.STOPPING, task_states.POWERING_OFF):
-            entity.attributes['occi.compute.state'] = 'inactive'
-            entity.actions = [infrastructure.START]
         # start server - OCCI
-        elif state in (task_states.STARTING, task_states.POWERING_ON):
-            entity.attributes['occi.compute.state'] = 'active'
+        elif instance['vm_state'] in (task_states.STARTING, task_states.POWERING_ON, \
+                       task_states.REBOOTING, task_states.REBOOTING_HARD):
+            entity.attributes['occi.compute.state'] = 'inactive'
             entity.actions = []
+        
+        # pause server - OCCI, suspend server - OCCI, stop server - OCCI
+        elif instance['vm_state'] in (task_states.STOPPING, task_states.POWERING_OFF):
+            entity.attributes['occi.compute.state'] = 'inactive'
+            entity.actions = [infrastructure.START]
+        
+        # resume server - OCCI
+        elif instance['vm_state'] in (task_states.RESUMING, task_states.PAUSING, \
+                       task_states.SUSPENDING):
+            entity.attributes['occi.compute.state'] = 'suspended'
+            if instance['vm_state'] in (vm_states.PAUSED, vm_states.SUSPENDED):
+                entity.actions = [infrastructure.START]
+            else:
+                entity.actions = []
+        
         # rebuild server - OS
-        elif state == vm_states.REBUILDING:
-            entity.attributes['occi.compute.state'] = 'active'
-            entity.actions = []
         # resize server confirm rebuild
-        # TODO: implement in update()
-        elif state in (task_states.RESIZE_CONFIRMING,
+        # revert resized server - OS (indirectly OCCI)
+        # TODO: implement OS-OCCI extension or can be done via update()
+        elif instance['vm_state'] in (vm_states.REBUILDING,
+                       task_states.RESIZE_CONFIRMING,
                        task_states.RESIZE_FINISH,
                        task_states.RESIZE_MIGRATED,
                        task_states.RESIZE_MIGRATING,
-                       task_states.RESIZE_PREP):
-            entity.attributes['occi.compute.state'] = 'active'
+                       task_states.RESIZE_PREP,
+                       task_states.RESIZE_REVERTING):
+            entity.attributes['occi.compute.state'] = 'inactive'
             entity.actions = []
-        # revert resized server - OS (indirectly OCCI)
-        # TODO: implement OS-OCCI extension or can be done via update()
-        elif state == task_states.RESIZE_REVERTING:
-            entity.attributes['occi.compute.state'] = 'active'
-            entity.actions = []
-        # confirm resized server
-        elif state == task_states.RESIZE_VERIFY:
-            entity.attributes['occi.compute.state'] = 'active'
-            entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
-                                                        infrastructure.RESTART]
-        
-        # TODO: create image - do we want this?
         
         return instance
 
@@ -314,9 +296,9 @@ class ComputeBackend(MyBackend):
         # TODO: Review: when retrieve is called the representation of the 
         # resource is rendered. We don't want that!
 
-        # TODO: Review: as there is no callback mechanism to update the state  
+        # As there is no callback mechanism to update the state  
         # of computes known by occi, a call to get the latest representation 
-        # must be made
+        # must be made.
         instance = self._retrieve(entity, extras)
 
         context = extras['nova_ctx']
@@ -327,12 +309,8 @@ class ComputeBackend(MyBackend):
             LOG.info('Starting virtual machine with id' + entity.identifier)
             entity.attributes['occi.compute.state'] = 'active'
             self.compute_api.start(context, instance)
-            # TODO: check that the instance is not paused or suspended
-            # self.compute_api.unpause(context, instance)
-            # self.compute_api.resume(context, instance)
 
         elif action == infrastructure.STOP:
-            # TODO: Review semantics
             # OCCI -> graceful, acpioff, poweroff
             # OS -> unclear
             LOG.info('Stopping virtual machine with id' + entity.identifier)
@@ -344,12 +322,11 @@ class ComputeBackend(MyBackend):
         elif action == infrastructure.RESTART:
             LOG.info('Restarting virtual machine with id' + entity.identifier)
             entity.attributes['occi.compute.state'] = 'active'
-            #TODO: Review semantics
-            #OS types == SOFT, HARD
-            #OCCI -> graceful, warm and cold
-            #mapping:
-            #  SOFT -> graceful, warm
-            #  HARD -> cold
+            # OS types == SOFT, HARD
+            # OCCI -> graceful, warm and cold
+            # mapping:
+            #  - SOFT -> graceful, warm
+            #  - HARD -> cold
             if not entity.attributes.has_key('method'):
                 raise exc.HTTPBadRequest()
 
@@ -368,7 +345,8 @@ class ComputeBackend(MyBackend):
             entity.attributes['occi.compute.state'] = 'suspended'
             self.compute_api.suspend(context, instance)
         elif action == extensions.OS_CHG_PWD:
-            # TODO: Review
+            # TODO: Review - it'll need the password sent as well as the
+            #                new password value.
             if not entity.attributes.has_key('method'):
                 raise exc.HTTPBadRequest()
             self.compute_api.set_admin_password(context, instance, \
