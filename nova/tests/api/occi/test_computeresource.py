@@ -76,58 +76,58 @@ class TestOcciComputeResource(test.TestCase):
         Try to create an OCCI entity.
         '''
         self.class_under_test.create(self.entity, self.extras)
-
-    def test_retrieve_for_success(self):
-        self.fail('To be implemented...')
-
-    def test_update_for_success(self):
-        self.fail('To be implemented...')
-
-    def test_replace_for_success(self):
-        self.fail('To be implemented...')
-
-    def test_delete_for_success(self):
-        self.fail('To be implemented...')
-
-    def test_action_for_success(self):
-        self.fail('To be implemented...')
-
-    #--------------------------------------------------------- Test for Failure
-
-    def test_create_for_failure(self):
-        self.fail('To be implemented...')
-
-    def test_retrieve_for_failure(self):
-        self.fail('To be implemented...')
-
-    def test_update_for_failure(self):
-        self.fail('To be implemented...')
-
-    def test_replace_for_failure(self):
-        self.fail('To be implemented...')
-
-    def test_delete_for_failure(self):
-        self.fail('To be implemented...')
-
-    def test_action_for_failure(self):
-        self.fail('To be implemented...')
-
-    #---------------------------------------------------------- Test for Sanity
-
-    def test_create_for_sanity(self):
-        self.fail('To be implemented...')
-
-    def test_retrieve_for_sanity(self):
-        self.fail('To be implemented...')
-
-    def test_update_for_sanity(self):
-        self.fail('To be implemented...')
-
-    def test_replace_for_sanity(self):
-        self.fail('To be implemented...')
-
-    def test_delete_for_sanity(self):
-        self.fail('To be implemented...')
-
-    def test_action_for_sanity(self):
-        self.fail('To be implemented...')
+#
+#    def test_retrieve_for_success(self):
+#        self.fail('To be implemented...')
+#
+#    def test_update_for_success(self):
+#        self.fail('To be implemented...')
+#
+#    def test_replace_for_success(self):
+#        self.fail('To be implemented...')
+#
+#    def test_delete_for_success(self):
+#        self.fail('To be implemented...')
+#
+#    def test_action_for_success(self):
+#        self.fail('To be implemented...')
+#
+#    #--------------------------------------------------------- Test for Failure
+#
+#    def test_create_for_failure(self):
+#        self.fail('To be implemented...')
+#
+#    def test_retrieve_for_failure(self):
+#        self.fail('To be implemented...')
+#
+#    def test_update_for_failure(self):
+#        self.fail('To be implemented...')
+#
+#    def test_replace_for_failure(self):
+#        self.fail('To be implemented...')
+#
+#    def test_delete_for_failure(self):
+#        self.fail('To be implemented...')
+#
+#    def test_action_for_failure(self):
+#        self.fail('To be implemented...')
+#
+#    #---------------------------------------------------------- Test for Sanity
+#
+#    def test_create_for_sanity(self):
+#        self.fail('To be implemented...')
+#
+#    def test_retrieve_for_sanity(self):
+#        self.fail('To be implemented...')
+#
+#    def test_update_for_sanity(self):
+#        self.fail('To be implemented...')
+#
+#    def test_replace_for_sanity(self):
+#        self.fail('To be implemented...')
+#
+#    def test_delete_for_sanity(self):
+#        self.fail('To be implemented...')
+#
+#    def test_action_for_sanity(self):
+#        self.fail('To be implemented...')
