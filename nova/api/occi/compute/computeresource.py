@@ -21,6 +21,7 @@ from nova.api.occi.backends import MyBackend
 from nova.api.occi.extensions import ResourceTemplate, OsTemplate
 from nova.compute import instance_types
 from nova.rpc import common as rpc_common
+import nova.policy
 
 from occi.exceptions import HTTPError
 from occi.extensions import infrastructure
@@ -41,6 +42,9 @@ class ComputeBackend(MyBackend):
     # TODO: implement update in super class
 
     def __init__(self):
+        
+        nova.policy.reset()
+        nova.policy.init()
         self.compute_api = compute.API()
         #self.network_api = network.API()
 
@@ -72,9 +76,13 @@ class ComputeBackend(MyBackend):
         # its assembled in AuthMiddleware - we can pipeline this with the 
         # OCCI service
         context = extras['nova_ctx']
+        
+        # TODO: query for correct project_id based on auth token?
+        context.project_id = '1'
+        
 
         #essential, required to get a vm image e.g. 
-        #            image_href = 'http://10.211.55.20:9292/v1/images/1'
+        #            image_href = 'http: // 10.211.55.20:9292 / v1 / images / 1'
         #extract resource template from entity and get the flavor name. 
         #            Flavor name is the term
         os_tpl_url = None
@@ -159,7 +167,9 @@ class ComputeBackend(MyBackend):
             msg = "%(err_type)s: %(err_msg)s" % \
                   {'err_type': err.exc_type, 'err_msg': err.value}
             raise exc.HTTPBadRequest(explanation=msg)
-
+        
+        import ipdb
+        ipdb.set_trace()
         entity.attributes['occi.core.id'] = instances[0]['uuid']
         entity.attributes['occi.compute.hostname'] = instances[0]['hostname']
         # TODO: can't we tell this from the image used?
@@ -209,6 +219,8 @@ class ComputeBackend(MyBackend):
         
         # TODO: Review: when a new resource is added to the registry its UUID
         # is prepended with it's location. Is this necessary? See extensions.py
+        import ipdb
+        ipdb.set_trace()
         uid = entity.attributes['occi.core.id']
         if uid.find(entity.kind.location) > -1:
             uid = uid.replace(entity.kind.location, '')
