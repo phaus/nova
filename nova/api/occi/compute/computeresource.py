@@ -55,7 +55,9 @@ class ComputeBackend(MyBackend):
         try:
             name = entity.attributes['occi.core.title']
         except KeyError:
-            name = 'Default Title (OCCI)'
+            #TODO: generate more suitable name as it's used for hostname
+            #      where no hostname is supplied.
+            name = entity.attributes['occi.core.title'] = 'Default Title (OCCI)' 
         
         key_name = None
         metadata = {}
@@ -223,9 +225,9 @@ class ComputeBackend(MyBackend):
         
         uid = entity.attributes['occi.core.id']
         
-        # TODO: at some stage the uid gets munged with location.
-        if uid.find(entity.kind.location) > -1:
-            uid = uid.replace(entity.kind.location, '')
+        # TODO at some stage the uid gets munged with location.
+        #if uid.find(entity.kind.location) > -1:
+        #    uid = uid.replace(entity.kind.location, '')
   
         try:
             instance = self.compute_api.routing_get(context, uid)
@@ -295,9 +297,9 @@ class ComputeBackend(MyBackend):
         context = extras['nova_ctx']
         
         uid = entity.attributes['occi.core.id']
-        # TODO: at some stage the uid gets munged with location.
-        if uid.find(entity.kind.location) > -1:
-            uid = uid.replace(entity.kind.location, '')
+        # TODO at some stage the uid gets munged with location.
+        #if uid.find(entity.kind.location) > -1:
+        #    uid = uid.replace(entity.kind.location, '')
         
         try:
             instance = self.compute_api.routing_get(context, uid)
@@ -326,6 +328,8 @@ class ComputeBackend(MyBackend):
         elif action == infrastructure.START:
             LOG.info('Starting virtual machine with id' + entity.identifier)
             entity.attributes['occi.compute.state'] = 'active'
+            entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
+                                                        infrastructure.RESTART]
             self.compute_api.start(context, instance)
 
         elif action == infrastructure.STOP:
@@ -336,10 +340,12 @@ class ComputeBackend(MyBackend):
                 LOG.info('OS only allows one type of stop. What is \
                             specified in the request will be ignored.')
             entity.attributes['occi.compute.state'] = 'inactive'
+            entity.actions = [infrastructure.START]
             self.compute_api.stop(context, instance)
         elif action == infrastructure.RESTART:
             LOG.info('Restarting virtual machine with id' + entity.identifier)
-            entity.attributes['occi.compute.state'] = 'active'
+            entity.attributes['occi.compute.state'] = 'inactive'
+            entity.actions = []
             # OS types == SOFT, HARD
             # OCCI -> graceful, warm and cold
             # mapping:
@@ -361,12 +367,16 @@ class ComputeBackend(MyBackend):
                 LOG.info('OS only allows one type of suspend. What is \
                             specified in the request will be ignored.')
             entity.attributes['occi.compute.state'] = 'suspended'
+            entity.actions = [infrastructure.START]
             self.compute_api.suspend(context, instance)
         elif action == extensions.OS_CHG_PWD:
             # TODO: Review - it'll need the password sent as well as the
             #                new password value.
             if not entity.attributes.has_key('method'):
                 raise exc.HTTPBadRequest()
+            entity.attributes['occi.compute.state'] = 'active'
+            entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
+                                                        infrastructure.RESTART]
             self.compute_api.set_admin_password(context, instance, \
                                                 entity.attributes['method'])
         elif action == extensions.OS_REBUILD:
@@ -375,13 +385,16 @@ class ComputeBackend(MyBackend):
             raise exc.HTTPNotImplemented()
             image_href = 'TODO'
             admin_password = 'TODO'
+            entity.attributes['occi.compute.state'] = 'inactive'
             self.compute_api.rebuild(context, instance, image_href, \
                                             admin_password, None, None, None)
         elif action == extensions.OS_REVERT_RESIZE:
+            raise exc.HTTPNotImplemented()
             LOG.info('Reverting resized virtual machine with id' + \
                                                             entity.identifier)
             self.compute_api.revert_resize(context, instance)
         elif action == extensions.OS_CONFIRM_RESIZE:
+            raise exc.HTTPNotImplemented()
             LOG.info('Confirming resize of virtual machine with id' + \
                                                             entity.identifier)
             self.compute_api.confirm_resize(context, instance)
