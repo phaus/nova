@@ -172,13 +172,13 @@ class ComputeBackend(MyBackend):
         entity.attributes['occi.core.id'] = instances[0]['uuid']
         entity.attributes['occi.compute.hostname'] = instances[0]['hostname']
         # TODO: can't we tell this from the image used?
-        # architecture is sometimes encoded in the image file's name
+        # The architecture is sometimes encoded in the image file's name
         # This is not reliable. db::glance::image_properties could be used
         # reliably so long as the information is supplied.
         entity.attributes['occi.compute.architecture'] = 'x86'
         entity.attributes['occi.compute.cores'] = str(instances[0]['vcpus'])
-        # occi.compute.speed is not available in instances by default
-        # cpu speed is not available but could be made available through
+        # occi.compute.speed is not available in instances by default.
+        # CPU speed is not available but could be made available through
         # db::nova::compute_nodes::cpu_info
         # additional code is required in 
         #     nova/nova/virt/libvirt/connection.py::get_cpu_info()
@@ -372,6 +372,8 @@ class ComputeBackend(MyBackend):
         elif action == extensions.OS_CHG_PWD:
             # TODO: Review - it'll need the password sent as well as the
             #                new password value.
+            raise exc.HTTPNotImplemented()
+        
             if not entity.attributes.has_key('method'):
                 raise exc.HTTPBadRequest()
             entity.attributes['occi.compute.state'] = 'active'
@@ -383,6 +385,7 @@ class ComputeBackend(MyBackend):
             #TODO: there must be an OsTemplate mixin with the request and
             #      there must be the admin password to the instance
             raise exc.HTTPNotImplemented()
+        
             image_href = 'TODO'
             admin_password = 'TODO'
             entity.attributes['occi.compute.state'] = 'inactive'
@@ -398,4 +401,7 @@ class ComputeBackend(MyBackend):
             LOG.info('Confirming resize of virtual machine with id' + \
                                                             entity.identifier)
             self.compute_api.confirm_resize(context, instance)
+        else:
+            raise exc.HTTPBadRequest()
+        
 
