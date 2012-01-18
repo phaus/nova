@@ -311,6 +311,55 @@ class ComputeBackend(MyBackend):
         else:
             self.compute_api.delete(context, instance)
 
+    def update(self, old, new, extras):
+        #Here we can update mixins, links and attributes
+        LOG.info('Partial update requested for instance: ' + \
+                                            old.attributes['occi.core.id'])
+        
+        context = extras['nova_ctx']
+        instance = self._retrieve(old, extras)
+        
+        # for now we will only handle one mixin change per request
+        if len(new.mixins) == 1:
+            #Find out what the mixin is.
+            mixin = new.mixins[0]
+            # check for scale up in new
+            if isinstance(mixin, ResourceTemplate):
+                LOG.info('Resize requested')
+                flavor_id = mixin.term
+                self.compute_api.resize(context, instance, flavor_id)
+            # check for new os rebuild in new
+            elif isinstance(mixin, OsTemplate):
+                LOG.info('Rebuild requested')
+                image_href = mixin.os_id
+                # TODO: where's best to supply this info?
+                # as an atttribute?
+                admin_password = 'TODO'
+                old.attributes['occi.compute.state'] = 'inactive'
+                self.compute_api.rebuild(context, instance, image_href, \
+                                            admin_password, None, None, None)
+            else:
+                LOG.error('I\'ve no idea what this mixin is! ' + \
+                                                    mixin.scheme + mixin.term)
+                raise exc.HTTPBadRequest()
+        elif len(new.mixins) > 1:
+            raise exc.HTTPBadRequest()
+        
+        # if new.attributes > 0 then ignore for now
+        # you can change occi.core.title, what about hostname?
+        # in the specific case of openstack, you cannot directly change things
+        # like occi.core.memory - you must resize i.e. change the resource
+        # template 
+        if new.attributes > 0:
+            LOG.info('Updating mutable attributes of instance')
+
+        # if new.links > 0 then ignore
+        # this will be important to enable linking of a resource to another
+        if new.links == 1:
+            LOG.info('Associate resource with another.')
+        elif len(new.mixins) > 1:
+            raise exc.HTTPBadRequest()
+
     def action(self, entity, action, extras):
 
         # TODO: Review: when retrieve is called the representation of the 
@@ -342,6 +391,8 @@ class ComputeBackend(MyBackend):
             entity.attributes['occi.compute.state'] = 'inactive'
             entity.actions = [infrastructure.START]
             self.compute_api.stop(context, instance)
+            self.compute_api.pause(context, instance)
+            
         elif action == infrastructure.RESTART:
             LOG.info('Restarting virtual machine with id' + entity.identifier)
             entity.attributes['occi.compute.state'] = 'inactive'
@@ -353,7 +404,6 @@ class ComputeBackend(MyBackend):
             #  - HARD -> cold
             if not entity.attributes.has_key('method'):
                 raise exc.HTTPBadRequest()
-
             if entity.attributes['method'] in ('graceful', 'warm'):
                 reboot_type = 'SOFT'
             elif entity.attributes['method'] is 'cold':
