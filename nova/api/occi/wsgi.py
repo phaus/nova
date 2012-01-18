@@ -26,7 +26,9 @@ from nova.api.occi.storage import storageresource
 from nova.compute import instance_types
 
 from occi import registry
+from occi import workflow
 from occi import wsgi as occi_wsgi
+from occi.core_model import Resource
 from occi.extensions import infrastructure
 
 #Hi I'm a logger, use me! :-)
@@ -132,6 +134,17 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         self.register_backend(infrastructure.STORAGELINK, storage_link_backend)
         self.register_backend(infrastructure.NETWORKINTERFACE,
                                           networkinterface_backend)
+        
+        #This must be done as by default OpenStack has a default network
+        # to which all new VM instances are attached.
+        LOG.info('Registering default network with web app.')
+        self._register_default_network()
+
+    def _register_default_network(self, name='DEFAULT_NETWORK'):
+        #TODO: should the default network expose details e.g. broadcast etc.?
+        default_network = Resource('', infrastructure.NETWORK, [infrastructure.IPNETWORK], [], 'summary', 'title')
+        default_network.attributes['occi.core.id'] = name
+        self.registry.add_resource('name', default_network)
 
     def _register_resource_mixins(self, resource_mixin_backend):
         '''

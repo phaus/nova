@@ -57,7 +57,9 @@ class StorageBackend(MyBackend):
         
         vol_type = None #volume type can be specified by mixin
         metadata = None #a metadata mixin???
+        #TODO take from occi.core.title
         disp_name = 'a volume' #vol.get('display_name')
+        #TODO take from occi.core.title
         disp_descr = 'a volume' #vol.get('display_description')
         new_volume = self.volume_api.create(context, size, None,
                                             disp_name,
