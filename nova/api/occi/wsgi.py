@@ -83,7 +83,23 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         nova_ctx = environ['nova.context']
         
         # TODO: query for correct project_id based on auth token?
-        nova_ctx.project_id = '1'
+        # There are multiple options here:
+        #  1. extract project_id from URL e.g.:
+        #     create compute: POST /compute/1/
+        #  2. supply project_id as a URL parameter e.g.:
+        #     create compute: POST /compute/query?project_id=1
+        #  3. Use a mixin
+        #  4. Use a HTTP header e.g.:
+        #     X-Project-Id: 1
+        #  Or....
+        #  Just use the openstack header! Ya ha ha ha!
+        
+        import ipdb
+        ipdb.set_trace()
+        #TODO this should be pushed into the context middleware
+        nova_ctx.project_id = environ.get('HTTP_X_AUTH_PROJECT_ID', None)
+        if nova_ctx.project_id == None:
+            LOG.error('No project ID header was supplied in the request')
         
         # TODO:(dizz) this is not optimal
         self._register_os_mixins(backends.OsMixinBackend(), nova_ctx)
