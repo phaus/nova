@@ -96,7 +96,7 @@ class ImagesControllerTest(test.TestCase):
                     }],
                 },
                 "metadata": {
-                    "instance_ref": server_href,
+                    "instance_uuid": server_uuid,
                     "user_id": "fake",
                 },
                 "links": [{
@@ -430,7 +430,7 @@ class ImagesControllerTest(test.TestCase):
             'id': '124',
             'name': 'queued snapshot',
             'metadata': {
-                u'instance_ref': server_href,
+                u'instance_uuid': server_uuid,
                 u'user_id': u'fake',
             },
             'updated': NOW_API_FORMAT,
@@ -468,7 +468,7 @@ class ImagesControllerTest(test.TestCase):
             'id': '125',
             'name': 'saving snapshot',
             'metadata': {
-                u'instance_ref': server_href,
+                u'instance_uuid': server_uuid,
                 u'user_id': u'fake',
             },
             'updated': NOW_API_FORMAT,
@@ -506,7 +506,7 @@ class ImagesControllerTest(test.TestCase):
             'id': '126',
             'name': 'active snapshot',
             'metadata': {
-                u'instance_ref': server_href,
+                u'instance_uuid': server_uuid,
                 u'user_id': u'fake',
             },
             'updated': NOW_API_FORMAT,
@@ -544,7 +544,7 @@ class ImagesControllerTest(test.TestCase):
             'id': '127',
             'name': 'killed snapshot',
             'metadata': {
-                u'instance_ref': server_href,
+                u'instance_uuid': server_uuid,
                 u'user_id': u'fake',
             },
             'updated': NOW_API_FORMAT,
@@ -582,7 +582,7 @@ class ImagesControllerTest(test.TestCase):
             'id': '128',
             'name': 'deleted snapshot',
             'metadata': {
-                u'instance_ref': server_href,
+                u'instance_uuid': server_uuid,
                 u'user_id': u'fake',
             },
             'updated': NOW_API_FORMAT,
@@ -620,7 +620,7 @@ class ImagesControllerTest(test.TestCase):
             'id': '129',
             'name': 'pending_delete snapshot',
             'metadata': {
-                u'instance_ref': server_href,
+                u'instance_uuid': server_uuid,
                 u'user_id': u'fake',
             },
             'updated': NOW_API_FORMAT,
@@ -721,7 +721,7 @@ class ImagesControllerTest(test.TestCase):
             'id': '124',
             'name': 'queued snapshot',
             'metadata': {
-                u'instance_ref': server_href,
+                u'instance_uuid': server_uuid,
                 u'user_id': u'fake',
             },
             'updated': NOW_API_FORMAT,
@@ -823,7 +823,7 @@ class ImagesControllerTest(test.TestCase):
         image_service = self.mox.CreateMockAnything()
         uuid = 'fa95aaf5-ab3b-4cd8-88c0-2be7dd051aaf'
         ref = 'http://localhost:8774/servers/' + uuid
-        filters = {'property-instance_ref': ref}
+        filters = {'property-instance_uuid': uuid}
         request = fakes.HTTPRequest.blank('/v2/images?server=' + ref)
         context = request.environ['nova.context']
         image_service.index(context, filters=filters).AndReturn([])
@@ -914,12 +914,25 @@ class ImagesControllerTest(test.TestCase):
         controller.detail(request)
         self.mox.VerifyAll()
 
-    def test_image_detail_filter_server(self):
+    def test_image_detail_filter_server_href(self):
         image_service = self.mox.CreateMockAnything()
         uuid = 'fa95aaf5-ab3b-4cd8-88c0-2be7dd051aaf'
         ref = 'http://localhost:8774/servers/' + uuid
         url = '/v2/fake/images/detail?server=' + ref
-        filters = {'property-instance_ref': ref}
+        filters = {'property-instance_uuid': uuid}
+        request = fakes.HTTPRequest.blank(url)
+        context = request.environ['nova.context']
+        image_service.index(context, filters=filters).AndReturn([])
+        self.mox.ReplayAll()
+        controller = images.Controller(image_service=image_service)
+        controller.index(request)
+        self.mox.VerifyAll()
+
+    def test_image_detail_filter_server_uuid(self):
+        image_service = self.mox.CreateMockAnything()
+        uuid = 'fa95aaf5-ab3b-4cd8-88c0-2be7dd051aaf'
+        url = '/v2/fake/images/detail?server=' + uuid
+        filters = {'property-instance_uuid': uuid}
         request = fakes.HTTPRequest.blank(url)
         context = request.environ['nova.context']
         image_service.index(context, filters=filters).AndReturn([])

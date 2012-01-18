@@ -683,19 +683,9 @@ class FixedIp(BASE, NovaBase):
     __tablename__ = 'fixed_ips'
     id = Column(Integer, primary_key=True)
     address = Column(String(255))
-    network_id = Column(Integer, ForeignKey('networks.id'), nullable=True)
-    network = relationship(Network, backref=backref('fixed_ips'))
-    virtual_interface_id = Column(Integer, ForeignKey('virtual_interfaces.id'),
-                                                                 nullable=True)
-    virtual_interface = relationship(VirtualInterface,
-                                     backref=backref('fixed_ips'))
-    instance_id = Column(Integer, ForeignKey('instances.id'), nullable=True)
-    instance = relationship(Instance,
-                            backref=backref('fixed_ips'),
-                            foreign_keys=instance_id,
-                            primaryjoin='and_('
-                                'FixedIp.instance_id == Instance.id,'
-                                'FixedIp.deleted == False)')
+    network_id = Column(Integer, nullable=True)
+    virtual_interface_id = Column(Integer, nullable=True)
+    instance_id = Column(Integer, nullable=True)
     # associated means that a fixed_ip has its instance_id column set
     # allocated means that a fixed_ip has a its virtual_interface_id column set
     allocated = Column(Boolean, default=False)
@@ -710,13 +700,7 @@ class FloatingIp(BASE, NovaBase):
     __tablename__ = 'floating_ips'
     id = Column(Integer, primary_key=True)
     address = Column(String(255))
-    fixed_ip_id = Column(Integer, ForeignKey('fixed_ips.id'), nullable=True)
-    fixed_ip = relationship(FixedIp,
-                            backref=backref('floating_ips'),
-                            foreign_keys=fixed_ip_id,
-                            primaryjoin='and_('
-                                'FloatingIp.fixed_ip_id == FixedIp.id,'
-                                'FloatingIp.deleted == False)')
+    fixed_ip_id = Column(Integer, nullable=True)
     project_id = Column(String(255))
     host = Column(String(255))  # , ForeignKey('hosts.id'))
     auto_assigned = Column(Boolean, default=False, nullable=False)
@@ -863,6 +847,42 @@ class Zone(BASE, NovaBase):
     password = Column(String(255))
     weight_offset = Column(Float(), default=0.0)
     weight_scale = Column(Float(), default=1.0)
+
+
+class Aggregate(BASE, NovaBase):
+    """Represents a cluster of hosts that exists in this zone."""
+    __tablename__ = 'aggregates'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(255), unique=True)
+    operational_state = Column(String(255), nullable=False)
+    availability_zone = Column(String(255), nullable=False)
+
+
+class AggregateHost(BASE, NovaBase):
+    """Represents a host that is member of an aggregate."""
+    __tablename__ = 'aggregate_hosts'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    host = Column(String(255), unique=True)
+    aggregate_id = Column(Integer, ForeignKey('aggregates.id'), nullable=False)
+    aggregate = relationship(Aggregate, backref=backref('aggregates'),
+                             foreign_keys=aggregate_id,
+                             primaryjoin='and_('
+                                  'AggregateHost.aggregate_id == Aggregate.id,'
+                                  'AggregateHost.deleted == False)')
+
+
+class AggregateMetadata(BASE, NovaBase):
+    """Represents a metadata key/value pair for an aggregate."""
+    __tablename__ = 'aggregate_metadata'
+    id = Column(Integer, primary_key=True)
+    key = Column(String(255), nullable=False)
+    value = Column(String(255), nullable=False)
+    aggregate_id = Column(Integer, ForeignKey('aggregates.id'), nullable=False)
+    aggregate = relationship(Aggregate, backref="metadata",
+                             foreign_keys=aggregate_id,
+                             primaryjoin='and_('
+                              'AggregateMetadata.aggregate_id == Aggregate.id,'
+                              'AggregateMetadata.deleted == False)')
 
 
 class AgentBuild(BASE, NovaBase):

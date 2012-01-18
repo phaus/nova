@@ -157,7 +157,7 @@ class ServerActionsControllerTest(test.TestCase):
         fakes.stub_out_glance(self.stubs)
         fakes.stub_out_nw_api(self.stubs)
         fakes.stub_out_rate_limiting(self.stubs)
-        self.snapshot = fakes.stub_out_compute_api_snapshot(self.stubs)
+        fakes.stub_out_compute_api_snapshot(self.stubs)
         service_class = 'nova.image.glance.GlanceImageService'
         self.service = utils.import_object(service_class)
         self.context = context.RequestContext(1, None)
@@ -579,9 +579,6 @@ class ServerActionsControllerTest(test.TestCase):
 
         location = response.headers['Location']
         self.assertEqual('http://localhost/v2/fake/images/123', location)
-        server_location = self.snapshot.extra_props_last_call['instance_ref']
-        expected_server_location = 'http://localhost/v2/servers/' + self.uuid
-        self.assertEqual(expected_server_location, server_location)
 
     def test_create_image_snapshots_disabled(self):
         """Don't permit a snapshot if the allow_instance_snapshots flag is
@@ -630,6 +627,17 @@ class ServerActionsControllerTest(test.TestCase):
     def test_create_image_no_name(self):
         body = {
             'createImage': {},
+        }
+        req = fakes.HTTPRequest.blank(self.url)
+        self.assertRaises(webob.exc.HTTPBadRequest,
+                          self.controller._action_create_image,
+                          req, FAKE_UUID, body)
+
+    def test_create_image_blank_name(self):
+        body = {
+            'createImage': {
+                'name': '',
+            }
         }
         req = fakes.HTTPRequest.blank(self.url)
         self.assertRaises(webob.exc.HTTPBadRequest,

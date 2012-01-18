@@ -399,21 +399,6 @@ class CloudController(object):
                 'keyMaterial': data['private_key']}
         # TODO(vish): when context is no longer an object, pass it here
 
-    def _get_fingerprint(self, public_key):
-        tmpdir = tempfile.mkdtemp()
-        pubfile = os.path.join(tmpdir, 'temp.pub')
-        fh = open(pubfile, 'w')
-        fh.write(public_key)
-        fh.close()
-        try:
-            (out, err) = utils.execute('ssh-keygen', '-l', '-f',
-                                       '%s' % (pubfile))
-            return out.split(' ')[1]
-        except Exception:
-            raise
-        finally:
-            shutil.rmtree(tmpdir)
-
     def import_key_pair(self, context, key_name, public_key_material,
                         **kwargs):
         LOG.audit(_("Import key %s"), key_name, context=context)
@@ -423,7 +408,7 @@ class CloudController(object):
         except exception.NotFound:
             pass
         public_key = base64.b64decode(public_key_material)
-        fingerprint = self._get_fingerprint(public_key)
+        fingerprint = crypto.generate_fingerprint(public_key)
         key = {}
         key['user_id'] = context.user_id
         key['name'] = key_name
@@ -844,15 +829,6 @@ class CloudController(object):
         instance = self.compute_api.get(context, instance_id)
         return self.compute_api.get_ajax_console(context, instance)
 
-    def get_vnc_console(self, context, instance_id, **kwargs):
-        """Returns vnc browser url.
-
-        This is an extension to the normal ec2_api"""
-        ec2_id = instance_id
-        instance_id = ec2utils.ec2_id_to_id(ec2_id)
-        instance = self.compute_api.get(context, instance_id)
-        return self.compute_api.get_vnc_console(context, instance)
-
     def describe_volumes(self, context, volume_id=None, **kwargs):
         if volume_id:
             volumes = []
@@ -1217,20 +1193,17 @@ class CloudController(object):
 
     def format_addresses(self, context):
         addresses = []
-        if context.is_admin:
-            iterator = db.floating_ip_get_all(context)
-        else:
-            iterator = db.floating_ip_get_all_by_project(context,
-                                                         context.project_id)
-        for floating_ip_ref in iterator:
+        floaters = self.network_api.get_floating_ips_by_project(context)
+        for floating_ip_ref in floaters:
             if floating_ip_ref['project_id'] is None:
                 continue
             address = floating_ip_ref['address']
             ec2_id = None
-            if (floating_ip_ref['fixed_ip']
-                and floating_ip_ref['fixed_ip']['instance']):
-                instance_id = floating_ip_ref['fixed_ip']['instance']['id']
-                ec2_id = ec2utils.id_to_ec2_id(instance_id)
+            if floating_ip_ref['fixed_ip_id']:
+                fixed_id = floating_ip_ref['fixed_ip_id']
+                fixed = self.network_api.get_fixed_ip(context, fixed_id)
+                if fixed['instance_id'] is not None:
+                    ec2_id = ec2utils.id_to_ec2_id(fixed['instance_id'])
             address_rv = {'public_ip': address,
                           'instance_id': ec2_id}
             if context.is_admin:

@@ -226,12 +226,22 @@ class RequestHeadersDeserializerTest(test.TestCase):
 class ResponseHeadersSerializerTest(test.TestCase):
     def test_request_id(self):
         serializer = wsgi.ResponseHeadersSerializer()
+
         context = nova.context.get_admin_context()
         req = webob.Request.blank('/', environ={'nova.context': context})
         res = webob.Response(request=req)
         serializer.serialize(res, {}, 'foo')
-        self.assertTrue(
-            utils.is_uuid_like(res.headers['X-Compute-Request-Id']))
+        h1 = res.headers.get('X-Compute-Request-Id')
+        self.assertTrue(h1)
+
+        context = nova.context.get_admin_context()
+        req = webob.Request.blank('/', environ={'nova.context': context})
+        res = webob.Response(request=req)
+        serializer.serialize(res, {}, 'foo')
+        h2 = res.headers.get('X-Compute-Request-Id')
+        self.assertTrue(h2)
+
+        self.assertNotEqual(h1, h2)
 
 
 class JSONSerializer(object):
@@ -993,7 +1003,7 @@ class ResponseObjectTest(test.TestCase):
     def test_get_serializer(self):
         robj = wsgi.ResponseObject({}, json='json', xml='xml', atom='atom')
         for content_type, mtype in wsgi._MEDIA_TYPE_MAP.items():
-            serializer = robj.get_serializer(content_type)
+            _mtype, serializer = robj.get_serializer(content_type)
             self.assertEqual(serializer, mtype)
 
     def test_get_serializer_defaults(self):
@@ -1002,8 +1012,8 @@ class ResponseObjectTest(test.TestCase):
         for content_type, mtype in wsgi._MEDIA_TYPE_MAP.items():
             self.assertRaises(exception.InvalidContentType,
                               robj.get_serializer, content_type)
-            serializer = robj.get_serializer(content_type,
-                                             default_serializers)
+            _mtype, serializer = robj.get_serializer(content_type,
+                                                     default_serializers)
             self.assertEqual(serializer, mtype)
 
     def test_serialize(self):
