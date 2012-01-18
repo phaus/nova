@@ -94,8 +94,6 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         #  Or....
         #  Just use the openstack header! Ya ha ha ha!
         
-        import ipdb
-        ipdb.set_trace()
         #TODO this should be pushed into the context middleware
         nova_ctx.project_id = environ.get('HTTP_X_AUTH_PROJECT_ID', None)
         if nova_ctx.project_id == None:
