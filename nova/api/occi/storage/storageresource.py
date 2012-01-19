@@ -17,7 +17,9 @@
 # TODO: implement updates
 
 
-from nova import exception, log as logging, volume
+from nova import exception
+from nova import log as logging 
+from nova import volume
 from nova.api.occi.backends import MyBackend
 from occi.extensions.infrastructure import ONLINE, BACKUP, SNAPSHOT, RESIZE, \
     OFFLINE
@@ -38,9 +40,21 @@ class StorageBackend(MyBackend):
         
     def create(self, entity, extras):
         """Creates a new volume."""
-        # create a storage container here!
         context = extras['nova_ctx']
-        size = entity.attributes['occi.storage.size']
+        size = float(entity.attributes['occi.storage.size'])
+        
+        # Right this sucks. Suggest a patch to OpenStack.
+        # OpenStack deals with size in terms of integer.
+        # Need to convert float to integer for now and only if the float
+        # can be losslessly converted to integer
+        # e.g. See nova/quota.py:108
+        if not size.is_integer:
+            LOG.error('Volume sizes cannot be specified as fractional floats. \
+                                            OpenStack does not support this.')
+            raise exc.HTTPBadRequest
+        
+        size = str(int(size))
+        
         LOG.audit(_("Create volume of %s GB"), size, context=context)
         
 #        vol = body['volume']
@@ -55,32 +69,36 @@ class StorageBackend(MyBackend):
 #
 #        metadata = vol.get('metadata', None)
         
-        vol_type = None #volume type can be specified by mixin
-        metadata = None #a metadata mixin???
-        #TODO take from occi.core.title
+        #volume type can be specified by mixin
+        #a metadata mixin???
+        #TODO: take from occi.core.title
         disp_name = 'a volume' #vol.get('display_name')
-        #TODO take from occi.core.title
+        #TODO: take from occi.core.title
         disp_descr = 'a volume' #vol.get('display_description')
-        new_volume = self.volume_api.create(context, size, None,
+        
+        new_volume = self.volume_api.create(context,
+                                            size,
                                             disp_name,
                                             disp_descr,
-                                            volume_type=vol_type,
-                                            metadata=metadata)
+                                            snapshot=None,
+                                            volume_type=None,
+                                            metadata=None,
+                                            availability_zone=None)
 
         # Work around problem that instance is lazy-loaded...
         new_volume = self.volume_api.get(context, new_volume['id'])
-        entity.attributes['occi.core.id'] = new_volume['id']
         
         if new_volume['status'] == 'error':
             msg = 'There was an error creating the volume'
             LOG.error(msg)
             raise exc.HTTPServerError(msg)
         
-        entity.attributes['occi.storage.state'] = 'offline'
-        entity.actions = [ONLINE]
+        entity.attributes['occi.core.id'] = str(new_volume['id'])
+        entity.attributes['occi.storage.state'] = 'online'
+        entity.actions = [OFFLINE]
 
     def retrieve(self, entity, extras):
-        # check the state and return it!
+        #TODO: check the state and return it!
         
         context = extras['nova_ctx']
         volume_id = entity.attributes['occi.core.id']
@@ -92,11 +110,11 @@ class StorageBackend(MyBackend):
         
         if vol['status'] == 'available':
             entity.attributes['occi.storage.state'] = 'online'
-        
+            entity.actions = [BACKUP, SNAPSHOT, RESIZE]
+            
         if entity.attributes['occi.storage.state'] == 'offline':
             entity.actions = [ONLINE]
-        elif entity.attributes['occi.storage.state'] == 'online':
-            entity.actions = [BACKUP, SNAPSHOT, RESIZE]
+            
 
     def delete(self, entity, extras):
         # call the management framework to delete this storage instance...
@@ -124,6 +142,9 @@ class StorageBackend(MyBackend):
         # RESIZE: increase, decrease size of volume.
         
         # NOTE: OCCI has no way to manage snapshots or backups :-(
+        
+        #TODO: Implement mappings to OpenStack
+        raise exc.HTTPNotImplemented
         
         if action not in entity.actions:
             raise AttributeError("This action is currently no applicable.")

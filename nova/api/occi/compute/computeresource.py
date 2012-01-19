@@ -277,7 +277,9 @@ class ComputeBackend(MyBackend):
         # resize server confirm rebuild
         # revert resized server - OS (indirectly OCCI)
         # TODO: implement OS-OCCI extension or can be done via update()
-        elif instance['vm_state'] in (vm_states.REBUILDING,
+        elif instance['vm_state'] in (
+                       vm_states.RESIZING,
+                       vm_states.REBUILDING,
                        task_states.RESIZE_CONFIRMING,
                        task_states.RESIZE_FINISH,
                        task_states.RESIZE_MIGRATED,
@@ -312,6 +314,7 @@ class ComputeBackend(MyBackend):
             self.compute_api.delete(context, instance)
 
     def update(self, old, new, extras):
+        
         #Here we can update mixins, links and attributes
         LOG.info('Partial update requested for instance: ' + \
                                             old.attributes['occi.core.id'])
@@ -326,11 +329,19 @@ class ComputeBackend(MyBackend):
             # check for scale up in new
             if isinstance(mixin, ResourceTemplate):
                 LOG.info('Resize requested')
-                flavor_id = mixin.term
-                self.compute_api.resize(context, instance, flavor_id)
+                raise exc.HTTPForbidden
+                # XXX: Ok, this sucks a little... resize is only supported on 
+                #      Xen: http://wiki.openstack.org/HypervisorSupportMatrix
+                flavor = \
+                        instance_types.get_instance_type_by_name(mixin.term)
+                self.compute_api.resize(context, instance, flavor['flavorid'])
+                #now update the mixin info
+                
+                
             # check for new os rebuild in new
             elif isinstance(mixin, OsTemplate):
                 LOG.info('Rebuild requested')
+                raise exc.HTTPForbidden
                 image_href = mixin.os_id
                 # TODO: where's best to supply this info?
                 # as an atttribute?

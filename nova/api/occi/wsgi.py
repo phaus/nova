@@ -62,9 +62,6 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         # setup the occi service...
         self._setup_occi_service()
 
-        # register openstack instance types (flavours)
-        self._register_resource_mixins(backends.ResourceMixinBackend())
-
         # register extensions to the basic occi entities
         self._register_occi_extensions()
 
@@ -99,8 +96,13 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         if nova_ctx.project_id == None:
             LOG.error('No project ID header was supplied in the request')
         
-        # TODO:(dizz) this is not optimal
+        # TODO:(dizz) this is not optimal - this should be done when the
+        # query interface is invoked.
+        # register openstack images
         self._register_os_mixins(backends.OsMixinBackend(), nova_ctx)
+        # register openstack instance types (flavours)
+        self._register_resource_mixins(backends.ResourceMixinBackend())
+        
         return self._call_occi(environ, response, nova_ctx=nova_ctx)
 
     def _setup_occi_service(self):
