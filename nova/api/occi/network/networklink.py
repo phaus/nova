@@ -44,12 +44,12 @@ class IpNetworkInterfaceBackend(MixinBackend):
     A mixin backend for the IPnetowkringinterface.
     '''
 
-    def create(self, entity, extras):
-        if not entity.kind == NETWORKINTERFACE:
+    def create(self, link, extras):
+        if not link.kind == NETWORKINTERFACE:
             raise AttributeError('This mixin cannot be applied to this kind.')
-        entity.attributes['occi.networkinterface.address'] = '10.0.0.65'
-        entity.attributes['occi.networkinterface.gateway'] = '10.0.0.1'
-        entity.attributes['occi.networkinterface.allocation'] = 'dynamic'
+        link.attributes['occi.networkinterface.address'] = '10.0.0.65'
+        link.attributes['occi.networkinterface.gateway'] = '10.0.0.1'
+        link.attributes['occi.networkinterface.allocation'] = 'dynamic'
 
     def delete(self, entity, extras):
         entity.attributes.pop('occi.networkinterface.address')

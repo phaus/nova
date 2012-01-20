@@ -12,13 +12,17 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import random
 
 from nova import flags
-from nova import compute, exception, log as logging
+from nova import compute
+from nova import exception
+from nova import log as logging
 from nova.compute import task_states
 from nova.compute import vm_states
 from nova.api.occi.backends import MyBackend
-from nova.api.occi.extensions import ResourceTemplate, OsTemplate
+from nova.api.occi.extensions import ResourceTemplate
+from nova.api.occi.extensions import OsTemplate
 from nova.compute import instance_types
 from nova.rpc import common as rpc_common
 import nova.policy
@@ -39,33 +43,31 @@ class ComputeBackend(MyBackend):
     A Backend for compute instances.
     '''
 
-    # TODO: implement update in super class
-
     def __init__(self):
         
         nova.policy.reset()
         nova.policy.init()
         self.compute_api = compute.API()
-        #self.network_api = network.API()
 
-    def create(self, entity, extras):
+    def create(self, resource, extras):
 
-        LOG.info('Creating the virtual machine with id: ' + entity.identifier)
+        LOG.info('Creating the virtual machine with id: ' + resource.identifier)
 
         try:
-            name = entity.attributes['occi.core.title']
+            name = resource.attributes['occi.core.title']
         except KeyError:
-            #TODO: generate more suitable name as it's used for hostname
-            #      where no hostname is supplied.
-            name = entity.attributes['occi.core.title'] = 'Default Title (OCCI)' 
+            name = resource.attributes['occi.core.title'] = \
+                            str(random.randrange(0, 99999999)) + \
+                                                        '-compute.occi-wg.org'
         
         key_name = None
+        key_data = None
         metadata = {}
         access_ip_v4 = None
         access_ip_v6 = None
         injected_files = []
         password = 'password'
-        zone_blob = 'blob'
+        zone_blob = None
         reservation_id = None
         min_count = max_count = 1
         requested_networks = None
@@ -76,21 +78,26 @@ class ComputeBackend(MyBackend):
         availability_zone = None
         config_drive = None
         block_device_mapping = None
-
+        #TODO: this can be specified through OS Templates
+        kernel_id = None
+        #TODO: this can be specified through OS Templates
+        ramdisk_id = None
+        auto_disk_config = None
+        
         # context is mainly authorisation information
         # its assembled in AuthMiddleware - we can pipeline this with the 
         # OCCI service
         context = extras['nova_ctx']
         
-        #essential, required to get a vm image e.g. 
-        #            image_href = 'http: // 10.211.55.20:9292 / v1 / images / 1'
-        #extract resource template from entity and get the flavor name. 
-        #            Flavor name is the term
+        # Essential, required to get a vm image e.g. 
+        #            image_href = 'http: // 10.211.55.20:9292/v1/images/1'
+        # Extract resource template from link and get the flavor name. 
+        # Flavor name is the term
         os_tpl_url = None
         flavor_name = None
-        if len(entity.mixins) > 0:
+        if len(resource.mixins) > 0:
             rc = oc = 0
-            for mixin in entity.mixins:
+            for mixin in resource.mixins:
                 if isinstance(mixin, ResourceTemplate):
                     r = mixin
                     rc += 1
@@ -109,7 +116,7 @@ class ComputeBackend(MyBackend):
 
             flavor_name = r.term
             os_tpl_url = o.os_id
-
+        
         try:
             if flavor_name:
                 inst_type = \
@@ -125,28 +132,33 @@ class ComputeBackend(MyBackend):
                 LOG.error(msg)
                 raise HTTPError(404, msg)
 
-            # all are None by default except context, inst_type and image_href
-            (instances, resv_id) = self.compute_api.create(context,
-                            inst_type,
-                            image_href=os_tpl_url,
-                            display_name=name,
-                            display_description=name,
-                            key_name=key_name,
-                            metadata=metadata,
-                            access_ip_v4=access_ip_v4,
-                            access_ip_v6=access_ip_v6,
-                            injected_files=injected_files,
-                            admin_password=password,
-                            zone_blob=zone_blob,
-                            reservation_id=reservation_id,
-                            min_count=min_count,
-                            max_count=max_count,
-                            requested_networks=requested_networks,
-                            security_group=sg_names,
-                            user_data=user_data,
-                            availability_zone=availability_zone,
-                            config_drive=config_drive,
-                            block_device_mapping=block_device_mapping)
+            (instances, resv_id) = self.compute_api.create(
+                                    context,
+                                    instance_type=inst_type,
+                                    image_href=os_tpl_url,
+                                    kernel_id=kernel_id,
+                                    ramdisk_id=ramdisk_id,
+                                    min_count=min_count,
+                                    max_count=max_count,
+                                    display_name=name,
+                                    display_description=name,
+                                    key_name=key_name,
+                                    key_data=key_data,
+                                    security_group=sg_names,
+                                    availability_zone=availability_zone,
+                                    user_data=user_data,
+                                    metadata=metadata,
+                                    injected_files=injected_files,
+                                    admin_password=password,
+                                    zone_blob=zone_blob,
+                                    reservation_id=reservation_id,
+                                    block_device_mapping=block_device_mapping,
+                                    access_ip_v4=access_ip_v4,
+                                    access_ip_v6=access_ip_v6,
+                                    requested_networks=requested_networks,
+                                    config_drive=config_drive,
+                                    auto_disk_config=auto_disk_config)
+            
         except exception.QuotaError as error:
             self._handle_quota_error(error)
         except exception.InstanceTypeMemoryTooSmall as error:
@@ -157,7 +169,7 @@ class ComputeBackend(MyBackend):
             msg = _("Can not find requested image")
             raise exc.HTTPBadRequest(explanation=msg)
         except exception.FlavorNotFound as error:
-            msg = _("Invalid flavorRef provided.")
+            msg = _("Invalid flavor provided.")
             raise exc.HTTPBadRequest(explanation=msg)
         except exception.KeypairNotFound as error:
             msg = _("Invalid key_name provided.")
@@ -169,14 +181,16 @@ class ComputeBackend(MyBackend):
                   {'err_type': err.exc_type, 'err_msg': err.value}
             raise exc.HTTPBadRequest(explanation=msg)
         
-        entity.attributes['occi.core.id'] = instances[0]['uuid']
-        entity.attributes['occi.compute.hostname'] = instances[0]['hostname']
+        resource.attributes['occi.core.id'] = instances[0]['uuid']
+        resource.attributes['occi.compute.hostname'] = instances[0]['hostname']
         # TODO: can't we tell this from the image used?
         # The architecture is sometimes encoded in the image file's name
         # This is not reliable. db::glance::image_properties could be used
         # reliably so long as the information is supplied.
-        entity.attributes['occi.compute.architecture'] = 'x86'
-        entity.attributes['occi.compute.cores'] = str(instances[0]['vcpus'])
+        # To use this the image must be registered with the required
+        # metadata.
+        resource.attributes['occi.compute.architecture'] = 'x86'
+        resource.attributes['occi.compute.cores'] = str(instances[0]['vcpus'])
         # occi.compute.speed is not available in instances by default.
         # CPU speed is not available but could be made available through
         # db::nova::compute_nodes::cpu_info
@@ -184,10 +198,10 @@ class ComputeBackend(MyBackend):
         #     nova/nova/virt/libvirt/connection.py::get_cpu_info()
         # note: this would be the physical node's speed not necessarily
         #     the VMs.
-        entity.attributes['occi.compute.speed'] = str(2.4)
-        entity.attributes['occi.compute.memory'] = \
+        resource.attributes['occi.compute.speed'] = str(2.4)
+        resource.attributes['occi.compute.memory'] = \
                                 str(float(instances[0]['memory_mb']) / 1024)
-        entity.attributes['occi.compute.state'] = 'active'
+        resource.attributes['occi.compute.state'] = 'active'
 
         # TODO: Once created, the VM is attached to a public network with an 
         # addresses allocated by DHCP
@@ -276,7 +290,6 @@ class ComputeBackend(MyBackend):
         # rebuild server - OS
         # resize server confirm rebuild
         # revert resized server - OS (indirectly OCCI)
-        # TODO: implement OS-OCCI extension or can be done via update()
         elif instance['vm_state'] in (
                        vm_states.RESIZING,
                        vm_states.REBUILDING,
@@ -374,7 +387,7 @@ class ComputeBackend(MyBackend):
     def action(self, entity, action, extras):
 
         # TODO: Review: when retrieve is called the representation of the 
-        # resource is rendered. We don't want that!
+        # resource is rendered. Do we want that?
 
         # As there is no callback mechanism to update the state  
         # of computes known by occi, a call to get the latest representation 

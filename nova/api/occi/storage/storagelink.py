@@ -13,14 +13,17 @@
 #    under the License.
 
 
-# TODO: implement create
-# TODO: implement delete
 # TODO: implement retreive
+
+import uuid
 
 from nova import log as logging
 from nova import volume
+from nova import compute
 
 from occi.backend import KindBackend
+from occi.extensions.infrastructure import STORAGE
+from occi.extensions.infrastructure import COMPUTE
 
 from webob import exc
 
@@ -35,42 +38,75 @@ class StorageLinkBackend(KindBackend):
     
     def __init__(self):
         self.volume_api = volume.API()
+        self.compute_api = compute.API()
+   
         
-    def create(self, entity, extras):
-        context = extras['nova_ctx']
-        LOG.info('Linking entity to storage via StorageLink.')
+    def create(self, link, extras):
+        LOG.info('Linking compute to storage via StorageLink.')
         
-        import ipdb
-        ipdb.set_trace()
+        vol_to_attach = self._get_vol_to_attach(extras['nova_ctx'], link)
+        inst_to_attach = self._get_inst_to_attach(extras['nova_ctx'], link)
         
-        vol_to_attach = self.volume_api.get(context, entity['occi.core.id'])
-        instance_id = entity['occi.core.id']
-        mountpoint = entity.attributes['occi.storagelink.mountpoint']
+        self.volume_api.attach(extras['nova_ctx'], vol_to_attach, \
+                            inst_to_attach['id'], \
+                            link.attributes['occi.storagelink.deviceid'])
         
-        self.volume_api.attach(context, vol_to_attach, instance_id, mountpoint)
-        
-        vol_to_attach = self.volume_api.get(context, entity['occi.core.id'])
-        
-        entity.attributes['occi.storagelink.deviceid'] = 'sda1'
-        entity.attributes['occi.storagelink.mountpoint'] = '/'
-        entity.attributes['occi.storagelink.state'] = 'mounted'
+        link.attributes['occi.core.id'] = str(uuid.uuid4())
+        link.attributes['occi.storagelink.deviceid'] = \
+                                link.attributes['occi.storagelink.deviceid']
+        link.attributes['occi.storagelink.mountpoint'] = ''
+        link.attributes['occi.storagelink.state'] = 'active'
+  
     
-    def retrieve(self, entity, extras):
-        raise exc.HTTPNotImplemented
+    def _get_vol_to_attach(self, context, link):
+        if link.target.kind == STORAGE: 
+            vol_to_attach = self.volume_api.get(context, \
+                                        link.target.attributes['occi.core.id'])
+        elif link.source.kind == STORAGE:
+            vol_to_attach = self.volume_api.get(context, \
+                                        link.source.attributes['occi.core.id'])
+        else:
+            exc.HTTPBadRequest
+
+        return vol_to_attach
+ 
     
-    def delete(self, entity, extras):
+    def _get_inst_to_attach(self, context, link):
+        #it's instance_id not UUID!!!
+        if link.target.kind == COMPUTE:
+            instance = self.compute_api.routing_get(context, \
+                                        link.target.attributes['occi.core.id'])
+        elif link.source.kind == COMPUTE:
+            instance = self.compute_api.routing_get(context, \
+                                        link.source.attributes['occi.core.id'])
+        else:
+            raise exc.HTTPBadRequest
+        return instance
+  
+    
+    def retrieve(self, link, extras):
+        LOG.info('ping')
+        #raise exc.HTTPNotImplemented
+        #TODO: process states
+#        import ipdb
+#        ipdb.set_trace()
+#        if link.attributes['occi.storagelink.state'] == 'active':
+#            link.actions = []
+#        elif link.attributes['occi.storagelink.state'] == 'inactive':
+#            link.actions = []
+ 
+    
+    def delete(self, link, extras):
         LOG.info('Unlinking entity from storage via StorageLink.')
         
-        import ipdb
-        ipdb.set_trace()
+        vol_to_detach = self._get_vol_to_attach(extras['nova_ctx'], link) 
+        self.volume_api.detach(extras['nova_ctx'], vol_to_detach)
         
-        context = extras['nova_ctx']
-        vol_to_detach = self.volume_api.get(context, entity['occi.core.id'])
-        self.volume_api.detach(context, vol_to_detach)
-        
-        entity.attributes.pop('occi.storagelink.deviceid')
-        entity.attributes.pop('occi.storagelink.mountpoint')
-        entity.attributes.pop('occi.storagelink.state')
+        link.attributes.pop('occi.storagelink.deviceid')
+        link.attributes.pop('occi.storagelink.mountpoint')
+        link.attributes.pop('occi.storagelink.state')
+
 
     def action(self, entity, action, extras):
         raise exc.HTTPNotImplemented
+

@@ -16,6 +16,7 @@
 # TODO: implement actions
 # TODO: implement updates
 
+import random
 
 from nova import exception
 from nova import log as logging 
@@ -37,13 +38,14 @@ class StorageBackend(MyBackend):
     '''
     def __init__(self):
         self.volume_api = volume.API()
+    
         
-    def create(self, entity, extras):
+    def create(self, resource, extras):
         """Creates a new volume."""
         context = extras['nova_ctx']
-        size = float(entity.attributes['occi.storage.size'])
+        size = float(resource.attributes['occi.storage.size'])
         
-        # Right this sucks. Suggest a patch to OpenStack.
+        # Right, this sucks. Suggest a patch to OpenStack.
         # OpenStack deals with size in terms of integer.
         # Need to convert float to integer for now and only if the float
         # can be losslessly converted to integer
@@ -66,16 +68,19 @@ class StorageBackend(MyBackend):
 #                                                                vol_type)
 #            except exception.NotFound:
 #                raise exc.HTTPNotFound()
-#
 #        metadata = vol.get('metadata', None)
-        
         #volume type can be specified by mixin
         #a metadata mixin???
-        #TODO: take from occi.core.title
-        disp_name = 'a volume' #vol.get('display_name')
-        #TODO: take from occi.core.title
-        disp_descr = 'a volume' #vol.get('display_description')
-        
+        name = ''
+        try:
+            name = resource.attributes['occi.core.title']
+        except KeyError:
+            #TODO: generate more suitable name as it's used for hostname
+            #      where no hostname is supplied.
+            name = resource.attributes['occi.core.title'] = \
+                            str(random.randrange(0, 99999999)) + \
+                                                        '-storage.occi-wg.org'
+        disp_name = disp_descr = name
         new_volume = self.volume_api.create(context,
                                             size,
                                             disp_name,
@@ -93,21 +98,21 @@ class StorageBackend(MyBackend):
             LOG.error(msg)
             raise exc.HTTPServerError(msg)
         
-        entity.attributes['occi.core.id'] = str(new_volume['id'])
-        entity.attributes['occi.storage.state'] = 'online'
-        entity.actions = [OFFLINE]
+        resource.attributes['occi.core.id'] = str(new_volume['id'])
+        resource.attributes['occi.storage.state'] = 'online'
+        resource.actions = [OFFLINE]
+
 
     def retrieve(self, entity, extras):
-        #TODO: check the state and return it!
-        
         context = extras['nova_ctx']
-        volume_id = entity.attributes['occi.core.id']
+        volume_id = int(entity.attributes['occi.core.id'])
         
         try:
             vol = self.volume_api.get(context, volume_id)
         except exception.NotFound:
             raise exc.HTTPNotFound()
-        
+
+        #TODO: review states        
         if vol['status'] == 'available':
             entity.attributes['occi.storage.state'] = 'online'
             entity.actions = [BACKUP, SNAPSHOT, RESIZE]
@@ -121,10 +126,11 @@ class StorageBackend(MyBackend):
         print('Removing storage device with id: ' + entity.identifier)
         
         context = extras['nova_ctx']
-        volume_id = entity.attributes['occi.core.id']
+        volume_id = int(entity.attributes['occi.core.id'])
         
         try:
-            self.volume_api.delete(context, volume_id)
+            vol = self.volume_api.get(context, volume_id)
+            self.volume_api.delete(context, vol)
         except exception.NotFound:
             raise exc.HTTPNotFound()
         
@@ -165,3 +171,5 @@ class StorageBackend(MyBackend):
         elif action == RESIZE:
             print('Resizing...storage resource with id: ' + entity.identifier)
 
+    def update(self, old, new, extras):
+        raise exc.HTTPNotImplemented
