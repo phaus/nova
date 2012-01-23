@@ -32,7 +32,7 @@ flags.DEFINE_integer('reserved_host_disk_mb', 0,
         'Amount of disk in MB to reserve for host/dom0')
 flags.DEFINE_integer('reserved_host_memory_mb', 512,
         'Amount of memory in MB to reserve for host/dom0')
-flags.DEFINE_list('default_host_filters', ['ComputeFilter'],
+flags.DEFINE_list('default_host_filters', ['RamFilter', 'ComputeFilter'],
         'Which filters to use for filtering hosts when not specified '
         'in the request.')
 
@@ -77,7 +77,7 @@ class HostState(object):
     previously used and lock down access.
     """
 
-    def __init__(self, host, topic, capabilities=None):
+    def __init__(self, host, topic, capabilities=None, service=None):
         self.host = host
         self.topic = topic
 
@@ -86,6 +86,9 @@ class HostState(object):
         if capabilities is None:
             capabilities = {}
         self.capabilities = ReadOnlyDict(capabilities.get(topic, None))
+        if service is None:
+            service = {}
+        self.service = ReadOnlyDict(service)
         # Mutable available resources.
         # These will change as resources are virtually "consumed".
         self.free_ram_mb = 0
@@ -114,6 +117,9 @@ class HostState(object):
 
         if self.host in filter_properties.get('ignore_hosts', []):
             return False
+        force_hosts = filter_properties.get('force_hosts', [])
+        if force_hosts:
+            return self.host in force_hosts
         for filter_fn in filter_fns:
             if not filter_fn(self, filter_properties):
                 return False
@@ -293,7 +299,8 @@ class HostManager(object):
             host = service['host']
             capabilities = self.service_states.get(host, None)
             host_state = self.host_state_cls(host, topic,
-                    capabilities=capabilities)
+                    capabilities=capabilities,
+                    service=dict(service.iteritems()))
             host_state.update_from_compute_node(compute)
             host_state_map[host] = host_state
 

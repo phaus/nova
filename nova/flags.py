@@ -381,9 +381,6 @@ DEFINE_string('instance_dns_domain', '',
 DEFINE_string('floating_ip_dns_manager',
               'nova.network.dns_driver.DNSDriver',
               'DNS Manager for floating IPs')
-DEFINE_multistring('floating_ip_dns_zones', '',
-                   'DNS zones for floating IPs.'
-                   'e.g. "example.org"')
 DEFINE_string('network_manager', 'nova.network.manager.VlanManager',
               'Manager for network')
 DEFINE_string('volume_manager', 'nova.volume.manager.VolumeManager',
@@ -473,3 +470,8 @@ DEFINE_integer('zombie_instance_updated_at_window', 172800,
                'being cleaned up.')
 
 DEFINE_boolean('allow_ec2_admin_api', False, 'Enable/Disable EC2 Admin API')
+
+DEFINE_integer('service_down_time', 60,
+        'maximum time since last check-in for up service')
+DEFINE_string('default_schedule_zone', None,
+              'zone to use when user doesnt specify one')

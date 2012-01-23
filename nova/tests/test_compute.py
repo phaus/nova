@@ -147,6 +147,7 @@ class BaseTestCase(test.TestCase):
         inst['launch_time'] = '10'
         inst['user_id'] = self.user_id
         inst['project_id'] = self.project_id
+        inst['host'] = 'fake_host'
         type_id = instance_types.get_instance_type_by_name(type_name)['id']
         inst['instance_type_id'] = type_id
         inst['ami_launch_index'] = 0
@@ -519,6 +520,22 @@ class ComputeTestCase(BaseTestCase):
         self.assertEqual(inst_ref['task_state'], None)
 
         self.compute.terminate_instance(self.context, inst_ref['uuid'])
+
+    def test_set_admin_password_bad_state(self):
+        """Test setting password while instance is rebuilding."""
+        instance = self._create_fake_instance()
+        self.compute.run_instance(self.context, instance['uuid'])
+        db.instance_update(self.context, instance['uuid'], {
+            "power_state": power_state.NOSTATE,
+        })
+        instance = db.instance_get_by_uuid(self.context, instance['uuid'])
+
+        self.assertEqual(instance['power_state'], power_state.NOSTATE)
+        self.assertRaises(exception.Error,
+                          self.compute.set_admin_password,
+                          self.context,
+                          instance['uuid'])
+        self.compute.terminate_instance(self.context, instance['uuid'])
 
     def test_set_admin_password_driver_error(self):
         """Ensure error is raised admin password set"""
@@ -933,7 +950,8 @@ class ComputeTestCase(BaseTestCase):
         self.stubs.Set(self.compute.network_api, 'get_instance_nw_info', fake)
         context = self.context.elevated()
         instance = self._create_fake_instance()
-        self.compute.prep_resize(context, instance['uuid'], 1)
+        self.compute.prep_resize(context, instance['uuid'], 1,
+                                 filter_properties={})
         migration_ref = db.migration_get_by_instance_and_status(context,
                 instance['uuid'], 'pre-migrating')
         try:
@@ -959,7 +977,8 @@ class ComputeTestCase(BaseTestCase):
         self.stubs.Set(self.compute.network_api, 'get_instance_nw_info', fake)
         context = self.context.elevated()
         instance = self._create_fake_instance()
-        self.compute.prep_resize(context, instance['uuid'], 1)
+        self.compute.prep_resize(context, instance['uuid'], 1,
+                                 filter_properties={})
         migration_ref = db.migration_get_by_instance_and_status(context,
                 instance['uuid'], 'pre-migrating')
 
@@ -981,7 +1000,8 @@ class ComputeTestCase(BaseTestCase):
         test_notifier.NOTIFICATIONS = []
 
         db.instance_update(self.context, instance_uuid, {'host': 'foo'})
-        self.compute.prep_resize(context, instance_uuid, 1)
+        self.compute.prep_resize(context, instance_uuid, 1,
+                                 filter_properties={})
         db.migration_get_by_instance_and_status(context,
                                                 instance_uuid,
                                                 'pre-migrating')
@@ -1034,7 +1054,8 @@ class ComputeTestCase(BaseTestCase):
 
         self.compute.run_instance(self.context, instance_uuid)
         db.instance_update(self.context, instance_uuid, {'host': 'foo'})
-        self.compute.prep_resize(context, instance_uuid, 1)
+        self.compute.prep_resize(context, instance_uuid, 1,
+                                 filter_properties={})
         migration_ref = db.migration_get_by_instance_and_status(context,
                 instance_uuid, 'pre-migrating')
 
@@ -1055,7 +1076,8 @@ class ComputeTestCase(BaseTestCase):
         self.compute.run_instance(self.context, instance_uuid)
         db.instance_update(self.context, instance_uuid,
                            {'host': 'foo'})
-        self.compute.prep_resize(context, instance_uuid, 1)
+        self.compute.prep_resize(context, instance_uuid, 1,
+                                 filter_properties={})
         migration_ref = db.migration_get_by_instance_and_status(context,
                 instance_uuid, 'pre-migrating')
         self.compute.resize_instance(context, instance_uuid,
@@ -1087,7 +1109,8 @@ class ComputeTestCase(BaseTestCase):
 
         new_instance_type_ref = db.instance_type_get_by_flavor_id(context, 3)
         self.compute.prep_resize(context, inst_ref['uuid'],
-                                 new_instance_type_ref['id'])
+                                 new_instance_type_ref['id'],
+                                 filter_properties={})
 
         migration_ref = db.migration_get_by_instance_and_status(context,
                 inst_ref['uuid'], 'pre-migrating')
@@ -1144,7 +1167,8 @@ class ComputeTestCase(BaseTestCase):
 
         self.compute.run_instance(self.context, inst_ref['uuid'])
         db.instance_update(self.context, inst_ref['uuid'], {'host': 'foo'})
-        self.compute.prep_resize(context, inst_ref['uuid'], 1)
+        self.compute.prep_resize(context, inst_ref['uuid'], 1,
+                                 filter_properties={})
         migration_ref = db.migration_get_by_instance_and_status(context,
                 inst_ref['uuid'], 'pre-migrating')
         self.assertRaises(Exception, self.compute.resize_instance,
@@ -2155,9 +2179,10 @@ class ComputeAPITestCase(BaseTestCase):
     def test_resize_request_spec(self):
         def _fake_cast(context, args):
             request_spec = args['args']['request_spec']
+            filter_properties = args['args']['filter_properties']
             instance_properties = request_spec['instance_properties']
             self.assertEqual(instance_properties['host'], 'host2')
-            self.assertEqual(request_spec['avoid_original_host'], True)
+            self.assertIn('host2', filter_properties['ignore_hosts'])
 
         self.stubs.Set(self.compute_api, '_cast_scheduler_message',
                        _fake_cast)
@@ -2174,9 +2199,10 @@ class ComputeAPITestCase(BaseTestCase):
     def test_resize_request_spec_noavoid(self):
         def _fake_cast(context, args):
             request_spec = args['args']['request_spec']
+            filter_properties = args['args']['filter_properties']
             instance_properties = request_spec['instance_properties']
             self.assertEqual(instance_properties['host'], 'host2')
-            self.assertEqual(request_spec['avoid_original_host'], False)
+            self.assertNotIn('host2', filter_properties['ignore_hosts'])
 
         self.stubs.Set(self.compute_api, '_cast_scheduler_message',
                        _fake_cast)
@@ -2451,9 +2477,9 @@ class ComputeAPITestCase(BaseTestCase):
                 search_opts={'flavor': 5})
         self.assertEqual(len(instances), 0)
 
-        self.assertRaises(exception.FlavorNotFound,
-                self.compute_api.get_all,
-                c, search_opts={'flavor': 99})
+        # ensure unknown filter maps to an empty list, not an exception
+        instances = self.compute_api.get_all(c, search_opts={'flavor': 99})
+        self.assertEqual(instances, [])
 
         instances = self.compute_api.get_all(c, search_opts={'flavor': 3})
         self.assertEqual(len(instances), 1)
@@ -2999,6 +3025,10 @@ class ComputePolicyTestCase(BaseTestCase):
 
     def test_wrapped_method(self):
         instance = self._create_fake_instance()
+        # Reset this to None for this policy check. If it's set, it
+        # tries to do a compute_api.update() and we're not testing for
+        # that here.
+        instance['host'] = None
         self.compute.run_instance(self.context, instance['uuid'])
 
         # force delete to fail

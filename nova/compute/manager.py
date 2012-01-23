@@ -33,6 +33,7 @@ terminating it.
 
 """
 
+import contextlib
 import functools
 import os
 import socket
@@ -913,7 +914,9 @@ class ComputeManager(manager.SchedulerDependentManager):
 
             if instance_state != expected_state:
                 self._instance_update(context, instance_id, task_state=None)
-                raise exception.Error(_('Instance is not running'))
+                raise exception.Error(_('Failed to set admin password. '
+                                      'Instance %s is not running') %
+                                      instance_ref["uuid"])
             else:
                 try:
                     self.driver.set_admin_password(instance_ref, new_pass)
@@ -1002,7 +1005,8 @@ class ComputeManager(manager.SchedulerDependentManager):
         network_info = self._get_instance_nw_info(context, instance_ref)
         image_meta = _get_image_meta(context, instance_ref['image_ref'])
 
-        self.driver.rescue(context, instance_ref, network_info, image_meta)
+        with self.error_out_instance_on_exception(context, instance_uuid):
+            self.driver.rescue(context, instance_ref, network_info, image_meta)
 
         current_power_state = self._get_power_state(context, instance_ref)
         self._instance_update(context,
@@ -1022,7 +1026,8 @@ class ComputeManager(manager.SchedulerDependentManager):
         instance_ref = self.db.instance_get_by_uuid(context, instance_uuid)
         network_info = self._get_instance_nw_info(context, instance_ref)
 
-        self.driver.unrescue(instance_ref, network_info)
+        with self.error_out_instance_on_exception(context, instance_uuid):
+            self.driver.unrescue(instance_ref, network_info)
 
         current_power_state = self._get_power_state(context, instance_ref)
         self._instance_update(context,
@@ -1113,7 +1118,7 @@ class ComputeManager(manager.SchedulerDependentManager):
     @exception.wrap_exception(notifier=notifier, publisher_id=publisher_id())
     @checks_instance_lock
     @wrap_instance_fault
-    def prep_resize(self, context, instance_uuid, instance_type_id):
+    def prep_resize(self, context, instance_uuid, instance_type_id, **kwargs):
         """Initiates the process of moving a running instance to another host.
 
         Possibly changes the RAM and disk size in the process.
@@ -2182,3 +2187,16 @@ class ComputeManager(manager.SchedulerDependentManager):
                         raise Exception(_("Unrecognized value '%(action)s'"
                                           " for FLAGS.running_deleted_"
                                           "instance_action"), locals())
+
+    @contextlib.contextmanager
+    def error_out_instance_on_exception(self, context, instance_uuid):
+        try:
+            yield
+        except Exception, error:
+            with utils.save_and_reraise_exception():
+                msg = _('%s. Setting instance vm_state to ERROR')
+                LOG.error(msg % error)
+                self._instance_update(context,
+                                      instance_uuid,
+                                      vm_state=vm_states.ERROR,
+                                      task_state=None)
