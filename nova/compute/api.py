@@ -17,7 +17,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-"""Handles all requests relating to instances (guest vms)."""
+"""Handles all requests relating to compute resources (e.g. guest vms,
+networking and storage of vms, and compute hosts on which they run)."""
 
 import functools
 import re
@@ -27,6 +28,7 @@ import novaclient
 import webob.exc
 
 from nova import block_device
+from nova.compute import aggregate_states
 from nova.compute import instance_types
 from nova.compute import power_state
 from nova.compute import task_states
@@ -37,6 +39,7 @@ from nova import flags
 import nova.image
 from nova import log as logging
 from nova import network
+from nova.openstack.common import cfg
 import nova.policy
 from nova import quota
 from nova import rpc
@@ -47,12 +50,15 @@ from nova import volume
 
 LOG = logging.getLogger('nova.compute.api')
 
+find_host_timeout_opt = \
+    cfg.StrOpt('find_host_timeout',
+               default=30,
+               help='Timeout after NN seconds when looking for a host.')
 
 FLAGS = flags.FLAGS
+FLAGS.add_option(find_host_timeout_opt)
 flags.DECLARE('enable_zone_routing', 'nova.scheduler.api')
 flags.DECLARE('consoleauth_topic', 'nova.consoleauth')
-flags.DEFINE_integer('find_host_timeout', 30,
-                     'Timeout after NN seconds when looking for a host.')
 
 
 def check_instance_state(vm_state=None, task_state=None):
@@ -226,7 +232,7 @@ class API(base.Base):
 
         if instance_type['memory_mb'] < int(image.get('min_ram') or 0):
             raise exception.InstanceTypeMemoryTooSmall()
-        if instance_type['local_gb'] < int(image.get('min_disk') or 0):
+        if instance_type['root_gb'] < int(image.get('min_disk') or 0):
             raise exception.InstanceTypeDiskTooSmall()
 
         config_drive_id = None
@@ -315,7 +321,8 @@ class API(base.Base):
             'instance_type_id': instance_type['id'],
             'memory_mb': instance_type['memory_mb'],
             'vcpus': instance_type['vcpus'],
-            'local_gb': instance_type['local_gb'],
+            'root_gb': instance_type['root_gb'],
+            'ephemeral_gb': instance_type['ephemeral_gb'],
             'display_name': display_name,
             'display_description': display_description,
             'user_data': user_data or '',
@@ -376,13 +383,13 @@ class API(base.Base):
 
             # TODO(yamahata): ephemeralN where N > 0
             # Only ephemeral0 is allowed for now because InstanceTypes
-            # table only allows single local disk, local_gb.
+            # table only allows single local disk, ephemeral_gb.
             # In order to enhance it, we need to add a new columns to
             # instance_types table.
             if num > 0:
                 return 0
 
-            size = instance_type.get('local_gb')
+            size = instance_type.get('ephemeral_gb')
 
         return size
 
@@ -709,7 +716,7 @@ class API(base.Base):
                       "args": {"security_group_id": group_id}})
 
     def trigger_provider_fw_rules_refresh(self, context):
-        """Called when a rule is added to or removed from a security_group"""
+        """Called when a rule is added/removed from a provider firewall"""
 
         hosts = [x['host'] for (x, idx)
                            in self.db.service_get_all_compute_sorted(context)]
@@ -1240,7 +1247,7 @@ class API(base.Base):
         #disk format of vhd is non-shrinkable
         if orig_image.get('disk_format') == 'vhd':
             min_ram = instance['instance_type']['memory_mb']
-            min_disk = instance['instance_type']['local_gb']
+            min_disk = instance['instance_type']['root_gb']
         else:
             #set new image values to the original image values
             min_ram = orig_image.get('min_ram')
@@ -1680,25 +1687,30 @@ class API(base.Base):
         # in its info, if this changes, the next few lines will need to
         # accommodate the info containing floating as well as fixed ip
         # addresses
-        fixed_ip_addrs = []
-        for info in self.network_api.get_instance_nw_info(context.elevated(),
-                                                          instance):
-            ips = info[1]['ips']
-            fixed_ip_addrs.extend([ip_dict['ip'] for ip_dict in ips])
 
-        # TODO(tr3buchet): this will associate the floating IP with the first
-        # fixed_ip (lowest id) an instance has. This should be changed to
-        # support specifying a particular fixed_ip if multiple exist.
-        if not fixed_ip_addrs:
-            msg = _("instance |%s| has no fixed_ips. "
-                    "unable to associate floating ip") % instance_uuid
-            raise exception.ApiError(msg)
-        if len(fixed_ip_addrs) > 1:
-            LOG.warning(_("multiple fixed_ips exist, using the first: %s"),
-                                                         fixed_ip_addrs[0])
-        self.network_api.associate_floating_ip(context,
+        fail_bag = _('instance |%s| has no fixed ips. '
+                     'unable to associate floating ip') % instance_uuid
+
+        nw_info = self.network_api.get_instance_nw_info(context.elevated(),
+                                                        instance)
+
+        if nw_info:
+            ips = [ip for ip in nw_info[0].fixed_ips()]
+
+            # TODO(tr3buchet): this will associate the floating IP with the
+            # first # fixed_ip (lowest id) an instance has. This should be
+            # changed to # support specifying a particular fixed_ip if
+            # multiple exist.
+            if not ips:
+                raise exception.ApiError(fail_bag)
+            if len(ips) > 1:
+                LOG.warning(_('multiple fixedips exist, using the first: %s'),
+                                                             ips[0]['address'])
+            self.network_api.associate_floating_ip(context,
                                                floating_address=address,
-                                               fixed_address=fixed_ip_addrs[0])
+                                               fixed_address=ips[0]['address'])
+            return
+        raise exception.ApiError(fail_bag)
 
     @wrap_check_policy
     def get_instance_metadata(self, context, instance):
@@ -1739,3 +1751,129 @@ class API(base.Base):
 
         uuids = [instance['uuid'] for instance in instances]
         return self.db.instance_fault_get_by_instance_uuids(context, uuids)
+
+
+class AggregateAPI(base.Base):
+    """Sub-set of the Compute Manager API for managing host aggregates."""
+    def __init__(self, **kwargs):
+        super(AggregateAPI, self).__init__(**kwargs)
+
+    def create_aggregate(self, context, aggregate_name, availability_zone):
+        """Creates the model for the aggregate."""
+        values = {"name": aggregate_name,
+                  "availability_zone": availability_zone}
+        aggregate = self.db.aggregate_create(context, values)
+        return dict(aggregate.iteritems())
+
+    def get_aggregate(self, context, aggregate_id):
+        """Get an aggregate by id."""
+        aggregate = self.db.aggregate_get(context, aggregate_id)
+        return self._get_aggregate_info(context, aggregate)
+
+    def get_aggregate_list(self, context):
+        """Get all the aggregates for this zone."""
+        aggregates = self.db.aggregate_get_all(context, read_deleted="no")
+        return [self._get_aggregate_info(context, a) for a in aggregates]
+
+    def update_aggregate(self, context, aggregate_id, values):
+        """Update the properties of an aggregate."""
+        aggregate = self.db.aggregate_update(context, aggregate_id, values)
+        return self._get_aggregate_info(context, aggregate)
+
+    def update_aggregate_metadata(self, context, aggregate_id, metadata):
+        """Updates the aggregate metadata.
+
+        If a key is set to None, it gets removed from the aggregate metadata.
+        """
+        # As a first release of the host aggregates blueprint, this call is
+        # pretty dumb, in the sense that interacts only with the model.
+        # In later releasses, updating metadata may trigger virt actions like
+        # the setup of shared storage, or more generally changes to the
+        # underlying hypervisor pools.
+        for key in metadata.keys():
+            if not metadata[key]:
+                try:
+                    self.db.aggregate_metadata_delete(context,
+                                                      aggregate_id, key)
+                    metadata.pop(key)
+                except exception.AggregateMetadataNotFound, e:
+                    LOG.warn(e.message)
+        self.db.aggregate_metadata_add(context, aggregate_id, metadata)
+        return self.get_aggregate(context, aggregate_id)
+
+    def delete_aggregate(self, context, aggregate_id):
+        """Deletes the aggregate."""
+        hosts = self.db.aggregate_host_get_all(context, aggregate_id,
+                                               read_deleted="no")
+        if len(hosts) > 0:
+            raise exception.InvalidAggregateAction(action='delete',
+                                                   aggregate_id=aggregate_id,
+                                                   reason='not empty')
+        values = {'operational_state': aggregate_states.DISMISSED}
+        self.db.aggregate_update(context, aggregate_id, values)
+        self.db.aggregate_delete(context, aggregate_id)
+
+    def add_host_to_aggregate(self, context, aggregate_id, host):
+        """Adds the host to an aggregate."""
+        # validates the host; ComputeHostNotFound is raised if invalid
+        service = self.db.service_get_all_compute_by_host(context, host)[0]
+        # add host, and reflects action in the aggregate operational state
+        aggregate = self.db.aggregate_get(context, aggregate_id)
+        if aggregate.operational_state in [aggregate_states.CREATED,
+                                           aggregate_states.ACTIVE]:
+            if service.availability_zone != aggregate.availability_zone:
+                raise exception.\
+                    InvalidAggregateAction(action='add host',
+                                           aggregate_id=aggregate_id,
+                                           reason='availibility zone mismatch')
+            self.db.aggregate_host_add(context, aggregate_id, host)
+            if aggregate.operational_state == aggregate_states.CREATED:
+                values = {'operational_state': aggregate_states.CHANGING}
+                self.db.aggregate_update(context, aggregate_id, values)
+            queue = self.db.queue_get_for(context, service.topic, host)
+            rpc.cast(context, queue, {"method": "add_aggregate_host",
+                                      "args": {"aggregate_id": aggregate_id,
+                                               "host": host}, })
+            return self.get_aggregate(context, aggregate_id)
+        else:
+            invalid = {aggregate_states.CHANGING: 'setup in progress',
+                       aggregate_states.DISMISSED: 'aggregate deleted',
+                       aggregate_states.ERROR: 'aggregate in error', }
+            if aggregate.operational_state in invalid.keys():
+                raise exception.\
+                    InvalidAggregateAction(action='add host',
+                            aggregate_id=aggregate_id,
+                            reason=invalid[aggregate.operational_state])
+
+    def remove_host_from_aggregate(self, context, aggregate_id, host):
+        """Removes host from the aggregate."""
+        # validates the host; ComputeHostNotFound is raised if invalid
+        service = self.db.service_get_all_compute_by_host(context, host)[0]
+        aggregate = self.db.aggregate_get(context, aggregate_id)
+        if aggregate.operational_state in [aggregate_states.ACTIVE,
+                                           aggregate_states.ERROR]:
+            self.db.aggregate_host_delete(context, aggregate_id, host)
+            queue = self.db.queue_get_for(context, service.topic, host)
+            rpc.cast(context, queue, {"method": "remove_aggregate_host",
+                                      "args": {"aggregate_id": aggregate_id,
+                                               "host": host}, })
+            return self.get_aggregate(context, aggregate_id)
+        else:
+            invalid = {aggregate_states.CHANGING: 'setup in progress',
+                       aggregate_states.DISMISSED: 'aggregate deleted', }
+            if aggregate.operational_state in invalid.keys():
+                raise exception.\
+                    InvalidAggregateAction(action='remove host',
+                            aggregate_id=aggregate_id,
+                            reason=invalid[aggregate.operational_state])
+
+    def _get_aggregate_info(self, context, aggregate):
+        """Builds a dictionary with aggregate props, metadata and hosts."""
+        metadata = self.db.aggregate_metadata_get(context, aggregate.id)
+        hosts = self.db.aggregate_host_get_all(context, aggregate.id,
+                                               read_deleted="no")
+
+        result = dict(aggregate.iteritems())
+        result["metadata"] = metadata
+        result["hosts"] = hosts
+        return result
