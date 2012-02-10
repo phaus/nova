@@ -47,23 +47,48 @@ OS_CONFIRM_RESIZE = core_model.Action(
                  {'method': ''})
 
 # Trusted Compute Pool technology mixin definition
-TCP_ATTRIBUTES = {'eu.fi-ware.compute.tcp': ''}
+TCP_ATTRIBUTES = {'come.intel.compute.tcp': '', }
 TCP = core_model.Mixin(\
     'http://schemas.fi-ware.eu/occi/infrastructure/compute#',
     'tcp', attributes=TCP_ATTRIBUTES)
 
+# Key pair extension
+KEY_PAIR_ATTRIBUTES = {'org.openstack.credentials.publickey.name': '',
+                       'org.openstack.credentials.publickey.data': '', }
+KEY_PAIR_EXT = core_model.Mixin(\
+    'http://schemas.openstack.org/instance/credentials#',
+    'public_key', attributes=KEY_PAIR_ATTRIBUTES)
+
+# VM Administrative password extension 
+ADMIN_PWD_ATTRIBUTES = {'org.openstack.credentials.admin_pwd': '', }
+ADMIN_PWD_EXT = core_model.Mixin(\
+    'http://schemas.openstack.org/instance/credentials#',
+    'admin_pwd', attributes=ADMIN_PWD_ATTRIBUTES)
 
 class TCPBackend(backend.MixinBackend):
     '''
     Trusted Compute Pool technology mixin backend handler
     '''
-    def create(self, entity, extras):
-        if not entity.kind == infrastructure.COMPUTE:
-            raise AttributeError('This mixin cannot be applied to this kind.')
-        entity.attributes['eu.fi-ware.compute.tcp'] = 'true'
+    pass
+#    def create(self, entity, extras):
+#        if not entity.kind == infrastructure.COMPUTE:
+#            raise AttributeError('This mixin cannot be applied to this kind.')
+#        entity.attributes['eu.fi-ware.compute.tcp'] = 'true'
+#
+#    def delete(self, entity, extras):
+#        entity.attributes.pop('eu.fi-ware.compute.tcp')
 
-    def delete(self, entity, extras):
-        entity.attributes.pop('eu.fi-ware.compute.tcp')
+class KeyPairBackend(backend.MixinBackend):
+    '''
+    Public SSH Keypair mixin backend handler
+    '''
+    pass
+
+class AdminPasswordBackend(backend.MixinBackend):
+    '''
+    Administrative password mixin backend handler
+    '''
+    pass
 
 
 class OsTemplate(core_model.Mixin):
