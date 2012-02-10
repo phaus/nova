@@ -35,7 +35,6 @@ from nova import utils
 from nova.api.ec2 import cloud
 from nova.compute import power_state
 from nova.compute import vm_states
-from nova.virt.disk import api as disk
 from nova.virt import images
 from nova.virt import driver
 from nova.virt.libvirt import connection
@@ -123,6 +122,10 @@ class LibvirtVolumeTestCase(test.TestCase):
             def get_hypervisor_type(self):
                 return self.hyperv
         self.fake_conn = FakeLibvirtConnection("Xen")
+        self.connr = {
+            'ip': '127.0.0.1',
+            'initiator': 'fake_initiator'
+        }
 
     def test_libvirt_iscsi_driver(self):
         # NOTE(vish) exists is to make driver assume connecting worked
@@ -136,8 +139,7 @@ class LibvirtVolumeTestCase(test.TestCase):
                'name': name,
                'provider_auth': None,
                'provider_location': '%s,fake %s' % (location, iqn)}
-        address = '127.0.0.1'
-        connection_info = vol_driver.initialize_connection(vol, '127.0.0.1')
+        connection_info = vol_driver.initialize_connection(vol, self.connr)
         mount_device = "vde"
         xml = libvirt_driver.connect_volume(connection_info, mount_device)
         tree = xml_to_tree(xml)
@@ -145,7 +147,7 @@ class LibvirtVolumeTestCase(test.TestCase):
         self.assertEqual(tree.get('type'), 'block')
         self.assertEqual(tree.find('./source').get('dev'), dev_str)
         libvirt_driver.disconnect_volume(connection_info, mount_device)
-        connection_info = vol_driver.terminate_connection(vol, '127.0.0.1')
+        connection_info = vol_driver.terminate_connection(vol, self.connr)
         expected_commands = [('iscsiadm', '-m', 'node', '-T', iqn,
                               '-p', location),
                              ('iscsiadm', '-m', 'node', '-T', iqn,
@@ -167,8 +169,7 @@ class LibvirtVolumeTestCase(test.TestCase):
         libvirt_driver = volume.LibvirtNetVolumeDriver(self.fake_conn)
         name = 'volume-00000001'
         vol = {'id': 1, 'name': name}
-        address = '127.0.0.1'
-        connection_info = vol_driver.initialize_connection(vol, address)
+        connection_info = vol_driver.initialize_connection(vol, self.connr)
         mount_device = "vde"
         xml = libvirt_driver.connect_volume(connection_info, mount_device)
         tree = xml_to_tree(xml)
@@ -176,15 +177,14 @@ class LibvirtVolumeTestCase(test.TestCase):
         self.assertEqual(tree.find('./source').get('protocol'), 'sheepdog')
         self.assertEqual(tree.find('./source').get('name'), name)
         libvirt_driver.disconnect_volume(connection_info, mount_device)
-        connection_info = vol_driver.terminate_connection(vol, '127.0.0.1')
+        connection_info = vol_driver.terminate_connection(vol, self.connr)
 
     def test_libvirt_rbd_driver(self):
         vol_driver = volume_driver.RBDDriver()
         libvirt_driver = volume.LibvirtNetVolumeDriver(self.fake_conn)
         name = 'volume-00000001'
         vol = {'id': 1, 'name': name}
-        address = '127.0.0.1'
-        connection_info = vol_driver.initialize_connection(vol, address)
+        connection_info = vol_driver.initialize_connection(vol, self.connr)
         mount_device = "vde"
         xml = libvirt_driver.connect_volume(connection_info, mount_device)
         tree = xml_to_tree(xml)
@@ -193,7 +193,7 @@ class LibvirtVolumeTestCase(test.TestCase):
         rbd_name = '%s/%s' % (FLAGS.rbd_pool, name)
         self.assertEqual(tree.find('./source').get('name'), rbd_name)
         libvirt_driver.disconnect_volume(connection_info, mount_device)
-        connection_info = vol_driver.terminate_connection(vol, '127.0.0.1')
+        connection_info = vol_driver.terminate_connection(vol, self.connr)
 
 
 class CacheConcurrencyTestCase(test.TestCase):
@@ -215,12 +215,11 @@ class CacheConcurrencyTestCase(test.TestCase):
 
         self.stubs.Set(os.path, 'exists', fake_exists)
         self.stubs.Set(utils, 'execute', fake_execute)
+        self.stubs.Set(connection.disk, 'extend', fake_extend)
         connection.libvirt_utils = fake_libvirt_utils
-        connection.disk.extend = fake_extend
 
     def tearDown(self):
         connection.libvirt_utils = libvirt_utils
-        connection.disk.extend = disk.extend
         super(CacheConcurrencyTestCase, self).tearDown()
 
     def test_same_fname_concurrency(self):
@@ -300,11 +299,10 @@ class LibvirtConnTestCase(test.TestCase):
         def fake_extend(image, size):
             pass
 
-        connection.disk.extend = fake_extend
+        self.stubs.Set(connection.disk, 'extend', fake_extend)
 
     def tearDown(self):
         connection.libvirt_utils = libvirt_utils
-        connection.disk.extend = disk.extend
         super(LibvirtConnTestCase, self).tearDown()
 
     test_instance = {'memory_kb': '1024000',
@@ -354,6 +352,22 @@ class LibvirtConnTestCase(test.TestCase):
                        'availability_zone': 'zone'}
 
         return db.service_create(context.get_admin_context(), service_ref)
+
+    def test_get_connector(self):
+        initiator = 'fake.initiator.iqn'
+        ip = 'fakeip'
+        self.flags(my_ip=ip)
+
+        conn = connection.LibvirtConnection(True)
+        expected = {
+            'ip': ip,
+            'initiator': initiator
+        }
+        volume = {
+            'id': 'fake'
+        }
+        result = conn.get_volume_connector(volume)
+        self.assertDictMatch(expected, result)
 
     def test_preparing_xml_info(self):
         conn = connection.LibvirtConnection(True)
@@ -1764,6 +1778,17 @@ class NWFilterTestCase(test.TestCase):
 
 
 class LibvirtUtilsTestCase(test.TestCase):
+    def test_get_iscsi_initiator(self):
+        self.mox.StubOutWithMock(utils, 'execute')
+        initiator = 'fake.initiator.iqn'
+        rval = ("junk\nInitiatorName=%s\njunk\n" % initiator, None)
+        utils.execute('cat', '/etc/iscsi/initiatorname.iscsi',
+                      run_as_root=True).AndReturn(rval)
+        # Start test
+        self.mox.ReplayAll()
+        result = libvirt_utils.get_iscsi_initiator()
+        self.assertEqual(initiator, result)
+
     def test_create_image(self):
         self.mox.StubOutWithMock(utils, 'execute')
         utils.execute('qemu-img', 'create', '-f', 'raw',
@@ -1896,20 +1921,6 @@ disk size: 4.4M''', ''))
                 self.assertEquals(fp.read(), 'hello')
         finally:
             os.unlink(dst_path)
-
-    def test_run_ajaxterm(self):
-        self.mox.StubOutWithMock(utils, 'execute')
-        token = 's3cr3tt0ken'
-        shell_cmd = 'shell-cmd.py'
-        port = 2048
-        utils.execute(mox.IgnoreArg(),
-                      '--command', shell_cmd,
-                      '-t', token,
-                      '-p', port)
-
-        # Start test
-        self.mox.ReplayAll()
-        libvirt_utils.run_ajaxterm(shell_cmd, token, port)
 
     def test_get_fs_info(self):
         # Use a 1024-byte block size (df -k) because OS X does not support

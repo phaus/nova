@@ -17,7 +17,7 @@
 
 import time
 
-from netaddr import IPNetwork, IPAddress
+import netaddr
 
 from nova.compute import instance_types
 from nova import context
@@ -50,6 +50,9 @@ quantum_opts = [
     cfg.BoolOpt('quantum_use_port_security',
                 default=False,
                 help='Whether or not to enable port security'),
+    cfg.BoolOpt('quantum_port_security_include_link_local',
+                default=False,
+                help='Add the link local address to the port security list'),
     ]
 
 FLAGS = flags.FLAGS
@@ -197,9 +200,10 @@ class QuantumManager(manager.FloatingIP, manager.FlatManager):
         # created in Quantum, so make sure.
         if quantum_net_id:
             if not self.q_conn.network_exists(q_tenant_id, quantum_net_id):
-                    raise Exception(_("Unable to find existing quantum " \
-                        " network for tenant '%(q_tenant_id)s' with "
-                        "net-id '%(quantum_net_id)s'" % locals()))
+                    raise Exception(_("Unable to find existing quantum "
+                                      "network for tenant '%(q_tenant_id)s' "
+                                      "with net-id '%(quantum_net_id)s'" %
+                                      locals()))
         else:
             nova_id = self._get_nova_id()
             quantum_net_id = self.q_conn.create_network(q_tenant_id, label,
@@ -287,8 +291,8 @@ class QuantumManager(manager.FloatingIP, manager.FlatManager):
         requested_networks = kwargs.get('requested_networks')
 
         if requested_networks:
-            net_proj_pairs = [(net_id, project_id) \
-                for (net_id, _i) in requested_networks]
+            net_proj_pairs = [(net_id, project_id)
+                              for (net_id, _i) in requested_networks]
         else:
             net_proj_pairs = self.ipam.get_project_and_global_net_ids(context,
                                                                 project_id)
@@ -341,13 +345,18 @@ class QuantumManager(manager.FloatingIP, manager.FlatManager):
             rxtx_factor = instance_type['rxtx_factor']
             nova_id = self._get_nova_id(instance)
             # Tell the ipam library to allocate an IP
-            ip = self.ipam.allocate_fixed_ip(context, project_id,
+            ips = self.ipam.allocate_fixed_ips(context, project_id,
                     quantum_net_id, net_tenant_id, vif_rec)
             pairs = []
             # Set up port security if enabled
             if FLAGS.quantum_use_port_security:
+                if FLAGS.quantum_port_security_include_link_local:
+                    mac = netaddr.EUI(vif_rec['address'])
+                    ips.append(str(mac.ipv6_link_local()))
+
                 pairs = [{'mac_address': vif_rec['address'],
-                          'ip_address': ip}]
+                          'ip_address': ip} for ip in ips]
+
             self.q_conn.create_and_attach_port(net_tenant_id, quantum_net_id,
                                                vif_rec['uuid'],
                                                vm_id=instance['uuid'],
@@ -384,15 +393,15 @@ class QuantumManager(manager.FloatingIP, manager.FlatManager):
             # previously gotten from the network table (they'll be
             # passed to the linux_net functions).
             network_ref['cidr'] = subnet['cidr']
-            n = IPNetwork(subnet['cidr'])
+            n = netaddr.IPNetwork(subnet['cidr'])
             # NOTE(tr3buchet): should probably not always assume first+1
-            network_ref['dhcp_server'] = IPAddress(n.first + 1)
+            network_ref['dhcp_server'] = netaddr.IPAddress(n.first + 1)
             # TODO(bgh): Melange should probably track dhcp_start
             # TODO(tr3buchet): melange should store dhcp_server as well
-            if not 'dhcp_start' in network_ref or \
-                    network_ref['dhcp_start'] is None:
-                network_ref['dhcp_start'] = IPAddress(n.first + 2)
-            network_ref['broadcast'] = IPAddress(n.broadcast)
+            if (not 'dhcp_start' in network_ref or
+                network_ref['dhcp_start'] is None):
+                network_ref['dhcp_start'] = netaddr.IPAddress(n.first + 2)
+            network_ref['broadcast'] = netaddr.IPAddress(n.broadcast)
             network_ref['gateway'] = subnet['gateway']
             # Construct the interface id that we'll use for the bridge
             interface_id = "gw-" + str(network_ref['uuid'][0:11])
@@ -478,9 +487,8 @@ class QuantumManager(manager.FloatingIP, manager.FlatManager):
                     net_tenant_id = FLAGS.quantum_default_tenant_id
                 network = {'id': network['id'],
                            'uuid': network['uuid'],
-                           'bridge': 'ovs_flag',
-                           'label': self.q_conn.get_network_name(net_tenant_id,
-                                                              network['uuid']),
+                           'bridge': '',  # Quantum ignores this field
+                           'label': network['label'],
                            'project_id': net_tenant_id}
                 networks[vif['uuid']] = network
 
@@ -531,7 +539,7 @@ class QuantumManager(manager.FloatingIP, manager.FlatManager):
                 # except anything so the rest of deallocate can succeed
                 msg = _('port deallocation failed for instance: '
                         '|%(instance_id)s|, port_id: |%(port_id)s|')
-                LOG.critical(msg % locals)
+                LOG.critical(msg % locals())
 
             # ipam deallocation block
             try:
@@ -540,6 +548,7 @@ class QuantumManager(manager.FloatingIP, manager.FlatManager):
 
                 self.ipam.deallocate_ips_by_vif(context, ipam_tenant_id,
                                                 net_id, vif_ref)
+                db.virtual_interface_delete(admin_context, vif_ref['id'])
 
                 # If DHCP is enabled on this network then we need to update the
                 # leases and restart the server.
@@ -551,14 +560,7 @@ class QuantumManager(manager.FloatingIP, manager.FlatManager):
                 vif_uuid = vif_ref['uuid']
                 msg = _('ipam deallocation failed for instance: '
                         '|%(instance_id)s|, vif_uuid: |%(vif_uuid)s|')
-                LOG.critical(msg % locals)
-
-        try:
-            db.virtual_interface_delete_by_instance(admin_context,
-                                                    instance_id)
-        except exception.InstanceNotFound:
-            LOG.error(_("Attempted to deallocate non-existent instance: %s" %
-                        (instance_id)))
+                LOG.critical(msg % locals())
 
     # TODO(bgh): At some point we should consider merging enable_dhcp() and
     # update_dhcp()
@@ -576,11 +578,11 @@ class QuantumManager(manager.FloatingIP, manager.FlatManager):
             # passed to the linux_net functions).
             if subnet['cidr']:
                 network_ref['cidr'] = subnet['cidr']
-            n = IPNetwork(network_ref['cidr'])
-            network_ref['dhcp_server'] = IPAddress(n.first + 1)
-            network_ref['dhcp_start'] = IPAddress(n.first + 2)
-            network_ref['broadcast'] = IPAddress(n.broadcast)
-            network_ref['gateway'] = IPAddress(n.first + 1)
+            n = netaddr.IPNetwork(network_ref['cidr'])
+            network_ref['dhcp_server'] = netaddr.IPAddress(n.first + 1)
+            network_ref['dhcp_start'] = netaddr.IPAddress(n.first + 2)
+            network_ref['broadcast'] = netaddr.IPAddress(n.broadcast)
+            network_ref['gateway'] = netaddr.IPAddress(n.first + 1)
             dev = self._generate_gw_dev(network_ref['uuid'])
             # And remove the dhcp mappings for the subnet
             hosts = self.get_dhcp_hosts_text(context,
@@ -642,9 +644,9 @@ class QuantumManager(manager.FloatingIP, manager.FlatManager):
             address, vif_id = ip
             vif = db.virtual_interface_get_by_uuid(admin_context, vif_id)
             mac_address = vif['address']
-            text = "%s %s %s %s *\n" % \
-                (int(time.time()) - FLAGS.dhcp_lease_time,
-                 mac_address, address, '*')
+            text = ("%s %s %s %s *\n" % (int(time.time()) -
+                                         FLAGS.dhcp_lease_time,
+                                         mac_address, address, '*'))
             leases_text += text
         LOG.debug("DHCP leases: %s" % leases_text)
         return leases_text

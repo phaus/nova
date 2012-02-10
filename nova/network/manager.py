@@ -187,8 +187,8 @@ class RPCAllocateFixedIP(object):
         for network in networks:
             address = None
             if requested_networks is not None:
-                for address in (fixed_ip for (uuid, fixed_ip) in \
-                              requested_networks if network['uuid'] == uuid):
+                for address in (fixed_ip for (uuid, fixed_ip) in
+                                requested_networks if network['uuid'] == uuid):
                     break
 
             # NOTE(vish): if we are not multi_host pass to the network host
@@ -291,8 +291,8 @@ class FloatingIP(object):
         # call the next inherited class's allocate_for_instance()
         # which is currently the NetworkManager version
         # do this first so fixed ip is already allocated
-        nw_info = \
-               super(FloatingIP, self).allocate_for_instance(context, **kwargs)
+        nw_info = super(FloatingIP, self).allocate_for_instance(context,
+                                                                **kwargs)
         if FLAGS.auto_assign_floating_ip:
             # allocate a floating ip
             floating_address = self.allocate_floating_ip(context, project_id)
@@ -881,8 +881,9 @@ class NetworkManager(manager.SchedulerDependentManager):
         """
         instance_id = kwargs.pop('instance_id')
         try:
-            fixed_ips = kwargs.get('fixed_ips') or \
-                  self.db.fixed_ip_get_by_instance(context, instance_id)
+            fixed_ips = (kwargs.get('fixed_ips') or
+                         self.db.fixed_ip_get_by_instance(context,
+                                                          instance_id))
         except exception.FixedIpNotFoundForInstance:
             fixed_ips = []
         LOG.debug(_("network deallocation for instance |%s|"), instance_id,
@@ -1476,6 +1477,11 @@ class NetworkManager(manager.SchedulerDependentManager):
         fixed = self.db.fixed_ip_get(context, id)
         return dict(fixed.iteritems())
 
+    def get_vif_by_mac_address(self, context, mac_address):
+        """Returns the vifs record for the mac_address"""
+        return self.db.virtual_interface_get_by_address(context,
+                                                        mac_address)
+
 
 class FlatManager(NetworkManager):
     """Basic network where no vlans are used.
@@ -1514,8 +1520,8 @@ class FlatManager(NetworkManager):
         for network in networks:
             address = None
             if requested_networks is not None:
-                for address in (fixed_ip for (uuid, fixed_ip) in \
-                              requested_networks if network['uuid'] == uuid):
+                for address in (fixed_ip for (uuid, fixed_ip) in
+                                requested_networks if network['uuid'] == uuid):
                     break
 
             self.allocate_fixed_ip(context, instance_id,

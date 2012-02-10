@@ -33,6 +33,8 @@ import uuid
 from decimal import Decimal, InvalidOperation
 from xml.dom import minidom
 
+from eventlet import greenthread
+
 from nova import exception
 from nova import flags
 from nova.image import glance
@@ -378,8 +380,8 @@ class VMHelper(HelperBase):
         """
         # NOTE(sirp): Currently we only support uploading images as VHD, there
         # is no RAW equivalent (yet)
-        logging.debug(_("Asking xapi to upload %(vdi_uuids)s as"
-                " ID %(image_id)s") % locals())
+        LOG.debug(_("Asking xapi to upload %(vdi_uuids)s as"
+                    " ID %(image_id)s") % locals())
 
         glance_host, glance_port = glance.pick_glance_api_server()
 
@@ -513,7 +515,7 @@ class VMHelper(HelperBase):
         # NOTE(jk0): We use a FAT32 filesystem for the Windows swap
         # partition because that is what parted supports.
         is_windows = instance.os_type == "windows"
-        fs_type = "fat32" if is_windows else "linux-swap"
+        fs_type = "vfat" if is_windows else "linux-swap"
 
         cls._generate_disk(session, instance, vm_ref, userdevice,
                            'swap', swap_mb, fs_type)
@@ -683,8 +685,8 @@ class VMHelper(HelperBase):
         if image_type == ImageType.DISK:
             # Make room for MBR.
             vdi_size += MBR_SIZE_BYTES
-        elif image_type in (ImageType.KERNEL, ImageType.RAMDISK) and \
-             vdi_size > FLAGS.max_kernel_ramdisk_size:
+        elif (image_type in (ImageType.KERNEL, ImageType.RAMDISK) and
+              vdi_size > FLAGS.max_kernel_ramdisk_size):
             max_size = FLAGS.max_kernel_ramdisk_size
             raise exception.Error(
                 _("Kernel/Ramdisk image is too large: %(vdi_size)d bytes, "
@@ -921,8 +923,8 @@ class VMHelper(HelperBase):
                         ref = node.childNodes
                         # Name and Value
                         if len(ref) > 6:
-                            diags[ref[0].firstChild.data] = \
-                                ref[6].firstChild.data
+                            _ref_zero = ref[0].firstChild.data
+                            diags[_ref_zero] = ref[6].firstChild.data
             return diags
         except cls.XenAPI.Failure as e:
             return {"Unable to retrieve diagnostics": e}
@@ -1211,16 +1213,7 @@ def _wait_for_vhd_coalesce(session, instance, sr_ref, vdi_ref,
             snapshot
     """
     max_attempts = FLAGS.xenapi_vhd_coalesce_max_attempts
-    attempts = {'counter': 0}
-
-    def _poll_vhds():
-        attempts['counter'] += 1
-        if attempts['counter'] > max_attempts:
-            counter = attempts['counter']
-            msg = (_("VHD coalesce attempts exceeded (%(counter)d >"
-                    " %(max_attempts)d), giving up...") % locals())
-            raise exception.Error(msg)
-
+    for i in xrange(max_attempts):
         VMHelper.scan_sr(session, instance, sr_ref)
         parent_uuid = get_vhd_parent_uuid(session, vdi_ref)
         if original_parent_uuid and (parent_uuid != original_parent_uuid):
@@ -1228,13 +1221,13 @@ def _wait_for_vhd_coalesce(session, instance, sr_ref, vdi_ref,
                     " %(original_parent_uuid)s, waiting for coalesce...")
                     % locals())
         else:
-            # Breakout of the loop (normally) and return the parent_uuid
-            raise utils.LoopingCallDone(parent_uuid)
+            return parent_uuid
 
-    loop = utils.LoopingCall(_poll_vhds)
-    loop.start(FLAGS.xenapi_vhd_coalesce_poll_interval, now=True)
-    parent_uuid = loop.wait()
-    return parent_uuid
+        greenthread.sleep(FLAGS.xenapi_vhd_coalesce_poll_interval)
+
+    msg = (_("VHD coalesce attempts exceeded (%(max_attempts)d)"
+             ", giving up...") % locals())
+    raise exception.Error(msg)
 
 
 def remap_vbd_dev(dev):
@@ -1319,7 +1312,6 @@ def vbd_unplug_with_retry(session, vbd_ref):
     DEVICE_DETACH_REJECTED.  For reasons which I don't understand, we're
     seeing the device still in use, even when all processes using the device
     should be dead."""
-    # FIXME(sirp): We can use LoopingCall here w/o blocking sleep()
     while True:
         try:
             session.call_xenapi("VBD.unplug", vbd_ref)
@@ -1329,7 +1321,7 @@ def vbd_unplug_with_retry(session, vbd_ref):
             if (len(e.details) > 0 and
                 e.details[0] == 'DEVICE_DETACH_REJECTED'):
                 LOG.debug(_('VBD.unplug rejected: retrying...'))
-                time.sleep(1)
+                greenthread.sleep(1)
                 LOG.debug(_('Not sleeping anymore!'))
             elif (len(e.details) > 0 and
                   e.details[0] == 'DEVICE_ALREADY_DETACHED'):
@@ -1446,9 +1438,14 @@ def _resize_part_and_fs(dev, start, old_sectors, new_sectors):
                   run_as_root=True)
 
     # fsck the disk
+    #
     # NOTE(sirp): using -p here to automatically repair filesystem, is
     # this okay?
-    utils.execute('e2fsck', '-f', '-p', partition_path, run_as_root=True)
+    #
+    # Exit Code 1 = File system errors corrected
+    #           2 = File system errors corrected, system needs a reboot
+    utils.execute('e2fsck', '-f', '-p', partition_path, run_as_root=True,
+                  check_exit_code=[0, 1, 2])
 
     if new_sectors < old_sectors:
         # Resizing down, resize filesystem before partition resize

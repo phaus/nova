@@ -28,10 +28,9 @@ from nova.virt import netutils
 
 LOG = logging.getLogger("nova.virt.firewall")
 
-allow_same_net_traffic_opt = \
-    cfg.BoolOpt('allow_same_net_traffic',
-                default=True,
-                help='Whether to allow network traffic from same network')
+allow_same_net_traffic_opt = cfg.BoolOpt('allow_same_net_traffic',
+        default=True,
+        help='Whether to allow network traffic from same network')
 
 FLAGS = flags.FLAGS
 FLAGS.add_option(allow_same_net_traffic_opt)
@@ -135,7 +134,7 @@ class IptablesFirewallDriver(FirewallDriver):
         self.instances[instance['id']] = instance
         self.network_infos[instance['id']] = network_info
         self.add_filters_for_instance(instance)
-        LOG.debug(_('Filters added to the instance: %r'), instance)
+        LOG.debug(_('Filters added to instance %s'), instance['uuid'])
         self.refresh_provider_fw_rules()
         LOG.debug(_('Provider Firewall Rules refreshed'))
         self.iptables.apply()

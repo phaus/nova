@@ -168,8 +168,8 @@ class API(base.Base):
                     volume_metadata[i['key']] = i['value']
 
                 for k, v in searchdict.iteritems():
-                    if k not in volume_metadata.keys()\
-                       or volume_metadata[k] != v:
+                    if (k not in volume_metadata.keys() or
+                        volume_metadata[k] != v):
                         return False
                 return True
 
@@ -244,22 +244,22 @@ class API(base.Base):
                   "args": {"volume_id": volume['id']}})
 
     @wrap_check_policy
-    def initialize_connection(self, context, volume, address):
+    def initialize_connection(self, context, volume, connector):
         host = volume['host']
         queue = self.db.queue_get_for(context, FLAGS.volume_topic, host)
         return rpc.call(context, queue,
                         {"method": "initialize_connection",
                          "args": {"volume_id": volume['id'],
-                                  "address": address}})
+                                  "connector": connector}})
 
     @wrap_check_policy
-    def terminate_connection(self, context, volume, address):
+    def terminate_connection(self, context, volume, connector):
         host = volume['host']
         queue = self.db.queue_get_for(context, FLAGS.volume_topic, host)
         return rpc.call(context, queue,
                         {"method": "terminate_connection",
                          "args": {"volume_id": volume['id'],
-                                  "address": address}})
+                                  "connector": connector}})
 
     def _create_snapshot(self, context, volume, name, description,
                          force=False):

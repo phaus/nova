@@ -65,7 +65,7 @@ import time
 import urlparse
 import xmlrpclib
 
-from eventlet import event
+from eventlet import greenthread
 from eventlet import queue
 from eventlet import tpool
 from eventlet import timeout
@@ -179,6 +179,7 @@ class XenAPIConnection(driver.ComputeDriver):
         self._host_state = None
         self._product_version = self._session.get_product_version()
         self._vmops = VMOps(self._session, self._product_version)
+        self._initiator = None
 
     @property
     def host_state(self):
@@ -324,29 +325,35 @@ class XenAPIConnection(driver.ComputeDriver):
         start_time = time.mktime(start_time.timetuple())
         if stop_time:
             stop_time = time.mktime(stop_time.timetuple())
-        for iusage in self._vmops.get_all_bw_usage(start_time, stop_time).\
-                      values():
+        for iusage in self._vmops.get_all_bw_usage(start_time,
+                                                   stop_time).values():
             for macaddr, usage in iusage.iteritems():
-                vi = db.virtual_interface_get_by_address(
-                                    context.get_admin_context(),
-                                    macaddr)
-                if vi:
-                    bwusage.append(dict(virtual_interface=vi,
-                                        bw_in=usage['bw_in'],
-                                        bw_out=usage['bw_out']))
+                bwusage.append(dict(mac_address=macaddr,
+                                    bw_in=usage['bw_in'],
+                                    bw_out=usage['bw_out']))
         return bwusage
 
     def get_console_output(self, instance):
         """Return snapshot of console"""
         return self._vmops.get_console_output(instance)
 
-    def get_ajax_console(self, instance):
-        """Return link to instance's ajax console"""
-        return self._vmops.get_ajax_console(instance)
-
     def get_vnc_console(self, instance):
-        """Return link to instance's ajax console"""
+        """Return link to instance's VNC console"""
         return self._vmops.get_vnc_console(instance)
+
+    def get_volume_connector(self, _instance):
+        """Return volume connector information"""
+        if not self._initiator:
+            stats = self.get_host_stats(update=True)
+            try:
+                self._initiator = stats['host_other-config']['iscsi_iqn']
+            except (TypeError, KeyError):
+                LOG.warn(_('Could not determine iscsi initiator name'))
+                self._initiator = None
+        return {
+            'ip': self.get_host_ip_addr(),
+            'initiator': self._initiator
+        }
 
     @staticmethod
     def get_host_ip_addr():
@@ -556,54 +563,44 @@ class XenAPISession(object):
     def wait_for_task(self, task, uuid=None):
         """Return the result of the given task. The task is polled
         until it completes."""
-        done = event.Event()
-        loop = utils.LoopingCall(f=None)
-
-        def _poll_task():
+        while True:
             """Poll the given XenAPI task, and return the result if the
             action was completed successfully or not.
             """
-            try:
-                ctxt = context.get_admin_context()
-                name = self.call_xenapi("task.get_name_label", task)
-                status = self.call_xenapi("task.get_status", task)
+            ctxt = context.get_admin_context()
+            name = self.call_xenapi("task.get_name_label", task)
+            status = self.call_xenapi("task.get_status", task)
 
-                # Ensure action is never > 255
-                action = dict(action=name[:255], error=None)
-                log_instance_actions = (FLAGS.xenapi_log_instance_actions and
-                                        uuid)
+            # Ensure action is never > 255
+            action = dict(action=name[:255], error=None)
+            log_instance_actions = (FLAGS.xenapi_log_instance_actions and
+                                    uuid)
+            if log_instance_actions:
+                action["instance_uuid"] = uuid
+
+            if status == "pending":
+                pass
+            elif status == "success":
+                result = self.call_xenapi("task.get_result", task)
+                LOG.info(_("Task [%(name)s] %(task)s status:"
+                        " success    %(result)s") % locals())
+
                 if log_instance_actions:
-                    action["instance_uuid"] = uuid
+                    db.instance_action_create(ctxt, action)
 
-                if status == "pending":
-                    return
-                elif status == "success":
-                    result = self.call_xenapi("task.get_result", task)
-                    LOG.info(_("Task [%(name)s] %(task)s status:"
-                            " success    %(result)s") % locals())
+                return _parse_xmlrpc_value(result)
+            else:
+                error_info = self.call_xenapi("task.get_error_info", task)
+                LOG.warn(_("Task [%(name)s] %(task)s status:"
+                        " %(status)s    %(error_info)s") % locals())
 
-                    if log_instance_actions:
-                        db.instance_action_create(ctxt, action)
+                if log_instance_actions:
+                    action["error"] = str(error_info)
+                    db.instance_action_create(ctxt, action)
 
-                    done.send(_parse_xmlrpc_value(result))
-                else:
-                    error_info = self.call_xenapi("task.get_error_info", task)
-                    LOG.warn(_("Task [%(name)s] %(task)s status:"
-                            " %(status)s    %(error_info)s") % locals())
+                raise self.XenAPI.Failure(error_info)
 
-                    if log_instance_actions:
-                        action["error"] = str(error_info)
-                        db.instance_action_create(ctxt, action)
-
-                    done.send_exception(self.XenAPI.Failure(error_info))
-            except self.XenAPI.Failure, exc:
-                LOG.warn(exc)
-                done.send_exception(*sys.exc_info())
-            loop.stop()
-
-        loop.f = _poll_task
-        loop.start(FLAGS.xenapi_task_poll_interval, now=True)
-        return done.wait()
+            greenthread.sleep(FLAGS.xenapi_task_poll_interval)
 
     def _create_session(self, url):
         """Stubout point. This can be replaced with a mock session."""
@@ -684,8 +681,8 @@ class HostState(object):
             data["host_memory_total"] = host_memory.get('total', 0)
             data["host_memory_overhead"] = host_memory.get('overhead', 0)
             data["host_memory_free"] = host_memory.get('free', 0)
-            data["host_memory_free_computed"] = \
-                        host_memory.get('free-computed', 0)
+            data["host_memory_free_computed"] = host_memory.get(
+                                                'free-computed', 0)
             del data['host_memory']
         self._stats = data
 

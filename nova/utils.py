@@ -222,8 +222,7 @@ def execute(*cmd, **kwargs):
             _returncode = obj.returncode  # pylint: disable=E1101
             if _returncode:
                 LOG.debug(_('Result was %s') % _returncode)
-                if not ignore_exit_code \
-                    and _returncode not in check_exit_code:
+                if not ignore_exit_code and _returncode not in check_exit_code:
                     (stdout, stderr) = result
                     raise exception.ProcessExecutionError(
                             exit_code=_returncode,
@@ -325,7 +324,7 @@ def default_flagfile(filename='nova.conf', args=None):
         args = sys.argv
     for arg in args:
         if arg.find('flagfile') != -1:
-            return arg[arg.index('flagfile') + 1:]
+            return arg[arg.index('flagfile') + len('flagfile') + 1:]
     else:
         if not os.path.isabs(filename):
             # turn relative filename into an absolute path
@@ -415,12 +414,12 @@ def usage_from_instance(instance_ref, network_info=None, **kw):
           disk_gb=instance_ref['root_gb'] + instance_ref['ephemeral_gb'],
           display_name=instance_ref['display_name'],
           created_at=str(instance_ref['created_at']),
-          launched_at=str(instance_ref['launched_at']) \
+          launched_at=str(instance_ref['launched_at'])
                       if instance_ref['launched_at'] else '',
           image_ref_url=image_ref_url,
           state=instance_ref['vm_state'],
-          state_description=instance_ref['task_state'] \
-                             if instance_ref['task_state'] else '')
+          state_description=instance_ref['task_state']
+                            if instance_ref['task_state'] else '')
 
     if network_info is not None:
         usage_info['fixed_ips'] = network_info.fixed_ips()
@@ -635,7 +634,7 @@ class LoopingCall(object):
                 self.stop()
                 done.send(e.retvalue)
             except Exception:
-                logging.exception('in looping call')
+                LOG.exception(_('in looping call'))
                 done.send_exception(*sys.exc_info())
                 return
             else:
@@ -804,7 +803,7 @@ def synchronized(name, external=False):
         @functools.wraps(f)
         def inner(*args, **kwargs):
             # NOTE(soren): If we ever go natively threaded, this will be racy.
-            #              See http://stackoverflow.com/questions/5390569/dyn\
+            #              See http://stackoverflow.com/questions/5390569/dyn
             #              amically-allocating-and-destroying-mutexes
             if name not in _semaphores:
                 _semaphores[name] = semaphore.Semaphore()
@@ -1413,3 +1412,12 @@ def generate_mac_address():
            random.randint(0x00, 0xff),
            random.randint(0x00, 0xff)]
     return ':'.join(map(lambda x: "%02x" % x, mac))
+
+
+def read_file_as_root(file_path):
+    """Secure helper to read file as root."""
+    try:
+        out, _err = execute('cat', file_path, run_as_root=True)
+        return out
+    except exception.ProcessExecutionError:
+        raise exception.FileNotFound(file_path=file_path)
