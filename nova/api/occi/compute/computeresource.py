@@ -58,6 +58,10 @@ class ComputeBackend(MyBackend):
 
     def create(self, resource, extras):
 
+        #TODO: if a request arrives with explicit values for certain attrs
+        # like occi.compute.cores then a bad request must be issued
+        # OpenStack does not support this. 
+
         LOG.info('Creating the virtual machine with id: ' + resource.identifier)
 
         try:
@@ -90,6 +94,7 @@ class ComputeBackend(MyBackend):
         #TODO: this can be specified through OS Templates
         ramdisk_id = None
         auto_disk_config = None
+        scheduler_hints = None
         
         # Essential, required to get a vm image e.g. 
         #            image_href = 'http: // 10.211.55.20:9292/v1/images/1'
@@ -144,10 +149,9 @@ class ComputeBackend(MyBackend):
                 msg = 'No URL to an image file has been found.'
                 LOG.error(msg)
                 raise HTTPError(404, msg)
-            import ipdb
-            ipdb.set_trace()
+
             (instances, resv_id) = self.compute_api.create(
-                                    extras['nova_ctx'],
+                                    context=extras['nova_ctx'],
                                     instance_type=inst_type,
                                     image_href=os_tpl_url,
                                     kernel_id=kernel_id,
@@ -171,7 +175,8 @@ class ComputeBackend(MyBackend):
                                     access_ip_v6=access_ip_v6,
                                     requested_networks=requested_networks,
                                     config_drive=config_drive,
-                                    auto_disk_config=auto_disk_config)
+                                    auto_disk_config=auto_disk_config,
+                                    scheduler_hints=scheduler_hints)
             
         except exception.QuotaError as error:
             self._handle_quota_error(error)
@@ -316,7 +321,6 @@ class ComputeBackend(MyBackend):
         #  - inactive == the oppose! :-)
         #  - suspended == machine in a frozen state e.g. via suspend or pause
         #
-        # TODO expose OS specific states by mixin
          
         # change password - OS 
         # confirm resized server

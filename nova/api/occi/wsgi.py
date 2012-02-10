@@ -162,7 +162,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         self._register_default_network()
 
     def _register_default_network(self, name='DEFAULT_NETWORK'):
-        #TODO: should the default network expose details e.g. broadcast etc.?
+        # FIXME: should the default network expose details e.g. broadcast etc.?
         default_network = Resource('', infrastructure.NETWORK, \
                             [infrastructure.IPNETWORK], [], 'summary', 'title')
         default_network.identifier = name
@@ -188,8 +188,15 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                 location=itype)
             LOG.debug('Regsitering an OpenStack flavour/instance type as: ' + \
                                                         str(resource_template))
-            #TODO:(dizz) - no check is done to see if the template is exists
-            self.register_backend(resource_template, resource_mixin_backend)
+            
+            try:
+                # only register the resource template if it does not exist
+                # if it does not exist an exception is raised
+                # registration is handled here
+                # FIXME: is this efficient??
+                self.registry.get_backend(resource_template)
+            except AttributeError:
+                self.register_backend(resource_template, resource_mixin_backend)
     
     #TODO: implement me! Attributes are not constructed correctly
     def _get_attributes(self, attrs):
@@ -199,8 +206,6 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         '''
         Register the os mixins from information retrieved frrom glance.
         '''
-        #TODO: kernel, ramdisk images should NOT be listed
-        # UPDATE - now the API allows users to supply RAM and Kernel images
         template_schema = 'http://schemas.openstack.org/template/os#'
         os_schema = 'http://schemas.ogf.org/occi/infrastructure#os_tpl'
 
@@ -210,7 +215,8 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
 
         for img in images:
             # filter out ram and kernel images
-            # TODO: make configurable, to filter or not?        
+            # FIXME: UPDATE - now the API allows users to 
+            # supply RAM and Kernel images        
             if (img['container_format'] or img['disk_format']) not in ('ari', 'aki'):
                 os_template = extensions.OsTemplate(term=img['name'],
                                         scheme=template_schema, \

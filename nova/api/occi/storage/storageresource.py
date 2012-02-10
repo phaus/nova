@@ -75,8 +75,8 @@ class StorageBackend(MyBackend):
         try:
             name = resource.attributes['occi.core.title']
         except KeyError:
-            #TODO: generate more suitable name as it's used for hostname
-            #      where no hostname is supplied.
+            #Generate more suitable name as it's used for hostname
+            #where no hostname is supplied.
             name = resource.attributes['occi.core.title'] = \
                             str(random.randrange(0, 99999999)) + \
                                                         '-storage.occi-wg.org'

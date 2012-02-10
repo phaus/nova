@@ -13,8 +13,6 @@
 #    under the License.
 
 
-# TODO: implement retreive
-
 import uuid
 
 from nova import log as logging
@@ -85,7 +83,7 @@ class StorageLinkBackend(KindBackend):
   
     
     def retrieve(self, link, extras):
-        LOG.info('ping')
+        pass
         #raise exc.HTTPNotImplemented
         #TODO: process states
 #        import ipdb
