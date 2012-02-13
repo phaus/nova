@@ -111,6 +111,9 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         '''
         LOG.info('Registering OCCI backends with web app.')
 
+        import ipdb
+        ipdb.set_trace()
+
         compute_backend = computeresource.ComputeBackend()
         network_backend = networkresource.NetworkBackend()
         storage_backend = storageresource.StorageBackend()
@@ -119,7 +122,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         storage_link_backend = storagelink.StorageLinkBackend()
         networkinterface_backend = networklink.NetworkInterfaceBackend()
         admin_password_backend = extensions.AdminPasswordBackend()
-        key_pair_backend = extensions.KeyPairBackend
+        key_pair_backend = extensions.KeyPairBackend()
 
         # register kinds with backends
         self.register_backend(infrastructure.COMPUTE, compute_backend)
@@ -152,6 +155,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         self.register_backend(extensions.OS_REBUILD, compute_backend)
         self.register_backend(extensions.OS_REVERT_RESIZE, compute_backend)
         self.register_backend(extensions.OS_CONFIRM_RESIZE, compute_backend)
+     
         # OS-OCCI Mixin extensions
         self.register_backend(extensions.ADMIN_PWD_EXT, admin_password_backend)
         self.register_backend(extensions.KEY_PAIR_EXT, key_pair_backend)
