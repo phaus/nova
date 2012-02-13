@@ -89,9 +89,9 @@ class ComputeBackend(MyBackend):
         availability_zone = None
         config_drive = None
         block_device_mapping = None
-        #TODO: this can be specified through OS Templates
+        #L8R: this can be specified through OS Templates
         kernel_id = None
-        #TODO: this can be specified through OS Templates
+        #L8R: this can be specified through OS Templates
         ramdisk_id = None
         auto_disk_config = None
         scheduler_hints = None
@@ -202,7 +202,8 @@ class ComputeBackend(MyBackend):
         
         resource.attributes['occi.core.id'] = instances[0]['uuid']
         resource.attributes['occi.compute.hostname'] = instances[0]['hostname']
-        # TODO: can't we tell this from the image used?
+        # TODO: extract architecture from either image name, description or
+        # metadata
         # The architecture is sometimes encoded in the image file's name
         # This is not reliable. db::glance::image_properties could be used
         # reliably so long as the information is supplied.
@@ -210,7 +211,7 @@ class ComputeBackend(MyBackend):
         # metadata.
         resource.attributes['occi.compute.architecture'] = 'x86'
         resource.attributes['occi.compute.cores'] = str(instances[0]['vcpus'])
-        # occi.compute.speed is not available in instances by default.
+        # L8R: occi.compute.speed is not available in instances by default.
         # CPU speed is not available but could be made available through
         # db::nova::compute_nodes::cpu_info
         # additional code is required in 
@@ -423,8 +424,7 @@ class ComputeBackend(MyBackend):
                 LOG.info('Rebuild requested')
                 raise exc.HTTPForbidden
                 image_href = mixin.os_id
-                # FIXME: where's best to supply this info?
-                # as an atttribute?
+                # where's best to supply this info? as an atttribute?
                 admin_password = 'TODO'
                 old.attributes['occi.compute.state'] = 'inactive'
                 self.compute_api.rebuild(context, instance, image_href, \
@@ -520,7 +520,7 @@ class ComputeBackend(MyBackend):
             self.compute_api.set_admin_password(context, instance, \
                                                 entity.attributes['method'])
         elif action == extensions.OS_REBUILD:
-            #TODO: there must be an OsTemplate mixin with the request and
+            #L8R: there must be an OsTemplate mixin with the request and
             #      there must be the admin password to the instance
             raise exc.HTTPNotImplemented()
         

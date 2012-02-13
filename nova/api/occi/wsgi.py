@@ -91,13 +91,11 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         #  Or....
         #  Just use the openstack header! Ya ha ha ha!
         
-        #TODO this should be pushed into the context middleware
+        #L8R this might be pushed into the context middleware
         nova_ctx.project_id = environ.get('HTTP_X_AUTH_PROJECT_ID', None)
         if nova_ctx.project_id == None:
             LOG.error('No project ID header was supplied in the request')
         
-        # FIXME:(dizz) this is not optimal - this should be done when the
-        # query interface is invoked.
         # register openstack images
         self._register_os_mixins(backends.OsMixinBackend(), nova_ctx)
         # register openstack instance types (flavours)
@@ -163,7 +161,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         self._register_default_network()
 
     def _register_default_network(self, name='DEFAULT_NETWORK'):
-        # FIXME: should the default network expose details e.g. broadcast etc.?
+        # TODO: expose details - make config so that empty strings can be used
         default_network = Resource('', infrastructure.NETWORK, \
                             [infrastructure.IPNETWORK], [], 'summary', 'title')
         default_network.identifier = name
@@ -190,14 +188,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
             LOG.debug('Regsitering an OpenStack flavour/instance type as: ' + \
                                                         str(resource_template))
             
-            try:
-                # only register the resource template if it does not exist
-                # if it does not exist an exception is raised
-                # registration is handled here
-                # FIXME: is this efficient??
-                self.registry.get_backend(resource_template)
-            except AttributeError:
-                self.register_backend(resource_template, resource_mixin_backend)
+            self.register_backend(resource_template, resource_mixin_backend)
     
     #TODO: implement me! Attributes are not constructed correctly
     def _get_attributes(self, attrs):
@@ -215,9 +206,8 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         images = image_service.detail(context)
 
         for img in images:
-            # filter out ram and kernel images
-            # FIXME: UPDATE - now the API allows users to 
-            # supply RAM and Kernel images        
+            # L8R: now the API allows users to supply RAM and Kernel images
+            # filter out ram and kernel images        
             if (img['container_format'] or img['disk_format']) not in ('ari', 'aki'):
                 os_template = extensions.OsTemplate(term=img['name'],
                                         scheme=template_schema, \
