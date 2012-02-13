@@ -55,7 +55,7 @@ find_host_timeout_opt = cfg.StrOpt('find_host_timeout',
         help='Timeout after NN seconds when looking for a host.')
 
 FLAGS = flags.FLAGS
-FLAGS.add_option(find_host_timeout_opt)
+FLAGS.register_opt(find_host_timeout_opt)
 flags.DECLARE('enable_zone_routing', 'nova.scheduler.api')
 flags.DECLARE('consoleauth_topic', 'nova.consoleauth')
 
@@ -1325,8 +1325,8 @@ class API(base.Base):
 
         self.update(context,
                     instance,
-                    vm_state=vm_states.ACTIVE,
-                    task_state=None)
+                    vm_state=vm_states.RESIZING,
+                    task_state=task_states.RESIZE_REVERTING)
 
         params = {'migration_id': migration_ref['id']}
         self._cast_compute_message('revert_resize', context,

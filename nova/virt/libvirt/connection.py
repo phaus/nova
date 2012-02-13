@@ -149,7 +149,7 @@ libvirt_opts = [
     ]
 
 FLAGS = flags.FLAGS
-FLAGS.add_options(libvirt_opts)
+FLAGS.register_opts(libvirt_opts)
 
 flags.DECLARE('live_migration_retry_count', 'nova.compute.manager')
 flags.DECLARE('vncserver_proxyclient_address', 'nova.vnc')
@@ -190,7 +190,7 @@ class LibvirtConnection(driver.ComputeDriver):
         self.container = None
         self.read_only = read_only
         if FLAGS.firewall_driver not in firewall.drivers:
-            FLAGS['firewall_driver'].SetDefault(firewall.drivers[0])
+            FLAGS.set_default('firewall_driver', firewall.drivers[0])
         fw_class = utils.import_class(FLAGS.firewall_driver)
         self.firewall_driver = fw_class(get_connection=self._get_connection)
         self.vif_driver = utils.import_object(FLAGS.libvirt_vif_driver)
@@ -280,6 +280,14 @@ class LibvirtConnection(driver.ComputeDriver):
             return libvirt.openReadOnly(uri)
         else:
             return libvirt.openAuth(uri, auth, 0)
+
+    def instance_exists(self, instance_id):
+        """Efficient override of base instance_exists method."""
+        try:
+            _ignored = self._conn.lookupByName(instance_id)
+            return True
+        except libvirt.libvirtError:
+            return False
 
     def list_instances(self):
         return [self._conn.lookupByID(x).name()
@@ -688,7 +696,25 @@ class LibvirtConnection(driver.ComputeDriver):
 
     @exception.wrap_exception()
     def poll_unconfirmed_resizes(self, resize_confirm_window):
-        pass
+        """Poll for unconfirmed resizes.
+
+        Look for any unconfirmed resizes that are older than
+        `resize_confirm_window` and automatically confirm them.
+        """
+        ctxt = nova_context.get_admin_context()
+        migrations = db.migration_get_all_unconfirmed(ctxt,
+            resize_confirm_window)
+
+        migrations_info = dict(migration_count=len(migrations),
+                confirm_window=FLAGS.resize_confirm_window)
+
+        if migrations_info["migration_count"] > 0:
+            LOG.info(_("Found %(migration_count)d unconfirmed migrations "
+                    "older than %(confirm_window)d seconds") % migrations_info)
+
+        for migration in migrations:
+            LOG.info(_("Automatically confirming migration %d"), migration.id)
+            self.compute_api.confirm_resize(ctxt, migration.instance_uuid)
 
     # NOTE(ilyaalekseyev): Implementation like in multinics
     # for xenapi(tr3buchet)

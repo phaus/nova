@@ -303,7 +303,7 @@ class ActionDeserializer(CommonDeserializer):
             raise AttributeError("No flavorRef was specified in request")
 
         if node.hasAttribute("auto_disk_config"):
-            rezise['auto_disk_config'] = node.getAttribute("auto_disk_config")
+            resize['auto_disk_config'] = node.getAttribute("auto_disk_config")
 
         return resize
 
@@ -961,7 +961,7 @@ class Controller(wsgi.Controller):
 
     def _image_ref_from_req_data(self, data):
         try:
-            return data['server']['imageRef']
+            return unicode(data['server']['imageRef'])
         except (TypeError, KeyError):
             msg = _("Missing imageRef attribute")
             raise exc.HTTPBadRequest(explanation=msg)
