@@ -111,9 +111,6 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         '''
         LOG.info('Registering OCCI backends with web app.')
 
-        import ipdb
-        ipdb.set_trace()
-
         compute_backend = computeresource.ComputeBackend()
         network_backend = networkresource.NetworkBackend()
         storage_backend = storageresource.StorageBackend()
