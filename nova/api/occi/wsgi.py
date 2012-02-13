@@ -96,7 +96,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         if nova_ctx.project_id == None:
             LOG.error('No project ID header was supplied in the request')
         
-        # TODO:(dizz) this is not optimal - this should be done when the
+        # FIXME:(dizz) this is not optimal - this should be done when the
         # query interface is invoked.
         # register openstack images
         self._register_os_mixins(backends.OsMixinBackend(), nova_ctx)

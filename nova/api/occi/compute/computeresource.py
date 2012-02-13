@@ -423,7 +423,7 @@ class ComputeBackend(MyBackend):
                 LOG.info('Rebuild requested')
                 raise exc.HTTPForbidden
                 image_href = mixin.os_id
-                # TODO: where's best to supply this info?
+                # FIXME: where's best to supply this info?
                 # as an atttribute?
                 admin_password = 'TODO'
                 old.attributes['occi.compute.state'] = 'inactive'
