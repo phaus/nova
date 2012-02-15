@@ -25,7 +25,8 @@ from nova import exception
 from nova import log as logging
 
 
-LOG = logging.getLogger("nova.api.openstack.compute.contrib.multinic")
+LOG = logging.getLogger(__name__)
+authorize = extensions.extension_authorizer('compute', 'multinic')
 
 
 class MultinicController(wsgi.Controller):
@@ -43,13 +44,14 @@ class MultinicController(wsgi.Controller):
     @wsgi.action('addFixedIp')
     def _add_fixed_ip(self, req, id, body):
         """Adds an IP on a given network to an instance."""
+        context = req.environ['nova.context']
+        authorize(context)
 
         # Validate the input entity
         if 'networkId' not in body['addFixedIp']:
             msg = _("Missing 'networkId' argument for addFixedIp")
             raise exc.HTTPUnprocessableEntity(explanation=msg)
 
-        context = req.environ['nova.context']
         instance = self._get_instance(context, id)
         network_id = body['addFixedIp']['networkId']
         self.compute_api.add_fixed_ip(context, instance, network_id)
@@ -58,13 +60,14 @@ class MultinicController(wsgi.Controller):
     @wsgi.action('removeFixedIp')
     def _remove_fixed_ip(self, req, id, body):
         """Removes an IP from an instance."""
+        context = req.environ['nova.context']
+        authorize(context)
 
         # Validate the input entity
         if 'address' not in body['removeFixedIp']:
             msg = _("Missing 'address' argument for removeFixedIp")
             raise exc.HTTPUnprocessableEntity(explanation=msg)
 
-        context = req.environ['nova.context']
         instance = self._get_instance(context, id)
         address = body['removeFixedIp']['address']
 

@@ -31,6 +31,7 @@ import nova
 import nova.common.policy
 from nova import compute
 import nova.compute.api
+from nova.compute import aggregate_states
 from nova.compute import instance_types
 from nova.compute import manager as compute_manager
 from nova.compute import power_state
@@ -53,7 +54,7 @@ from nova import utils
 import nova.volume
 
 
-LOG = logging.getLogger('nova.tests.compute')
+LOG = logging.getLogger(__name__)
 FLAGS = flags.FLAGS
 flags.DECLARE('stub_network', 'nova.compute.manager')
 flags.DECLARE('live_migration_retry_count', 'nova.compute.manager')
@@ -112,6 +113,7 @@ class BaseTestCase(test.TestCase):
                    notification_driver='nova.notifier.test_notifier',
                    network_manager='nova.network.manager.FlatManager')
         self.compute = utils.import_object(FLAGS.compute_manager)
+
         self.user_id = 'fake'
         self.project_id = 'fake'
         self.context = context.RequestContext(self.user_id,
@@ -151,6 +153,9 @@ class BaseTestCase(test.TestCase):
         type_id = instance_types.get_instance_type_by_name(type_name)['id']
         inst['instance_type_id'] = type_id
         inst['ami_launch_index'] = 0
+        inst['memory_mb'] = 0
+        inst['root_gb'] = 0
+        inst['ephemeral_gb'] = 0
         inst.update(params)
         return db.instance_create(self.context, inst)
 
@@ -166,11 +171,12 @@ class BaseTestCase(test.TestCase):
         context = self.context.elevated()
         inst = {}
         inst['name'] = 'm1.small'
-        inst['memory_mb'] = '1024'
-        inst['vcpus'] = '1'
-        inst['local_gb'] = '20'
+        inst['memory_mb'] = 1024
+        inst['vcpus'] = 1
+        inst['root_gb'] = 20
+        inst['ephemeral_gb'] = 10
         inst['flavorid'] = '1'
-        inst['swap'] = '2048'
+        inst['swap'] = 2048
         inst['rxtx_factor'] = 1
         inst.update(params)
         return db.instance_type_create(context, inst)['id']
@@ -184,6 +190,15 @@ class BaseTestCase(test.TestCase):
 
 
 class ComputeTestCase(BaseTestCase):
+    def setUp(self):
+        def fake_get_nw_info(cls, ctxt, instance):
+            self.assertTrue(ctxt.is_admin)
+            return fake_network.fake_get_instance_nw_info(self.stubs, 1, 1,
+                                                          spectacular=True)
+
+        super(ComputeTestCase, self).setUp()
+        self.stubs.Set(nova.network.API, 'get_instance_nw_info',
+                       fake_get_nw_info)
 
     def test_wrap_instance_fault(self):
         inst_uuid = "fake_uuid"
@@ -458,6 +473,12 @@ class ComputeTestCase(BaseTestCase):
 
     def test_rebuild(self):
         """Ensure instance can be rebuilt"""
+        def fake_get_nw_info(cls, ctxt, instance):
+            return fake_network.fake_get_instance_nw_info(self.stubs, 1, 1,
+                                                          spectacular=True)
+
+        self.stubs.Set(nova.network.API, 'get_instance_nw_info',
+                       fake_get_nw_info)
         instance = self._create_fake_instance()
         instance_uuid = instance['uuid']
 
@@ -569,7 +590,7 @@ class ComputeTestCase(BaseTestCase):
 
         inst_ref = db.instance_get_by_uuid(self.context, instance_uuid)
         self.assertEqual(inst_ref['vm_state'], vm_states.ERROR)
-        self.assertEqual(inst_ref['task_state'], None)
+        self.assertEqual(inst_ref['task_state'], task_states.UPDATING_PASSWORD)
 
         self.compute.terminate_instance(self.context, inst_ref['uuid'])
 
@@ -703,16 +724,6 @@ class ComputeTestCase(BaseTestCase):
         self.assertEqual(output, 'ANOTHER\nLAST LINE')
         self.compute.terminate_instance(self.context, instance['uuid'])
 
-    def test_ajax_console(self):
-        """Make sure we can get console output from instance"""
-        instance = self._create_fake_instance()
-        self.compute.run_instance(self.context, instance['uuid'])
-
-        console = self.compute.get_ajax_console(self.context,
-                                                instance['uuid'])
-        self.assert_(set(['token', 'host', 'port']).issubset(console.keys()))
-        self.compute.terminate_instance(self.context, instance['uuid'])
-
     def test_novnc_vnc_console(self):
         """Make sure we can a vnc console for an instance."""
         instance = self._create_fake_instance()
@@ -774,7 +785,7 @@ class ComputeTestCase(BaseTestCase):
         self.assertEquals(len(test_notifier.NOTIFICATIONS), 0)
         self.compute.add_fixed_ip_to_instance(self.context, instance_uuid, 1)
 
-        self.assertEquals(len(test_notifier.NOTIFICATIONS), 1)
+        self.assertEquals(len(test_notifier.NOTIFICATIONS), 2)
         self.compute.terminate_instance(self.context, instance_uuid)
 
     def test_remove_fixed_ip_usage_notification(self):
@@ -796,7 +807,7 @@ class ComputeTestCase(BaseTestCase):
                                                    instance_uuid,
                                                    1)
 
-        self.assertEquals(len(test_notifier.NOTIFICATIONS), 1)
+        self.assertEquals(len(test_notifier.NOTIFICATIONS), 2)
         self.compute.terminate_instance(self.context, instance_uuid)
 
     def test_run_instance_usage_notification(self):
@@ -804,11 +815,14 @@ class ComputeTestCase(BaseTestCase):
         inst_ref = self._create_fake_instance()
         instance_uuid = inst_ref['uuid']
         self.compute.run_instance(self.context, instance_uuid)
-        self.assertEquals(len(test_notifier.NOTIFICATIONS), 1)
+        self.assertEquals(len(test_notifier.NOTIFICATIONS), 2)
         inst_ref = db.instance_get_by_uuid(self.context, instance_uuid)
         msg = test_notifier.NOTIFICATIONS[0]
+        self.assertEquals(msg['event_type'], 'compute.instance.create.start')
+        # The last event is the one with the sugar in it.
+        msg = test_notifier.NOTIFICATIONS[1]
         self.assertEquals(msg['priority'], 'INFO')
-        self.assertEquals(msg['event_type'], 'compute.instance.create')
+        self.assertEquals(msg['event_type'], 'compute.instance.create.end')
         payload = msg['payload']
         self.assertEquals(payload['tenant_id'], self.project_id)
         self.assertEquals(payload['user_id'], self.user_id)
@@ -832,14 +846,16 @@ class ComputeTestCase(BaseTestCase):
         test_notifier.NOTIFICATIONS = []
         self.compute.terminate_instance(self.context, inst_ref['uuid'])
 
-        self.assertEquals(len(test_notifier.NOTIFICATIONS), 2)
+        self.assertEquals(len(test_notifier.NOTIFICATIONS), 3)
         msg = test_notifier.NOTIFICATIONS[0]
         self.assertEquals(msg['priority'], 'INFO')
         self.assertEquals(msg['event_type'], 'compute.instance.exists')
 
         msg = test_notifier.NOTIFICATIONS[1]
         self.assertEquals(msg['priority'], 'INFO')
-        self.assertEquals(msg['event_type'], 'compute.instance.delete')
+        self.assertEquals(msg['event_type'], 'compute.instance.delete.start')
+        msg1 = test_notifier.NOTIFICATIONS[2]
+        self.assertEquals(msg1['event_type'], 'compute.instance.delete.end')
         payload = msg['payload']
         self.assertEquals(payload['tenant_id'], self.project_id)
         self.assertEquals(payload['user_id'], self.user_id)
@@ -868,6 +884,12 @@ class ComputeTestCase(BaseTestCase):
         instance = self._create_fake_instance()
         instance_uuid = instance['uuid']
 
+        def fake_get_nw_info(cls, ctxt, instance):
+            return fake_network.fake_get_instance_nw_info(self.stubs, 1, 1,
+                                                          spectacular=True)
+
+        self.stubs.Set(nova.network.API, 'get_instance_nw_info',
+                       fake_get_nw_info)
         self.mox.StubOutWithMock(self.compute.network_api,
                                  "allocate_for_instance")
         self.compute.network_api.allocate_for_instance(mox.IgnoreArg(),
@@ -876,7 +898,7 @@ class ComputeTestCase(BaseTestCase):
                                                        vpn=False).\
             AndRaise(quantum_client.QuantumServerException())
 
-        FLAGS.stub_network = False
+        self.flags(stub_network=False)
 
         self.mox.ReplayAll()
 
@@ -943,29 +965,44 @@ class ComputeTestCase(BaseTestCase):
     def test_finish_resize(self):
         """Contrived test to ensure finish_resize doesn't raise anything"""
 
+        nw_info = fake_network.fake_get_instance_nw_info(self.stubs,
+                                                         spectacular=True)
+
         def fake(*args, **kwargs):
             pass
 
+        def fake_nw_info(*args, **kwargs):
+            return nw_info
+
+        # NOTE(jkoelker) There is a bit of a stubbing issue here.
+        #                fake_network stubs out a bunch of stuff which
+        #                this functional test expects to be acting on
+        #                the db or the stubs it sets.
+        self.stubs.UnsetAll()
+        self.stubs.SmartUnsetAll()
+        self.setUp()
+
         self.stubs.Set(self.compute.driver, 'finish_migration', fake)
-        self.stubs.Set(self.compute.network_api, 'get_instance_nw_info', fake)
+        self.stubs.Set(self.compute.network_api, 'get_instance_nw_info',
+                       fake_nw_info)
+        fake_network.stub_out_nw_api_get_instance_nw_info(self.stubs,
+                                                          func=fake_nw_info)
         context = self.context.elevated()
+
         instance = self._create_fake_instance()
         self.compute.prep_resize(context, instance['uuid'], 1,
                                  filter_properties={})
         migration_ref = db.migration_get_by_instance_and_status(context,
                 instance['uuid'], 'pre-migrating')
-        try:
-            self.compute.finish_resize(context, instance['uuid'],
-                    int(migration_ref['id']), {})
-        except KeyError, e:
-            # Only catch key errors. We want other reasons for the test to
-            # fail to actually error out so we don't obscure anything
-            self.fail()
-
+        self.compute.finish_resize(context, instance['uuid'],
+                                   int(migration_ref['id']), {})
         self.compute.terminate_instance(self.context, instance['uuid'])
 
     def test_finish_resize_handles_error(self):
         """Make sure we don't leave the instance in RESIZE on error"""
+
+        nw_info = fake_network.fake_get_instance_nw_info(self.stubs,
+                                                         spectacular=True)
 
         def throw_up(*args, **kwargs):
             raise Exception()
@@ -973,8 +1010,21 @@ class ComputeTestCase(BaseTestCase):
         def fake(*args, **kwargs):
             pass
 
+        def fake_nw_info(*args, **kwargs):
+            return nw_info
+
+        # NOTE(jkoelker) There is a bit of a stubbing issue here.
+        #                fake_network stubs out a bunch of stuff which
+        #                this functional test expects to be acting on
+        #                the db or the stubs it sets.
+        self.stubs.UnsetAll()
+        self.stubs.SmartUnsetAll()
+        self.setUp()
+
         self.stubs.Set(self.compute.driver, 'finish_migration', throw_up)
         self.stubs.Set(self.compute.network_api, 'get_instance_nw_info', fake)
+        fake_network.stub_out_nw_api_get_instance_nw_info(self.stubs,
+                                                          func=fake_nw_info)
         context = self.context.elevated()
         instance = self._create_fake_instance()
         self.compute.prep_resize(context, instance['uuid'], 1,
@@ -992,6 +1042,13 @@ class ComputeTestCase(BaseTestCase):
 
     def test_resize_instance_notification(self):
         """Ensure notifications on instance migrate/resize"""
+        def fake_get_nw_info(cls, ctxt, instance):
+            return fake_network.fake_get_instance_nw_info(self.stubs, 1, 1,
+                                                          spectacular=True)
+
+        self.stubs.Set(nova.network.API, 'get_instance_nw_info',
+                       fake_get_nw_info)
+
         instance = self._create_fake_instance()
         instance_uuid = instance['uuid']
         context = self.context.elevated()
@@ -1006,10 +1063,17 @@ class ComputeTestCase(BaseTestCase):
                                                 instance_uuid,
                                                 'pre-migrating')
 
-        self.assertEquals(len(test_notifier.NOTIFICATIONS), 1)
+        self.assertEquals(len(test_notifier.NOTIFICATIONS), 3)
         msg = test_notifier.NOTIFICATIONS[0]
+        self.assertEquals(msg['event_type'],
+                          'compute.instance.exists')
+        msg = test_notifier.NOTIFICATIONS[1]
+        self.assertEquals(msg['event_type'],
+                          'compute.instance.resize.prep.start')
+        msg = test_notifier.NOTIFICATIONS[2]
+        self.assertEquals(msg['event_type'],
+                          'compute.instance.resize.prep.end')
         self.assertEquals(msg['priority'], 'INFO')
-        self.assertEquals(msg['event_type'], 'compute.instance.resize.prep')
         payload = msg['payload']
         self.assertEquals(payload['tenant_id'], self.project_id)
         self.assertEquals(payload['user_id'], self.user_id)
@@ -1086,12 +1150,31 @@ class ComputeTestCase(BaseTestCase):
 
     def test_finish_revert_resize(self):
         """Ensure that the flavor is reverted to the original on revert"""
-        context = self.context.elevated()
-        instance = self._create_fake_instance()
-        instance_uuid = instance['uuid']
+        nw_info = fake_network.fake_get_instance_nw_info(self.stubs,
+                                                         spectacular=True)
 
         def fake(*args, **kwargs):
             pass
+
+        def fake_nw_info(*args, **kwargs):
+            return nw_info
+
+        # NOTE(jkoelker) There is a bit of a stubbing issue here.
+        #                fake_network stubs out a bunch of stuff which
+        #                this functional test expects to be acting on
+        #                the db or the stubs it sets.
+        self.stubs.UnsetAll()
+        self.stubs.SmartUnsetAll()
+        self.setUp()
+
+        self.stubs.Set(self.compute.network_api, 'get_instance_nw_info',
+                       fake_nw_info)
+        fake_network.stub_out_nw_api_get_instance_nw_info(self.stubs,
+                                                          func=fake_nw_info)
+
+        context = self.context.elevated()
+        instance = self._create_fake_instance()
+        instance_uuid = instance['uuid']
 
         self.stubs.Set(self.compute.driver, 'finish_migration', fake)
         self.stubs.Set(self.compute.driver, 'finish_revert_migration', fake)
@@ -1131,6 +1214,10 @@ class ComputeTestCase(BaseTestCase):
                 migration_ref['id'])
         self.compute.finish_revert_resize(context, inst_ref['uuid'],
                 migration_ref['id'])
+
+        instance = db.instance_get_by_uuid(context, instance['uuid'])
+        self.assertEqual(instance['vm_state'], vm_states.ACTIVE)
+        self.assertEqual(instance['task_state'], None)
 
         inst_ref = db.instance_get_by_uuid(context, instance_uuid)
         instance_type_ref = db.instance_type_get(context,
@@ -1198,6 +1285,14 @@ class ComputeTestCase(BaseTestCase):
 
     def test_pre_live_migration_works_correctly(self):
         """Confirm setup_compute_volume is called when volume is mounted."""
+        fake_network.stub_out_nw_api_get_instance_nw_info(self.stubs,
+                                                          spectacular=True)
+
+        def stupid(*args, **kwargs):
+            return fake_network.fake_get_instance_nw_info(self.stubs,
+                                                          spectacular=True)
+        self.stubs.Set(nova.compute.manager.ComputeManager,
+                       '_get_instance_nw_info', stupid)
         # creating instance testdata
         inst_ref = self._create_fake_instance({'host': 'dummy'})
         c = context.get_admin_context()
@@ -1206,16 +1301,13 @@ class ComputeTestCase(BaseTestCase):
         # creating mocks
         self.mox.StubOutWithMock(self.compute.driver, 'pre_live_migration')
         self.compute.driver.pre_live_migration({'block_device_mapping': []})
-        dummy_nw_info = [[None, {'ips':'1.1.1.1'}]]
-        self.mox.StubOutWithMock(self.compute, '_get_instance_nw_info')
-        self.compute._get_instance_nw_info(c, mox.IsA(inst_ref)
-            ).AndReturn(dummy_nw_info)
+        nw_info = fake_network.fake_get_instance_nw_info(self.stubs)
         self.mox.StubOutWithMock(self.compute.driver, 'plug_vifs')
-        self.compute.driver.plug_vifs(mox.IsA(inst_ref), dummy_nw_info)
+        self.compute.driver.plug_vifs(mox.IsA(inst_ref), nw_info)
         self.mox.StubOutWithMock(self.compute.driver,
                                  'ensure_filtering_rules_for_instance')
         self.compute.driver.ensure_filtering_rules_for_instance(
-            mox.IsA(inst_ref), dummy_nw_info)
+            mox.IsA(inst_ref), nw_info)
 
         # start test
         self.mox.ReplayAll()
@@ -1408,7 +1500,14 @@ class ComputeTestCase(BaseTestCase):
 class ComputeAPITestCase(BaseTestCase):
 
     def setUp(self):
+        def fake_get_nw_info(cls, ctxt, instance):
+            self.assertTrue(ctxt.is_admin)
+            return fake_network.fake_get_instance_nw_info(self.stubs, 1, 1,
+                                                          spectacular=True)
+
         super(ComputeAPITestCase, self).setUp()
+        self.stubs.Set(nova.network.API, 'get_instance_nw_info',
+                       fake_get_nw_info)
         self.compute_api = compute.API()
         self.fake_image = {
             'id': 1,
@@ -1449,7 +1548,7 @@ class ComputeAPITestCase(BaseTestCase):
         """Test an instance type with too little disk space"""
 
         inst_type = instance_types.get_default_instance_type()
-        inst_type['local_gb'] = 1
+        inst_type['root_gb'] = 1
 
         def fake_show(*args):
             img = copy(self.fake_image)
@@ -1461,7 +1560,7 @@ class ComputeAPITestCase(BaseTestCase):
             self.compute_api.create, self.context, inst_type, None)
 
         # Now increase the inst_type disk space and make sure all is fine.
-        inst_type['local_gb'] = 2
+        inst_type['root_gb'] = 2
         (refs, resv_id) = self.compute_api.create(self.context,
                 inst_type, None)
         db.instance_destroy(self.context, refs[0]['id'])
@@ -1470,7 +1569,7 @@ class ComputeAPITestCase(BaseTestCase):
         """Test an instance type with just enough ram and disk space"""
 
         inst_type = instance_types.get_default_instance_type()
-        inst_type['local_gb'] = 2
+        inst_type['root_gb'] = 2
         inst_type['memory_mb'] = 2
 
         def fake_show(*args):
@@ -1488,7 +1587,7 @@ class ComputeAPITestCase(BaseTestCase):
         """Test an instance type with no min_ram or min_disk"""
 
         inst_type = instance_types.get_default_instance_type()
-        inst_type['local_gb'] = 1
+        inst_type['root_gb'] = 1
         inst_type['memory_mb'] = 1
 
         def fake_show(*args):
@@ -1942,7 +2041,7 @@ class ComputeAPITestCase(BaseTestCase):
         self.stubs.Set(fake_image._FakeImageService, 'show', fake_show)
 
         instance = self._create_fake_instance()
-        inst_params = {'local_gb': 2, 'memory_mb': 256}
+        inst_params = {'root_gb': 2, 'memory_mb': 256}
         instance['instance_type'].update(inst_params)
 
         image = self.compute_api.snapshot(self.context, instance, 'snap1',
@@ -2140,6 +2239,11 @@ class ComputeAPITestCase(BaseTestCase):
         instance = db.instance_get_by_uuid(context, instance['uuid'])
 
         self.compute_api.revert_resize(context, instance)
+
+        instance = db.instance_get_by_uuid(context, instance['uuid'])
+        self.assertEqual(instance['vm_state'], vm_states.RESIZING)
+        self.assertEqual(instance['task_state'], task_states.RESIZE_REVERTING)
+
         self.compute.terminate_instance(context, instance['uuid'])
 
     def test_resize_invalid_flavor_fails(self):
@@ -2225,17 +2329,8 @@ class ComputeAPITestCase(BaseTestCase):
                                           fixed_address):
             called['associate'] = True
 
-        nw_info = fake_network.fake_get_instance_nw_info(self.stubs, 1)
-
-        def fake_get_nw_info(cls, ctxt, instance):
-            self.assertTrue(ctxt.is_admin)
-            return nw_info
-
         self.stubs.Set(nova.network.API, 'associate_floating_ip',
                        fake_associate_ip_network_api)
-
-        self.stubs.Set(nova.network.API, 'get_instance_nw_info',
-                       fake_get_nw_info)
 
         instance = self._create_fake_instance()
         instance_uuid = instance['uuid']
@@ -2262,7 +2357,7 @@ class ComputeAPITestCase(BaseTestCase):
         address = '0.1.2.3'
 
         self.compute.run_instance(self.context, instance_uuid)
-        self.assertRaises(exception.ApiError,
+        self.assertRaises(exception.FixedIpNotFoundForInstance,
                           self.compute_api.associate_floating_ip,
                           self.context,
                           instance,
@@ -2768,12 +2863,12 @@ class ComputeAPITestCase(BaseTestCase):
         self.compute.terminate_instance(self.context, instance['uuid'])
 
     def test_volume_size(self):
-        local_size = 2
+        ephemeral_size = 2
         swap_size = 3
-        inst_type = {'local_gb': local_size, 'swap': swap_size}
+        inst_type = {'ephemeral_gb': ephemeral_size, 'swap': swap_size}
         self.assertEqual(self.compute_api._volume_size(inst_type,
-                                                          'ephemeral0'),
-                         local_size)
+                                                       'ephemeral0'),
+                         ephemeral_size)
         self.assertEqual(self.compute_api._volume_size(inst_type,
                                                        'ephemeral1'),
                          0)
@@ -2872,7 +2967,7 @@ class ComputeAPITestCase(BaseTestCase):
         self.compute_api.delete(self.context, instance)
 
     def test_attach_volume_invalid(self):
-        self.assertRaises(exception.ApiError,
+        self.assertRaises(exception.InvalidDevicePath,
                 self.compute_api.attach_volume,
                 self.context,
                 None,
@@ -2892,17 +2987,6 @@ class ComputeAPITestCase(BaseTestCase):
         console = self.compute_api.get_vnc_console(self.context,
                                                    instance,
                                                    'novnc')
-        self.compute_api.delete(self.context, instance)
-
-    def test_ajax_console(self):
-        """Make sure we can an ajax console for an instance."""
-        def ajax_rpc_call_wrapper(*args, **kwargs):
-            return {'token': 'asdf', 'host': '0.0.0.0', 'port': 8080}
-
-        self.stubs.Set(rpc, 'call', ajax_rpc_call_wrapper)
-
-        instance = self._create_fake_instance()
-        console = self.compute_api.get_ajax_console(self.context, instance)
         self.compute_api.delete(self.context, instance)
 
     def test_console_output(self):
@@ -2955,6 +3039,7 @@ class ComputeAPITestCase(BaseTestCase):
 
     def test_add_remove_security_group(self):
         instance = self._create_fake_instance()
+
         self.compute.run_instance(self.context, instance['uuid'])
         instance = self.compute_api.get(self.context, instance['uuid'])
         security_group_name = self._create_group()['name']
@@ -2997,6 +3082,229 @@ class ComputeAPITestCase(BaseTestCase):
         self.compute_api.inject_file(self.context, instance,
                                      "/tmp/test", "File Contents")
         db.instance_destroy(self.context, instance['id'])
+
+
+def fake_rpc_method(context, topic, msg, do_cast=True):
+    pass
+
+
+def _create_service_entries(context, values={'avail_zone1': ['fake_host1',
+                                                             'fake_host2'],
+                                             'avail_zone2': ['fake_host3'], }):
+    for avail_zone, hosts in values.iteritems():
+        for host in hosts:
+            db.service_create(context,
+                              {'host': host,
+                               'binary': 'nova-compute',
+                               'topic': 'compute',
+                               'report_count': 0,
+                               'availability_zone': avail_zone})
+    return values
+
+
+class ComputeAPIAggrTestCase(test.TestCase):
+
+    def setUp(self):
+        super(ComputeAPIAggrTestCase, self).setUp()
+        self.api = compute.AggregateAPI()
+        self.context = context.get_admin_context()
+        self.stubs.Set(rpc, 'call', fake_rpc_method)
+        self.stubs.Set(rpc, 'cast', fake_rpc_method)
+
+    def tearDown(self):
+        super(ComputeAPIAggrTestCase, self).tearDown()
+
+    def test_update_aggregate_metadata(self):
+        aggr = self.api.create_aggregate(self.context, 'fake_aggregate',
+                                         'fake_availability_zone')
+        metadata = {'foo_key1': 'foo_value1',
+                    'foo_key2': 'foo_value2', }
+        aggr = self.api.update_aggregate_metadata(self.context, aggr['id'],
+                                                  metadata)
+        metadata['foo_key1'] = None
+        expected = self.api.update_aggregate_metadata(self.context,
+                                             aggr['id'], metadata)
+        self.assertDictMatch(expected['metadata'], {'foo_key2': 'foo_value2'})
+
+    def test_delete_aggregate(self):
+        """Ensure we can delete an aggregate."""
+        aggr = self.api.create_aggregate(self.context, 'fake_aggregate',
+                                         'fake_availability_zone')
+        self.api.delete_aggregate(self.context, aggr['id'])
+        expected = db.aggregate_get(self.context, aggr['id'],
+                                    read_deleted='yes')
+        self.assertNotEqual(aggr['operational_state'],
+                            expected['operational_state'])
+
+    def test_delete_non_empty_aggregate(self):
+        """Ensure InvalidAggregateAction is raised when non empty aggregate."""
+        aggr = self.api.create_aggregate(self.context, 'fake_aggregate',
+                                         'fake_availability_zone')
+        _create_service_entries(self.context,
+                                {'fake_availability_zone': ['fake_host']})
+        self.api.add_host_to_aggregate(self.context, aggr['id'], 'fake_host')
+        self.assertRaises(exception.InvalidAggregateAction,
+                          self.api.delete_aggregate, self.context, aggr['id'])
+
+    def test_add_host_to_aggregate(self):
+        """Ensure we can add a host to an aggregate."""
+        values = _create_service_entries(self.context)
+        fake_zone = values.keys()[0]
+        fake_host = values[fake_zone][0]
+        aggr = self.api.create_aggregate(self.context,
+                                         'fake_aggregate', fake_zone)
+        aggr = self.api.add_host_to_aggregate(self.context,
+                                              aggr['id'], fake_host)
+        self.assertEqual(aggr['operational_state'], aggregate_states.CHANGING)
+
+    def test_add_host_to_aggregate_multiple(self):
+        """Ensure we can add multiple hosts to an aggregate."""
+        values = _create_service_entries(self.context)
+        fake_zone = values.keys()[0]
+        aggr = self.api.create_aggregate(self.context,
+                                         'fake_aggregate', fake_zone)
+        # let's mock the fact that the aggregate is active already!
+        status = {'operational_state': aggregate_states.ACTIVE}
+        db.aggregate_update(self.context, aggr['id'], status)
+        for host in values[fake_zone]:
+            aggr = self.api.add_host_to_aggregate(self.context,
+                                                  aggr['id'], host)
+        self.assertEqual(len(aggr['hosts']), len(values[fake_zone]))
+        self.assertEqual(aggr['operational_state'],
+                         aggregate_states.ACTIVE)
+
+    def test_add_host_to_aggregate_invalid_changing_status(self):
+        """Ensure InvalidAggregateAction is raised when adding host while
+        aggregate is not ready."""
+        values = _create_service_entries(self.context)
+        fake_zone = values.keys()[0]
+        fake_host = values[fake_zone][0]
+        aggr = self.api.create_aggregate(self.context,
+                                         'fake_aggregate', fake_zone)
+        aggr = self.api.add_host_to_aggregate(self.context,
+                                              aggr['id'], fake_host)
+        self.assertEqual(aggr['operational_state'],
+                             aggregate_states.CHANGING)
+        self.assertRaises(exception.InvalidAggregateAction,
+                          self.api.add_host_to_aggregate, self.context,
+                          aggr['id'], fake_host)
+
+    def test_add_host_to_aggregate_invalid_dismissed_status(self):
+        """Ensure InvalidAggregateAction is raised when aggregate is
+        deleted."""
+        aggr = self.api.create_aggregate(self.context,
+                                         'fake_aggregate', 'fake_zone')
+        _create_service_entries(self.context, {'fake_zone': ['fake_host']})
+        # let's mock the fact that the aggregate is dismissed!
+        status = {'operational_state': aggregate_states.DISMISSED}
+        db.aggregate_update(self.context, aggr['id'], status)
+        self.assertRaises(exception.InvalidAggregateAction,
+                          self.api.add_host_to_aggregate, self.context,
+                          aggr['id'], 'fake_host')
+
+    def test_add_host_to_aggregate_invalid_error_status(self):
+        """Ensure InvalidAggregateAction is raised when aggregate is
+        in error."""
+        aggr = self.api.create_aggregate(self.context,
+                                         'fake_aggregate', 'fake_zone')
+        _create_service_entries(self.context, {'fake_zone': ['fake_host']})
+        # let's mock the fact that the aggregate is in error!
+        status = {'operational_state': aggregate_states.ERROR}
+        db.aggregate_update(self.context, aggr['id'], status)
+        self.assertRaises(exception.InvalidAggregateAction,
+                          self.api.add_host_to_aggregate, self.context,
+                          aggr['id'], 'fake_host')
+
+    def test_add_host_to_aggregate_zones_mismatch(self):
+        """Ensure InvalidAggregateAction is raised when zones don't match."""
+        _create_service_entries(self.context, {'fake_zoneX': ['fake_host']})
+        aggr = self.api.create_aggregate(self.context,
+                                         'fake_aggregate', 'fake_zoneY')
+        self.assertRaises(exception.InvalidAggregateAction,
+                          self.api.add_host_to_aggregate,
+                          self.context, aggr['id'], 'fake_host')
+
+    def test_add_host_to_aggregate_raise_not_found(self):
+        """Ensure ComputeHostNotFound is raised when adding invalid host."""
+        aggr = self.api.create_aggregate(self.context, 'fake_aggregate',
+                                         'fake_availability_zone')
+        self.assertRaises(exception.ComputeHostNotFound,
+                          self.api.add_host_to_aggregate,
+                          self.context, aggr['id'], 'invalid_host')
+
+    def test_remove_host_from_aggregate_active(self):
+        """Ensure we can remove a host from an aggregate."""
+        values = _create_service_entries(self.context)
+        fake_zone = values.keys()[0]
+        aggr = self.api.create_aggregate(self.context,
+                                         'fake_aggregate', fake_zone)
+        # let's mock the fact that the aggregate is active already!
+        status = {'operational_state': aggregate_states.ACTIVE}
+        db.aggregate_update(self.context, aggr['id'], status)
+        for host in values[fake_zone]:
+            aggr = self.api.add_host_to_aggregate(self.context,
+                                                  aggr['id'], host)
+        expected = self.api.remove_host_from_aggregate(self.context,
+                                                       aggr['id'],
+                                                       values[fake_zone][0])
+        self.assertEqual(len(aggr['hosts']) - 1, len(expected['hosts']))
+        self.assertEqual(expected['operational_state'],
+                         aggregate_states.ACTIVE)
+
+    def test_remove_host_from_aggregate_error(self):
+        """Ensure we can remove a host from an aggregate even if in error."""
+        values = _create_service_entries(self.context)
+        fake_zone = values.keys()[0]
+        aggr = self.api.create_aggregate(self.context,
+                                         'fake_aggregate', fake_zone)
+        # let's mock the fact that the aggregate is ready!
+        status = {'operational_state': aggregate_states.ACTIVE}
+        db.aggregate_update(self.context, aggr['id'], status)
+        for host in values[fake_zone]:
+            aggr = self.api.add_host_to_aggregate(self.context,
+                                                  aggr['id'], host)
+        # let's mock the fact that the aggregate is in error!
+        status = {'operational_state': aggregate_states.ERROR}
+        expected = self.api.remove_host_from_aggregate(self.context,
+                                                       aggr['id'],
+                                                       values[fake_zone][0])
+        self.assertEqual(len(aggr['hosts']) - 1, len(expected['hosts']))
+        self.assertEqual(expected['operational_state'],
+                         aggregate_states.ACTIVE)
+
+    def test_remove_host_from_aggregate_invalid_dismissed_status(self):
+        """Ensure InvalidAggregateAction is raised when aggregate is
+        deleted."""
+        aggr = self.api.create_aggregate(self.context,
+                                         'fake_aggregate', 'fake_zone')
+        _create_service_entries(self.context, {'fake_zone': ['fake_host']})
+        # let's mock the fact that the aggregate is dismissed!
+        status = {'operational_state': aggregate_states.DISMISSED}
+        db.aggregate_update(self.context, aggr['id'], status)
+        self.assertRaises(exception.InvalidAggregateAction,
+                          self.api.remove_host_from_aggregate, self.context,
+                          aggr['id'], 'fake_host')
+
+    def test_remove_host_from_aggregate_invalid_changing_status(self):
+        """Ensure InvalidAggregateAction is raised when aggregate is
+        changing."""
+        aggr = self.api.create_aggregate(self.context,
+                                         'fake_aggregate', 'fake_zone')
+        _create_service_entries(self.context, {'fake_zone': ['fake_host']})
+        # let's mock the fact that the aggregate is changing!
+        status = {'operational_state': aggregate_states.CHANGING}
+        db.aggregate_update(self.context, aggr['id'], status)
+        self.assertRaises(exception.InvalidAggregateAction,
+                          self.api.remove_host_from_aggregate, self.context,
+                          aggr['id'], 'fake_host')
+
+    def test_remove_host_from_aggregate_raise_not_found(self):
+        """Ensure ComputeHostNotFound is raised when removing invalid host."""
+        aggr = self.api.create_aggregate(self.context, 'fake_aggregate',
+                                         'fake_availability_zone')
+        self.assertRaises(exception.ComputeHostNotFound,
+                          self.api.remove_host_from_aggregate,
+                          self.context, aggr['id'], 'invalid_host')
 
 
 class ComputePolicyTestCase(BaseTestCase):

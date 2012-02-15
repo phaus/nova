@@ -22,44 +22,50 @@ from nova.auth import fakeldap
 from nova import exception
 from nova import flags
 from nova import log as logging
+from nova import utils
+from nova.openstack.common import cfg
 
 
-LOG = logging.getLogger("nova.network.manager")
+LOG = logging.getLogger(__name__)
 
-flags.DEFINE_string('ldap_dns_url',
-                    'ldap://ldap.example.com:389',
-                    'URL for ldap server which will store dns entries')
-flags.DEFINE_string('ldap_dns_user',
-                    'uid=admin,ou=people,dc=example,dc=org',
-                    'user for ldap DNS')
-flags.DEFINE_string('ldap_dns_password',
-                    'password',
-                    'password for ldap DNS')
-flags.DEFINE_string('ldap_dns_soa_hostmaster',
-                    'hostmaster@example.org',
-                    'Hostmaster for ldap dns driver Statement of Authority')
-flags.DEFINE_multistring('ldap_dns_servers',
-                    '[dns.example.org]',
-                    'DNS Servers for ldap dns driver')
-flags.DEFINE_string('ldap_dns_base_dn',
-                    'ou=hosts,dc=example,dc=org',
-                    'Base DN for DNS entries in ldap')
-flags.DEFINE_string('ldap_dns_soa_refresh',
-                    '1800',
-                    'Refresh interval (in seconds) for ldap dns driver '
-                    'Statement of Authority')
-flags.DEFINE_string('ldap_dns_soa_retry',
-                    '3600',
-                    'Retry interval (in seconds) for ldap dns driver '
-                    'Statement of Authority')
-flags.DEFINE_string('ldap_dns_soa_expiry',
-                    '86400',
-                    'Expiry interval (in seconds) for ldap dns driver '
-                    'Statement of Authority')
-flags.DEFINE_string('ldap_dns_soa_minimum',
-                    '7200',
-                    'Minimum interval (in seconds) for ldap dns driver '
-                    'Statement of Authority')
+ldap_dns_opts = [
+    cfg.StrOpt('ldap_dns_url',
+               default='ldap://ldap.example.com:389',
+               help='URL for ldap server which will store dns entries'),
+    cfg.StrOpt('ldap_dns_user',
+               default='uid=admin,ou=people,dc=example,dc=org',
+               help='user for ldap DNS'),
+    cfg.StrOpt('ldap_dns_password',
+               default='password',
+               help='password for ldap DNS'),
+    cfg.StrOpt('ldap_dns_soa_hostmaster',
+               default='hostmaster@example.org',
+               help='Hostmaster for ldap dns driver Statement of Authority'),
+    cfg.MultiStrOpt('ldap_dns_servers',
+                    default='[dns.example.org]',
+                    help='DNS Servers for ldap dns driver'),
+    cfg.StrOpt('ldap_dns_base_dn',
+               default='ou=hosts,dc=example,dc=org',
+               help='Base DN for DNS entries in ldap'),
+    cfg.StrOpt('ldap_dns_soa_refresh',
+               default='1800',
+               help='Refresh interval (in seconds) for ldap dns driver '
+                    'Statement of Authority'),
+    cfg.StrOpt('ldap_dns_soa_retry',
+               default='3600',
+               help='Retry interval (in seconds) for ldap dns driver '
+                    'Statement of Authority'),
+    cfg.StrOpt('ldap_dns_soa_expiry',
+               default='86400',
+               help='Expiry interval (in seconds) for ldap dns driver '
+                    'Statement of Authority'),
+    cfg.StrOpt('ldap_dns_soa_minimum',
+               default='7200',
+               help='Minimum interval (in seconds) for ldap dns driver '
+                    'Statement of Authority'),
+    ]
+
+flags.FLAGS.register_opts(ldap_dns_opts)
 
 
 # Importing ldap.modlist breaks the tests for some reason,
@@ -68,6 +74,10 @@ flags.DEFINE_string('ldap_dns_soa_minimum',
 def create_modlist(newattrs):
     modlist = []
     for attrtype in newattrs.keys():
+        utf8_vals = []
+        for val in newattrs[attrtype]:
+            utf8_vals.append(utils.utf8(val))
+        newattrs[attrtype] = utf8_vals
         modlist.append((attrtype, newattrs[attrtype]))
     return modlist
 
@@ -85,7 +95,7 @@ class DNSEntry(object):
     @classmethod
     def _get_tuple_for_domain(cls, lobj, domain):
         entry = lobj.search_s(flags.FLAGS.ldap_dns_base_dn, ldap.SCOPE_SUBTREE,
-                              "(associatedDomain=%s)" % domain)
+                              "(associatedDomain=%s)" % utils.utf8(domain))
         if not entry:
             return None
         if len(entry) > 1:
@@ -143,7 +153,7 @@ class DomainEntry(DNSEntry):
                  flags.FLAGS.ldap_dns_soa_retry,
                  flags.FLAGS.ldap_dns_soa_expiry,
                  flags.FLAGS.ldap_dns_soa_minimum)
-        return soa
+        return utils.utf8(soa)
 
     @classmethod
     def create_domain(cls, lobj, domain):
@@ -157,7 +167,7 @@ class DomainEntry(DNSEntry):
                                  'domain', 'dcobject', 'top'],
                  'sOARecord': [cls._soa()],
                  'associatedDomain': [domain],
-                 'dc': domain}
+                 'dc': [domain]}
         lobj.add_s(newdn, create_modlist(attrs))
         return DomainEntry(lobj, domain)
 
@@ -187,7 +197,8 @@ class DomainEntry(DNSEntry):
     def subentry_with_name(self, name):
         entry = self.lobj.search_s(self.dn, ldap.SCOPE_SUBTREE,
                                    "(associatedDomain=%s.%s)" %
-                                     (name, self.qualified_domain))
+                                     (utils.utf8(name),
+                                      utils.utf8(self.qualified_domain)))
         if entry:
             return HostEntry(self, entry[0])
         else:
@@ -195,7 +206,7 @@ class DomainEntry(DNSEntry):
 
     def subentries_with_ip(self, ip):
         entries = self.lobj.search_s(self.dn, ldap.SCOPE_SUBTREE,
-                                   "(aRecord=%s)" % ip)
+                                   "(aRecord=%s)" % utils.utf8(ip))
         objs = []
         for entry in entries:
             if 'associatedDomain' in entry[1]:
@@ -215,7 +226,8 @@ class DomainEntry(DNSEntry):
             existingdn = entries[0].dn
             self.lobj.modify_s(existingdn, [(ldap.MOD_ADD,
                                             'associatedDomain',
-                                             self._qualify(name))])
+                                             utils.utf8(self._qualify(name)))])
+
             return self.subentry_with_name(name)
         else:
             # We need to create an entirely new entry.
@@ -224,7 +236,7 @@ class DomainEntry(DNSEntry):
                                      'domain', 'dcobject', 'top'],
                      'aRecord': [address],
                      'associatedDomain': [self._qualify(name)],
-                     'dc': name}
+                     'dc': [name]}
             self.lobj.add_s(newdn, create_modlist(attrs))
             return self.subentry_with_name(name)
         self.update_soa()
@@ -252,12 +264,12 @@ class HostEntry(DNSEntry):
         if len(names) > 1:
             # We just have to remove the requested domain.
             self.lobj.modify_s(self.dn, [(ldap.MOD_DELETE, 'associatedDomain',
-                                         self._qualify(name))])
+                                        self._qualify(utils.utf8(name)))])
             if (self.rdn[1] == name):
                 # We just removed the rdn, so we need to move this entry.
                 names.remove(self._qualify(name))
                 newrdn = "dc=%s" % self._dequalify(names[0])
-                self.lobj.modrdn_s(self.dn, newrdn)
+                self.lobj.modrdn_s(self.dn, [newrdn])
         else:
             # We should delete the entire record.
             self.lobj.delete_s(self.dn)
@@ -268,7 +280,7 @@ class HostEntry(DNSEntry):
             raise exception.NotFound()
         if len(names) == 1:
             self.lobj.modify_s(self.dn, [(ldap.MOD_REPLACE, 'aRecord',
-                                         [address])])
+                                         [utils.utf8(address)])])
         else:
             self.remove_name(name)
             parent.add_entry(name, address)
@@ -360,5 +372,5 @@ class FakeLdapDNS(LdapDNS):
         attrs = {'objectClass': ['domainrelatedobject', 'dnsdomain',
                                  'domain', 'dcobject', 'top'],
                  'associateddomain': ['root'],
-                 'dc': 'root'}
+                 'dc': ['root']}
         self.lobj.add_s(flags.FLAGS.ldap_dns_base_dn, create_modlist(attrs))

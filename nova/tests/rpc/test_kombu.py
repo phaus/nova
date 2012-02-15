@@ -25,7 +25,7 @@ from nova.rpc import impl_kombu
 from nova.tests.rpc import common
 
 
-LOG = logging.getLogger('nova.tests.rpc')
+LOG = logging.getLogger(__name__)
 
 
 class MyException(Exception):
@@ -51,6 +51,7 @@ class RpcKombuTestCase(common._BaseRpcTestCase):
         super(RpcKombuTestCase, self).setUp()
 
     def tearDown(self):
+        impl_kombu.cleanup()
         super(RpcKombuTestCase, self).tearDown()
 
     def test_reusing_connection(self):

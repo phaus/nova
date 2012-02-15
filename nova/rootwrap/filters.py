@@ -41,6 +41,10 @@ class CommandFilter(object):
             return ['sudo', '-u', self.run_as, self.exec_path] + userargs[1:]
         return [self.exec_path] + userargs[1:]
 
+    def get_environment(self, userargs):
+        """Returns specific environment to set, None if none"""
+        return None
+
 
 class RegExpFilter(CommandFilter):
     """Command filter doing regexp matching for every argument"""
@@ -77,4 +81,63 @@ class DnsmasqFilter(CommandFilter):
         return False
 
     def get_command(self, userargs):
-        return userargs[0:2] + [self.exec_path] + userargs[3:]
+        return [self.exec_path] + userargs[3:]
+
+    def get_environment(self, userargs):
+        env = os.environ.copy()
+        env['FLAGFILE'] = userargs[0].split('=')[-1]
+        env['NETWORK_ID'] = userargs[1].split('=')[-1]
+        return env
+
+
+class KillFilter(CommandFilter):
+    """Specific filter for the kill calls.
+       1st argument is a list of accepted signals (emptystring means no signal)
+       2nd argument is a list of accepted affected executables.
+
+       This filter relies on /proc to accurately determine affected
+       executable, so it will only work on procfs-capable systems (not OSX).
+    """
+
+    def match(self, userargs):
+        if userargs[0] != "kill":
+            return False
+        args = list(userargs)
+        if len(args) == 3:
+            signal = args.pop(1)
+            if signal not in self.args[0]:
+                # Requested signal not in accepted list
+                return False
+        else:
+            if len(args) != 2:
+                # Incorrect number of arguments
+                return False
+            if '' not in self.args[0]:
+                # No signal, but list doesn't include empty string
+                return False
+        try:
+            command = os.readlink("/proc/%d/exe" % int(args[1]))
+            if command not in self.args[1]:
+                # Affected executable not in accepted list
+                return False
+        except (ValueError, OSError):
+            # Incorrect PID
+            return False
+        return True
+
+
+class ReadFileFilter(CommandFilter):
+    """Specific filter for the utils.read_file_as_root call"""
+
+    def __init__(self, file_path, *args):
+        self.file_path = file_path
+        super(ReadFileFilter, self).__init__("/bin/cat", "root", *args)
+
+    def match(self, userargs):
+        if userargs[0] != 'cat':
+            return False
+        if userargs[1] != self.file_path:
+            return False
+        if len(userargs) != 2:
+            return False
+        return True

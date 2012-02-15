@@ -24,21 +24,29 @@ Simple Scheduler
 from nova import db
 from nova import flags
 from nova import exception
+from nova.openstack.common import cfg
 from nova.scheduler import driver
 from nova.scheduler import chance
 from nova import utils
 
+
+simple_scheduler_opts = [
+    cfg.IntOpt("max_cores",
+               default=16,
+               help="maximum number of instance cores to allow per host"),
+    cfg.IntOpt("max_gigabytes",
+               default=10000,
+               help="maximum number of volume gigabytes to allow per host"),
+    cfg.IntOpt("max_networks",
+               default=1000,
+               help="maximum number of networks to allow per host"),
+    cfg.BoolOpt('skip_isolated_core_check',
+                default=True,
+                help='Allow overcommitting vcpus on isolated hosts'),
+    ]
+
 FLAGS = flags.FLAGS
-flags.DEFINE_integer("max_cores", 16,
-                     "maximum number of instance cores to allow per host")
-flags.DEFINE_integer("max_gigabytes", 10000,
-                     "maximum number of volume gigabytes to allow per host")
-flags.DEFINE_integer("max_networks", 1000,
-                     "maximum number of networks to allow per host")
-flags.DEFINE_list('isolated_images', [], 'Images to run on isolated host')
-flags.DEFINE_list('isolated_hosts', [], 'Host reserved for specific images')
-flags.DEFINE_boolean('skip_isolated_core_check', True,
-                     'Allow overcommitting vcpus on isolated hosts')
+FLAGS.register_opts(simple_scheduler_opts)
 
 
 class SimpleScheduler(chance.ChanceScheduler):
@@ -74,8 +82,8 @@ class SimpleScheduler(chance.ChanceScheduler):
             if service['host'] in FLAGS.isolated_hosts and not in_isolation:
                 # images that aren't isolated only run on general hosts
                 continue
-            if check_cores and \
-                    instance_cores + instance_opts['vcpus'] > FLAGS.max_cores:
+            if (check_cores and
+                instance_cores + instance_opts['vcpus'] > FLAGS.max_cores):
                 msg = _("Not enough allocatable CPU cores remaining")
                 raise exception.NoValidHost(reason=msg)
             if utils.service_is_up(service) and not service['disabled']:

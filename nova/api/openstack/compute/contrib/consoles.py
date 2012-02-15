@@ -23,7 +23,8 @@ from nova.api.openstack import extensions
 from nova.api.openstack import wsgi
 
 
-LOG = logging.getLogger('nova.api.openstack.compute.contrib.console')
+LOG = logging.getLogger(__name__)
+authorize = extensions.extension_authorizer('compute', 'consoles')
 
 
 class ConsolesController(wsgi.Controller):
@@ -35,6 +36,7 @@ class ConsolesController(wsgi.Controller):
     def get_vnc_console(self, req, id, body):
         """Get text console output."""
         context = req.environ['nova.context']
+        authorize(context)
 
         console_type = body['os-getVNCConsole'].get('type')
 
@@ -52,10 +54,10 @@ class ConsolesController(wsgi.Controller):
                                                       console_type)
         except exception.ConsoleTypeInvalid, e:
             raise webob.exc.HTTPBadRequest(_('Invalid type specification'))
-        except exception.ApiError, e:
-            raise webob.exc.HTTPBadRequest(explanation=e.message)
         except exception.NotAuthorized, e:
             raise webob.exc.HTTPUnauthorized()
+        except exception.NotFound:
+            raise webob.exc.HTTPNotFound(_('Instance not found'))
 
         return {'console': {'type': console_type, 'url': output['url']}}
 

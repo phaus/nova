@@ -20,25 +20,14 @@ from nova import flags
 from nova import log as logging
 
 
-LOG = logging.getLogger('nova.api.openstack.volume.extensions')
+LOG = logging.getLogger(__name__)
 FLAGS = flags.FLAGS
 
 
 class ExtensionManager(base_extensions.ExtensionManager):
-    def __new__(cls):
-        if cls._ext_mgr is None:
-            LOG.audit(_('Initializing extension manager.'))
+    def __init__(self):
+        LOG.audit(_('Initializing extension manager.'))
 
-            cls._ext_mgr = super(ExtensionManager, cls).__new__(cls)
-
-            cls.cls_list = FLAGS.osapi_volume_extension
-            cls._ext_mgr.extensions = {}
-            cls._ext_mgr._load_extensions()
-
-        return cls._ext_mgr
-
-
-class ExtensionMiddleware(base_extensions.ExtensionMiddleware):
-    def __init__(self, application, ext_mgr=None):
-        ext_mgr = ExtensionManager()
-        super(ExtensionMiddleware, self).__init__(application, ext_mgr)
+        self.cls_list = FLAGS.osapi_volume_extension
+        self.extensions = {}
+        self._load_extensions()

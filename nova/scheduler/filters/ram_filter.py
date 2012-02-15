@@ -16,13 +16,17 @@
 
 from nova import flags
 from nova import log as logging
+from nova.openstack.common import cfg
 from nova.scheduler.filters import abstract_filter
 
-LOG = logging.getLogger('nova.scheduler.filter.ram_filter')
+LOG = logging.getLogger(__name__)
+
+ram_allocation_ratio_opt = cfg.FloatOpt("ram_allocation_ratio",
+        default=1.0,
+        help="virtual ram to physical ram allocation ratio")
 
 FLAGS = flags.FLAGS
-flags.DEFINE_float("ram_allocation_ratio", 1.0,
-                     "virtual ram to physical ram allocation ratio")
+FLAGS.register_opt(ram_allocation_ratio_opt)
 
 
 class RamFilter(abstract_filter.AbstractHostFilter):

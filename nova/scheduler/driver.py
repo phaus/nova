@@ -29,20 +29,27 @@ from nova import db
 from nova import exception
 from nova import flags
 from nova import log as logging
+from nova.openstack.common import cfg
 from nova import rpc
 from nova.scheduler import host_manager
 from nova.scheduler import zone_manager
 from nova import utils
 
 
+LOG = logging.getLogger(__name__)
+
+scheduler_driver_opts = [
+    cfg.StrOpt('scheduler_host_manager',
+               default='nova.scheduler.host_manager.HostManager',
+               help='The scheduler host manager class to use'),
+    cfg.StrOpt('scheduler_zone_manager',
+               default='nova.scheduler.zone_manager.ZoneManager',
+               help='The scheduler zone manager class to use'),
+    ]
+
 FLAGS = flags.FLAGS
-LOG = logging.getLogger('nova.scheduler.driver')
-flags.DEFINE_string('scheduler_host_manager',
-        'nova.scheduler.host_manager.HostManager',
-        'The scheduler host manager class to use')
-flags.DEFINE_string('scheduler_zone_manager',
-        'nova.scheduler.zone_manager.ZoneManager',
-        'The scheduler zone manager class to use')
+FLAGS.register_opts(scheduler_driver_opts)
+
 flags.DECLARE('instances_path', 'nova.compute.manager')
 
 
@@ -412,11 +419,8 @@ class Scheduler(object):
         # Getting total used memory and disk of host
         # It should be sum of memories that are assigned as max value,
         # because overcommiting is risky.
-        used = 0
         instance_refs = db.instance_get_all_by_host(context, dest)
-        used_list = [i['memory_mb'] for i in instance_refs]
-        if used_list:
-            used = reduce(lambda x, y: x + y, used_list)
+        used = sum([i['memory_mb'] for i in instance_refs])
 
         mem_inst = instance_ref['memory_mb']
         avail = avail - used
@@ -448,11 +452,6 @@ class Scheduler(object):
         # if real disk size < available disk size
         # if disk_over_commit is True,
         #  otherwise virtual disk size < available disk size.
-
-        # Refresh compute_nodes table
-        topic = db.queue_get_for(context, FLAGS.compute_topic, dest)
-        rpc.call(context, topic,
-                 {"method": "update_available_resource"})
 
         # Getting total available disk of host
         available_gb = self._get_compute_info(context,

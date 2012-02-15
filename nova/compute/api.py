@@ -17,7 +17,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-"""Handles all requests relating to instances (guest vms)."""
+"""Handles all requests relating to compute resources (e.g. guest vms,
+networking and storage of vms, and compute hosts on which they run)."""
 
 import functools
 import re
@@ -27,6 +28,7 @@ import novaclient
 import webob.exc
 
 from nova import block_device
+from nova.compute import aggregate_states
 from nova.compute import instance_types
 from nova.compute import power_state
 from nova.compute import task_states
@@ -37,6 +39,7 @@ from nova import flags
 import nova.image
 from nova import log as logging
 from nova import network
+from nova.openstack.common import cfg
 import nova.policy
 from nova import quota
 from nova import rpc
@@ -45,14 +48,16 @@ from nova import utils
 from nova import volume
 
 
-LOG = logging.getLogger('nova.compute.api')
+LOG = logging.getLogger(__name__)
 
+find_host_timeout_opt = cfg.StrOpt('find_host_timeout',
+        default=30,
+        help='Timeout after NN seconds when looking for a host.')
 
 FLAGS = flags.FLAGS
+FLAGS.register_opt(find_host_timeout_opt)
 flags.DECLARE('enable_zone_routing', 'nova.scheduler.api')
 flags.DECLARE('consoleauth_topic', 'nova.consoleauth')
-flags.DEFINE_integer('find_host_timeout', 30,
-                     'Timeout after NN seconds when looking for a host.')
 
 
 def check_instance_state(vm_state=None, task_state=None):
@@ -69,15 +74,14 @@ def check_instance_state(vm_state=None, task_state=None):
     def outer(f):
         @functools.wraps(f)
         def inner(self, context, instance, *args, **kw):
-            if vm_state is not None and \
-               instance['vm_state'] not in vm_state:
+            if vm_state is not None and instance['vm_state'] not in vm_state:
                 raise exception.InstanceInvalidState(
                     attr='vm_state',
                     instance_uuid=instance['uuid'],
                     state=instance['vm_state'],
                     method=f.__name__)
-            if task_state is not None and \
-               instance['task_state'] not in task_state:
+            if (task_state is not None and
+                instance['task_state'] not in task_state):
                 raise exception.InstanceInvalidState(
                     attr='task_state',
                     instance_uuid=instance['uuid'],
@@ -108,8 +112,8 @@ class API(base.Base):
 
     def __init__(self, image_service=None, network_api=None, volume_api=None,
                  **kwargs):
-        self.image_service = image_service or \
-                nova.image.get_default_image_service()
+        self.image_service = (image_service or
+                              nova.image.get_default_image_service())
 
         self.network_api = network_api or network.API()
         self.volume_api = volume_api or volume.API()
@@ -132,8 +136,8 @@ class API(base.Base):
             content_limit = quota.allowed_injected_file_content_bytes(
                                                     context, len(content))
             if len(content) > content_limit:
-                raise exception.QuotaError(
-                                  code="OnsetFileContentLimitExceeded")
+                code = "OnsetFileContentLimitExceeded"
+                raise exception.QuotaError(code=code)
 
     def _check_metadata_properties_quota(self, context, metadata=None):
         """Enforce quota limits on metadata properties."""
@@ -146,7 +150,7 @@ class API(base.Base):
             msg = _("Quota exceeded for %(pid)s, tried to set "
                     "%(num_metadata)s metadata properties") % locals()
             LOG.warn(msg)
-            raise exception.QuotaError(msg, "MetadataLimitExceeded")
+            raise exception.QuotaError(code="MetadataLimitExceeded")
 
         # Because metadata is stored in the DB, we hard-code the size limits
         # In future, we may support more variable length strings, so we act
@@ -157,7 +161,7 @@ class API(base.Base):
                 msg = _("Quota exceeded for %(pid)s, metadata property "
                         "key or value too long") % locals()
                 LOG.warn(msg)
-                raise exception.QuotaError(msg, "MetadataLimitExceeded")
+                raise exception.QuotaError(code="MetadataLimitExceeded")
 
     def _check_requested_networks(self, context, requested_networks):
         """ Check if the networks requested belongs to the project
@@ -214,7 +218,7 @@ class API(base.Base):
             else:
                 message = _("Instance quota exceeded. You can only run %s "
                             "more instances of this type.") % num_instances
-            raise exception.QuotaError(message, "InstanceLimitExceeded")
+            raise exception.QuotaError(code="InstanceLimitExceeded")
 
         self._check_metadata_properties_quota(context, metadata)
         self._check_injected_file_quota(context, injected_files)
@@ -226,7 +230,7 @@ class API(base.Base):
 
         if instance_type['memory_mb'] < int(image.get('min_ram') or 0):
             raise exception.InstanceTypeMemoryTooSmall()
-        if instance_type['local_gb'] < int(image.get('min_disk') or 0):
+        if instance_type['root_gb'] < int(image.get('min_disk') or 0):
             raise exception.InstanceTypeDiskTooSmall()
 
         config_drive_id = None
@@ -263,8 +267,8 @@ class API(base.Base):
             ramdisk_id = None
             LOG.debug(_("Creating a raw instance"))
         # Make sure we have access to kernel and ramdisk (if not raw)
-        logging.debug("Using Kernel=%s, Ramdisk=%s" %
-                       (kernel_id, ramdisk_id))
+        LOG.debug(_("Using Kernel=%(kernel_id)s, Ramdisk=%(ramdisk_id)s")
+                  % locals())
         if kernel_id:
             image_service.show(context, kernel_id)
         if ramdisk_id:
@@ -315,7 +319,8 @@ class API(base.Base):
             'instance_type_id': instance_type['id'],
             'memory_mb': instance_type['memory_mb'],
             'vcpus': instance_type['vcpus'],
-            'local_gb': instance_type['local_gb'],
+            'root_gb': instance_type['root_gb'],
+            'ephemeral_gb': instance_type['ephemeral_gb'],
             'display_name': display_name,
             'display_description': display_description,
             'user_data': user_data or '',
@@ -376,13 +381,13 @@ class API(base.Base):
 
             # TODO(yamahata): ephemeralN where N > 0
             # Only ephemeral0 is allowed for now because InstanceTypes
-            # table only allows single local disk, local_gb.
+            # table only allows single local disk, ephemeral_gb.
             # In order to enhance it, we need to add a new columns to
             # instance_types table.
             if num > 0:
                 return 0
 
-            size = instance_type.get('local_gb')
+            size = instance_type.get('ephemeral_gb')
 
         return size
 
@@ -709,7 +714,7 @@ class API(base.Base):
                       "args": {"security_group_id": group_id}})
 
     def trigger_provider_fw_rules_refresh(self, context):
-        """Called when a rule is added to or removed from a security_group"""
+        """Called when a rule is added/removed from a provider firewall"""
 
         hosts = [x['host'] for (x, idx)
                            in self.db.service_get_all_compute_sorted(context)]
@@ -1240,7 +1245,7 @@ class API(base.Base):
         #disk format of vhd is non-shrinkable
         if orig_image.get('disk_format') == 'vhd':
             min_ram = instance['instance_type']['memory_mb']
-            min_disk = instance['instance_type']['local_gb']
+            min_disk = instance['instance_type']['root_gb']
         else:
             #set new image values to the original image values
             min_ram = orig_image.get('min_ram')
@@ -1320,8 +1325,8 @@ class API(base.Base):
 
         self.update(context,
                     instance,
-                    vm_state=vm_states.ACTIVE,
-                    task_state=None)
+                    vm_state=vm_states.RESIZING,
+                    task_state=task_states.RESIZE_REVERTING)
 
         params = {'migration_id': migration_ref['id']}
         self._cast_compute_message('revert_resize', context,
@@ -1567,19 +1572,6 @@ class API(base.Base):
                                    instance, params=params)
 
     @wrap_check_policy
-    def get_ajax_console(self, context, instance):
-        """Get a url to an AJAX Console."""
-        output = self._call_compute_message('get_ajax_console',
-                                            context,
-                                            instance)
-        rpc.cast(context, '%s' % FLAGS.ajax_console_proxy_topic,
-                 {'method': 'authorize_ajax_console',
-                  'args': {'token': output['token'], 'host': output['host'],
-                  'port': output['port']}})
-        return {'url': '%s/?token=%s' % (FLAGS.ajax_console_proxy_url,
-                                         output['token'])}
-
-    @wrap_check_policy
     def get_vnc_console(self, context, instance, console_type):
         """Get a url to an instance Console."""
         connect_info = self._call_compute_message('get_vnc_console',
@@ -1593,8 +1585,8 @@ class API(base.Base):
                            'console_type': console_type,
                            'host': connect_info['host'],
                            'port': connect_info['port'],
-                           'internal_access_path':\
-                            connect_info['internal_access_path']}})
+                           'internal_access_path':
+                                   connect_info['internal_access_path']}})
 
         return {'url': connect_info['access_url']}
 
@@ -1639,8 +1631,7 @@ class API(base.Base):
     def attach_volume(self, context, instance, volume_id, device):
         """Attach an existing volume to an existing instance."""
         if not re.match("^/dev/x{0,1}[a-z]d[a-z]+$", device):
-            raise exception.ApiError(_("Invalid device specified: %s. "
-                                     "Example device: /dev/vdb") % device)
+            raise exception.InvalidDevicePath(path=device)
         volume = self.volume_api.get(context, volume_id)
         self.volume_api.check_attach(context, volume)
         params = {"volume_id": volume_id,
@@ -1655,7 +1646,7 @@ class API(base.Base):
         """Detach a volume from an instance."""
         instance = self.db.volume_get_instance(context.elevated(), volume_id)
         if not instance:
-            raise exception.ApiError(_("Volume isn't attached to anything!"))
+            raise exception.VolumeUnattached(volume_id=volume_id)
 
         check_policy(context, 'detach_volume', instance)
 
@@ -1680,25 +1671,29 @@ class API(base.Base):
         # in its info, if this changes, the next few lines will need to
         # accommodate the info containing floating as well as fixed ip
         # addresses
-        fixed_ip_addrs = []
-        for info in self.network_api.get_instance_nw_info(context.elevated(),
-                                                          instance):
-            ips = info[1]['ips']
-            fixed_ip_addrs.extend([ip_dict['ip'] for ip_dict in ips])
+        nw_info = self.network_api.get_instance_nw_info(context.elevated(),
+                                                        instance)
 
-        # TODO(tr3buchet): this will associate the floating IP with the first
-        # fixed_ip (lowest id) an instance has. This should be changed to
-        # support specifying a particular fixed_ip if multiple exist.
-        if not fixed_ip_addrs:
-            msg = _("instance |%s| has no fixed_ips. "
-                    "unable to associate floating ip") % instance_uuid
-            raise exception.ApiError(msg)
-        if len(fixed_ip_addrs) > 1:
-            LOG.warning(_("multiple fixed_ips exist, using the first: %s"),
-                                                         fixed_ip_addrs[0])
+        if not nw_info:
+            raise exception.FixedIpNotFoundForInstance(
+                    instance_id=instance_uuid)
+
+        ips = [ip for ip in nw_info[0].fixed_ips()]
+
+        if not ips:
+            raise exception.FixedIpNotFoundForInstance(
+                    instance_id=instance_uuid)
+
+        # TODO(tr3buchet): this will associate the floating IP with the
+        # first fixed_ip (lowest id) an instance has. This should be
+        # changed to support specifying a particular fixed_ip if
+        # multiple exist.
+        if len(ips) > 1:
+            msg = _('multiple fixedips exist, using the first: %s')
+            LOG.warning(msg, ips[0]['address'])
+
         self.network_api.associate_floating_ip(context,
-                                               floating_address=address,
-                                               fixed_address=fixed_ip_addrs[0])
+                floating_address=address, fixed_address=ips[0]['address'])
 
     @wrap_check_policy
     def get_instance_metadata(self, context, instance):
@@ -1734,8 +1729,137 @@ class API(base.Base):
     def get_instance_faults(self, context, instances):
         """Get all faults for a list of instance uuids."""
 
+        if not instances:
+            return {}
+
         for instance in instances:
             check_policy(context, 'get_instance_faults', instance)
 
         uuids = [instance['uuid'] for instance in instances]
         return self.db.instance_fault_get_by_instance_uuids(context, uuids)
+
+
+class AggregateAPI(base.Base):
+    """Sub-set of the Compute Manager API for managing host aggregates."""
+    def __init__(self, **kwargs):
+        super(AggregateAPI, self).__init__(**kwargs)
+
+    def create_aggregate(self, context, aggregate_name, availability_zone):
+        """Creates the model for the aggregate."""
+        values = {"name": aggregate_name,
+                  "availability_zone": availability_zone}
+        aggregate = self.db.aggregate_create(context, values)
+        return dict(aggregate.iteritems())
+
+    def get_aggregate(self, context, aggregate_id):
+        """Get an aggregate by id."""
+        aggregate = self.db.aggregate_get(context, aggregate_id)
+        return self._get_aggregate_info(context, aggregate)
+
+    def get_aggregate_list(self, context):
+        """Get all the aggregates for this zone."""
+        aggregates = self.db.aggregate_get_all(context, read_deleted="no")
+        return [self._get_aggregate_info(context, a) for a in aggregates]
+
+    def update_aggregate(self, context, aggregate_id, values):
+        """Update the properties of an aggregate."""
+        aggregate = self.db.aggregate_update(context, aggregate_id, values)
+        return self._get_aggregate_info(context, aggregate)
+
+    def update_aggregate_metadata(self, context, aggregate_id, metadata):
+        """Updates the aggregate metadata.
+
+        If a key is set to None, it gets removed from the aggregate metadata.
+        """
+        # As a first release of the host aggregates blueprint, this call is
+        # pretty dumb, in the sense that interacts only with the model.
+        # In later releasses, updating metadata may trigger virt actions like
+        # the setup of shared storage, or more generally changes to the
+        # underlying hypervisor pools.
+        for key in metadata.keys():
+            if not metadata[key]:
+                try:
+                    self.db.aggregate_metadata_delete(context,
+                                                      aggregate_id, key)
+                    metadata.pop(key)
+                except exception.AggregateMetadataNotFound, e:
+                    LOG.warn(e.message)
+        self.db.aggregate_metadata_add(context, aggregate_id, metadata)
+        return self.get_aggregate(context, aggregate_id)
+
+    def delete_aggregate(self, context, aggregate_id):
+        """Deletes the aggregate."""
+        hosts = self.db.aggregate_host_get_all(context, aggregate_id,
+                                               read_deleted="no")
+        if len(hosts) > 0:
+            raise exception.InvalidAggregateAction(action='delete',
+                                                   aggregate_id=aggregate_id,
+                                                   reason='not empty')
+        values = {'operational_state': aggregate_states.DISMISSED}
+        self.db.aggregate_update(context, aggregate_id, values)
+        self.db.aggregate_delete(context, aggregate_id)
+
+    def add_host_to_aggregate(self, context, aggregate_id, host):
+        """Adds the host to an aggregate."""
+        # validates the host; ComputeHostNotFound is raised if invalid
+        service = self.db.service_get_all_compute_by_host(context, host)[0]
+        # add host, and reflects action in the aggregate operational state
+        aggregate = self.db.aggregate_get(context, aggregate_id)
+        if aggregate.operational_state in [aggregate_states.CREATED,
+                                           aggregate_states.ACTIVE]:
+            if service.availability_zone != aggregate.availability_zone:
+                raise exception.InvalidAggregateAction(
+                        action='add host',
+                        aggregate_id=aggregate_id,
+                        reason='availibility zone mismatch')
+            self.db.aggregate_host_add(context, aggregate_id, host)
+            if aggregate.operational_state == aggregate_states.CREATED:
+                values = {'operational_state': aggregate_states.CHANGING}
+                self.db.aggregate_update(context, aggregate_id, values)
+            queue = self.db.queue_get_for(context, service.topic, host)
+            rpc.cast(context, queue, {"method": "add_aggregate_host",
+                                      "args": {"aggregate_id": aggregate_id,
+                                               "host": host}, })
+            return self.get_aggregate(context, aggregate_id)
+        else:
+            invalid = {aggregate_states.CHANGING: 'setup in progress',
+                       aggregate_states.DISMISSED: 'aggregate deleted',
+                       aggregate_states.ERROR: 'aggregate in error', }
+            if aggregate.operational_state in invalid.keys():
+                raise exception.InvalidAggregateAction(
+                        action='add host',
+                        aggregate_id=aggregate_id,
+                        reason=invalid[aggregate.operational_state])
+
+    def remove_host_from_aggregate(self, context, aggregate_id, host):
+        """Removes host from the aggregate."""
+        # validates the host; ComputeHostNotFound is raised if invalid
+        service = self.db.service_get_all_compute_by_host(context, host)[0]
+        aggregate = self.db.aggregate_get(context, aggregate_id)
+        if aggregate.operational_state in [aggregate_states.ACTIVE,
+                                           aggregate_states.ERROR]:
+            self.db.aggregate_host_delete(context, aggregate_id, host)
+            queue = self.db.queue_get_for(context, service.topic, host)
+            rpc.cast(context, queue, {"method": "remove_aggregate_host",
+                                      "args": {"aggregate_id": aggregate_id,
+                                               "host": host}, })
+            return self.get_aggregate(context, aggregate_id)
+        else:
+            invalid = {aggregate_states.CHANGING: 'setup in progress',
+                       aggregate_states.DISMISSED: 'aggregate deleted', }
+            if aggregate.operational_state in invalid.keys():
+                raise exception.InvalidAggregateAction(
+                        action='remove host',
+                        aggregate_id=aggregate_id,
+                        reason=invalid[aggregate.operational_state])
+
+    def _get_aggregate_info(self, context, aggregate):
+        """Builds a dictionary with aggregate props, metadata and hosts."""
+        metadata = self.db.aggregate_metadata_get(context, aggregate.id)
+        hosts = self.db.aggregate_host_get_all(context, aggregate.id,
+                                               read_deleted="no")
+
+        result = dict(aggregate.iteritems())
+        result["metadata"] = metadata
+        result["hosts"] = hosts
+        return result

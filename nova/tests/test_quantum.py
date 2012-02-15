@@ -27,7 +27,7 @@ from nova import test
 from nova import utils
 from nova.network import manager
 
-LOG = logging.getLogger('nova.tests.quantum_network')
+LOG = logging.getLogger(__name__)
 
 
 # this class can be used for unit functional/testing on nova,
@@ -275,32 +275,42 @@ class QuantumNovaIPAMTestCase(QuantumNovaTestCase):
         self.net_man.driver.update_dhcp_hostfile_with_text = func
         self.net_man.driver.restart_dhcp = func2
         self.net_man.driver.kill_dhcp = func1
-        nw_info = self.net_man.allocate_for_instance(ctx,
+        nw_info = self.net_man.allocate_for_instance(ctx.elevated(),
                         instance_id=instance_ref['id'], host="",
-                        instance_type_id=instance_ref['instance_type_id'],
+                        rxtx_factor=3,
                         project_id=project_id)
 
         self.assertEquals(len(nw_info), 2)
 
+        cidrs = ['10.', '192.']
+        addrs = ['10.', '192.']
+        cidrs_v6 = ['2001:1dba:', '2001:1db8:']
+        addrs_v6 = ['2001:1dba:', '2001:1db8:']
+
+        def check_for_startswith(choices, choice):
+            for v in choices:
+                if choice.startswith(v):
+                    choices.remove(v)
+                    return True
+            return False
+
         # we don't know which order the NICs will be in until we
         # introduce the notion of priority
-        # v4 cidr
-        self.assertTrue(nw_info[0][0]['cidr'].startswith("10."))
-        self.assertTrue(nw_info[1][0]['cidr'].startswith("192."))
-
-        # v4 address
-        self.assertTrue(nw_info[0][1]['ips'][0]['ip'].startswith("10."))
-        self.assertTrue(nw_info[1][1]['ips'][0]['ip'].startswith("192."))
-
-        # v6 cidr
-        self.assertTrue(nw_info[0][0]['cidr_v6'].startswith("2001:1dba:"))
-        self.assertTrue(nw_info[1][0]['cidr_v6'].startswith("2001:1db8:"))
-
-        # v6 address
-        self.assertTrue(
-            nw_info[0][1]['ip6s'][0]['ip'].startswith("2001:1dba:"))
-        self.assertTrue(
-            nw_info[1][1]['ip6s'][0]['ip'].startswith("2001:1db8:"))
+        for vif in nw_info:
+            for subnet in vif['network']['subnets']:
+                cidr = subnet['cidr'].lower()
+                if subnet['version'] == 4:
+                    # v4 cidr
+                    self.assertTrue(check_for_startswith(cidrs, cidr))
+                    # v4 address
+                    address = subnet['ips'][0]['address']
+                    self.assertTrue(check_for_startswith(addrs, address))
+                else:
+                    # v6 cidr
+                    self.assertTrue(check_for_startswith(cidrs_v6, cidr))
+                    # v6 address
+                    address = subnet['ips'][0]['address']
+                    self.assertTrue(check_for_startswith(addrs_v6, address))
 
         self.net_man.deallocate_for_instance(ctx,
                     instance_id=instance_ref['id'],
@@ -336,39 +346,40 @@ class QuantumNovaIPAMTestCase(QuantumNovaTestCase):
         self.net_man.driver.kill_dhcp = func1
         nw_info = self.net_man.allocate_for_instance(ctx,
                         instance_id=instance_ref['id'], host="",
-                        instance_type_id=instance_ref['instance_type_id'],
+                        rxtx_factor=3,
                         project_id=project_id,
                         requested_networks=requested_networks)
 
         self.assertEquals(len(nw_info), 2)
 
+        cidrs = ['9.', '192.']
+        addrs = ['9.', '192.']
+        cidrs_v6 = ['2001:1dbb:', '2001:1db9:']
+        addrs_v6 = ['2001:1dbb:', '2001:1db9:']
+
+        def check_for_startswith(choices, choice):
+            for v in choices:
+                if choice.startswith(v):
+                    choices.remove(v)
+                    return True
+
         # we don't know which order the NICs will be in until we
         # introduce the notion of priority
-        # v4 cidr
-        self.assertTrue(nw_info[0][0]['cidr'].startswith("9.") or
-                        nw_info[1][0]['cidr'].startswith("9."))
-        self.assertTrue(nw_info[0][0]['cidr'].startswith("192.") or
-                        nw_info[1][0]['cidr'].startswith("192."))
-
-        # v4 address
-        self.assertTrue(nw_info[0][1]['ips'][0]['ip'].startswith("9.") or
-                        nw_info[1][1]['ips'][0]['ip'].startswith("9."))
-        self.assertTrue(nw_info[0][1]['ips'][0]['ip'].startswith("192.") or
-                        nw_info[1][1]['ips'][0]['ip'].startswith("192."))
-
-        # v6 cidr
-        self.assertTrue(nw_info[0][0]['cidr_v6'].startswith("2001:1dbb:") or
-                        nw_info[1][0]['cidr_v6'].startswith("2001:1dbb:"))
-        self.assertTrue(nw_info[0][0]['cidr_v6'].startswith("2001:1db9:") or
-                        nw_info[1][0]['cidr_v6'].startswith("2001:1db9:"))
-
-        # v6 address
-        self.assertTrue(
-            nw_info[0][1]['ip6s'][0]['ip'].startswith("2001:1dbb:") or
-            nw_info[1][1]['ip6s'][0]['ip'].startswith("2001:1dbb:"))
-        self.assertTrue(
-            nw_info[0][1]['ip6s'][0]['ip'].startswith("2001:1db9:") or
-            nw_info[1][1]['ip6s'][0]['ip'].startswith("2001:1db9:"))
+        for vif in nw_info:
+            for subnet in vif['network']['subnets']:
+                cidr = subnet['cidr'].lower()
+                if subnet['version'] == 4:
+                    # v4 cidr
+                    self.assertTrue(check_for_startswith(cidrs, cidr))
+                    # v4 address
+                    address = subnet['ips'][0]['address']
+                    self.assertTrue(check_for_startswith(addrs, address))
+                else:
+                    # v6 cidr
+                    self.assertTrue(check_for_startswith(cidrs_v6, cidr))
+                    # v6 address
+                    address = subnet['ips'][0]['address']
+                    self.assertTrue(check_for_startswith(addrs_v6, address))
 
         self.net_man.deallocate_for_instance(ctx,
                     instance_id=instance_ref['id'],
@@ -386,8 +397,8 @@ class QuantumNovaMACGenerationTestCase(QuantumNovaTestCase):
     def test_local_mac_address_creation(self):
         self.flags(use_melange_mac_generation=False)
         fake_mac = "ab:cd:ef:ab:cd:ef"
-        self.stubs.Set(manager.FlatManager, "generate_mac_address",
-                       lambda x: fake_mac)
+        self.stubs.Set(utils, "generate_mac_address",
+                       lambda: fake_mac)
         project_id = "fake_project1"
         ctx = context.RequestContext('user1', project_id)
         self._create_network(networks[0])
@@ -399,10 +410,10 @@ class QuantumNovaMACGenerationTestCase(QuantumNovaTestCase):
                                     {"project_id": project_id})
         nw_info = self.net_man.allocate_for_instance(ctx,
                         instance_id=instance_ref['id'], host="",
-                        instance_type_id=instance_ref['instance_type_id'],
+                        rxtx_factor=3,
                         project_id=project_id,
                         requested_networks=requested_networks)
-        self.assertEqual(nw_info[0][1]['mac'], fake_mac)
+        self.assertEqual(nw_info[0]['address'], fake_mac)
 
     def test_melange_mac_address_creation(self):
         self.flags(use_melange_mac_generation=True)
@@ -420,10 +431,10 @@ class QuantumNovaMACGenerationTestCase(QuantumNovaTestCase):
                                     {"project_id": project_id})
         nw_info = self.net_man.allocate_for_instance(ctx,
                         instance_id=instance_ref['id'], host="",
-                        instance_type_id=instance_ref['instance_type_id'],
+                        rxtx_factor=3,
                         project_id=project_id,
                         requested_networks=requested_networks)
-        self.assertEqual(nw_info[0][1]['mac'], fake_mac)
+        self.assertEqual(nw_info[0]['address'], fake_mac)
 
 
 class QuantumNovaPortSecurityTestCase(QuantumNovaTestCase):
@@ -457,10 +468,10 @@ class QuantumNovaPortSecurityTestCase(QuantumNovaTestCase):
             _instrumented_create_and_attach_port
         nw_info = self.net_man.allocate_for_instance(ctx,
                         instance_id=instance_ref['id'], host="",
-                        instance_type_id=instance_ref['instance_type_id'],
+                        rxtx_factor=3,
                         project_id=project_id,
                         requested_networks=requested_networks)
-        self.assertEqual(nw_info[0][1]['mac'], fake_mac)
+        self.assertEqual(nw_info[0]['address'], fake_mac)
 
     def test_port_securty_negative(self):
         self.flags(use_melange_mac_generation=True)
@@ -491,7 +502,7 @@ class QuantumNovaPortSecurityTestCase(QuantumNovaTestCase):
             _instrumented_create_and_attach_port
         nw_info = self.net_man.allocate_for_instance(ctx,
                         instance_id=instance_ref['id'], host="",
-                        instance_type_id=instance_ref['instance_type_id'],
+                        rxtx_factor=3,
                         project_id=project_id,
                         requested_networks=requested_networks)
-        self.assertEqual(nw_info[0][1]['mac'], fake_mac)
+        self.assertEqual(nw_info[0]['address'], fake_mac)

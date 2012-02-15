@@ -63,12 +63,12 @@ from nova import log as logging
 from nova import utils
 
 
-_CLASSES = ['host', 'network', 'session', 'SR', 'VBD',
+_CLASSES = ['host', 'network', 'session', 'SR', 'VBD', 'pool',
             'PBD', 'VDI', 'VIF', 'PIF', 'VM', 'VLAN', 'task']
 
 _db_content = {}
 
-LOG = logging.getLogger("nova.virt.xenapi.fake")
+LOG = logging.getLogger(__name__)
 
 
 def log_db_contents(msg=None):
@@ -91,6 +91,11 @@ def reset_table(table):
     if not table in _CLASSES:
         return
     _db_content[table] = {}
+
+
+def create_pool(name_label):
+    return _create_object('pool',
+                          {'name_label': name_label})
 
 
 def create_host(name_label):
@@ -201,50 +206,40 @@ def create_local_pifs():
        Do this one per host."""
     for host_ref in _db_content['host'].keys():
         _create_local_pif(host_ref)
-        _create_local_sr_iso(host_ref)
 
 
 def create_local_srs():
     """Create an SR that looks like the one created on the local disk by
-    default by the XenServer installer.  Do this one per host."""
+    default by the XenServer installer.  Do this one per host. Also, fake
+    the installation of an ISO SR."""
     for host_ref in _db_content['host'].keys():
-        _create_local_sr(host_ref)
+        create_sr(name_label='Local storage',
+                  type='lvm',
+                  other_config={'i18n-original-value-name_label':
+                                'Local storage',
+                                'i18n-key': 'local-storage'},
+                  host_ref=host_ref)
+        create_sr(name_label='Local storage ISO',
+                  type='iso',
+                  other_config={'i18n-original-value-name_label':
+                                'Local storage ISO',
+                                'i18n-key': 'local-storage-iso'},
+                  host_ref=host_ref)
 
 
-def _create_local_sr(host_ref):
+def create_sr(**kwargs):
     sr_ref = _create_object(
              'SR',
-             {'name_label': 'Local storage',
-              'type': 'lvm',
+             {'name_label': kwargs.get('name_label'),
+              'type': kwargs.get('type'),
               'content_type': 'user',
               'shared': False,
               'physical_size': str(1 << 30),
               'physical_utilisation': str(0),
               'virtual_allocation': str(0),
-              'other_config': {
-                     'i18n-original-value-name_label': 'Local storage',
-                     'i18n-key': 'local-storage'},
+              'other_config': kwargs.get('other_config'),
               'VDIs': []})
-    pbd_ref = create_pbd('', host_ref, sr_ref, True)
-    _db_content['SR'][sr_ref]['PBDs'] = [pbd_ref]
-    return sr_ref
-
-
-def _create_local_sr_iso(host_ref):
-    sr_ref = _create_object(
-             'SR',
-             {'name_label': 'Local storage ISO',
-              'type': 'lvm',
-              'content_type': 'iso',
-              'shared': False,
-              'physical_size': str(1 << 30),
-              'physical_utilisation': str(0),
-              'virtual_allocation': str(0),
-              'other_config': {
-                     'i18n-original-value-name_label': 'Local storage ISO',
-                     'i18n-key': 'local-storage-iso'},
-              'VDIs': []})
-    pbd_ref = create_pbd('', host_ref, sr_ref, True)
+    pbd_ref = create_pbd('', kwargs.get('host_ref'), sr_ref, True)
     _db_content['SR'][sr_ref]['PBDs'] = [pbd_ref]
     return sr_ref
 
@@ -356,6 +351,9 @@ class SessionBase(object):
     def __init__(self, uri):
         self._session = None
 
+    def pool_get_default_SR(self, _1, pool_ref):
+        return 'FAKE DEFAULT SR'
+
     def VBD_plug(self, _1, ref):
         rec = get_record('VBD', ref)
         if rec['currently_attached']:
@@ -448,6 +446,35 @@ class SessionBase(object):
             db_ref['xenstore_data'] = {}
         db_ref['xenstore_data'][key] = value
 
+    def VDI_remove_from_other_config(self, _1, vdi_ref, key):
+        db_ref = _db_content['VDI'][vdi_ref]
+        if not 'other_config' in db_ref:
+            return
+        db_ref['other_config'][key] = None
+
+    def VDI_add_to_other_config(self, _1, vdi_ref, key, value):
+        db_ref = _db_content['VDI'][vdi_ref]
+        if not 'other_config' in db_ref:
+            db_ref['other_config'] = {}
+        db_ref['other_config'][key] = value
+
+    def VDI_copy(self, _1, vdi_to_copy_ref, sr_ref):
+        db_ref = _db_content['VDI'][vdi_to_copy_ref]
+        name_label = db_ref['name_label']
+        read_only = db_ref['read_only']
+        sharable = db_ref['sharable']
+        vdi_ref = create_vdi(name_label, read_only, sr_ref, sharable)
+        return vdi_ref
+
+    def VDI_clone(self, _1, vdi_to_clone_ref):
+        db_ref = _db_content['VDI'][vdi_to_clone_ref]
+        name_label = db_ref['name_label']
+        read_only = db_ref['read_only']
+        sr_ref = db_ref['SR']
+        sharable = db_ref['sharable']
+        vdi_ref = create_vdi(name_label, read_only, sr_ref, sharable)
+        return vdi_ref
+
     def host_compute_free_memory(self, _1, ref):
         #Always return 12GB available
         return 12 * 1024 * 1024 * 1024
@@ -458,6 +485,8 @@ class SessionBase(object):
         elif (plugin, method) == ('glance', 'copy_kernel_vdi'):
             return ''
         elif (plugin, method) == ('glance', 'upload_vhd'):
+            return ''
+        elif (plugin, method) == ('glance', 'create_kernel_ramdisk'):
             return ''
         elif (plugin, method) == ('migration', 'move_vhds_into_sr'):
             return ''
@@ -500,9 +529,9 @@ class SessionBase(object):
 
     def _login(self, method, params):
         self._session = str(uuid.uuid4())
-        _db_content['session'][self._session] = \
-                                {'uuid': str(uuid.uuid4()),
-                                 'this_host': _db_content['host'].keys()[0]}
+        _session_info = {'uuid': str(uuid.uuid4()),
+                         'this_host': _db_content['host'].keys()[0]}
+        _db_content['session'][self._session] = _session_info
 
     def _logout(self):
         s = self._session
@@ -623,11 +652,11 @@ class SessionBase(object):
         expected = is_sr_create and 10 or is_vlan_create and 4 or 2
         self._check_arg_count(params, expected)
         (cls, _) = name.split('.')
-        ref = is_sr_create and \
-              _create_sr(cls, params) or \
-              is_vlan_create and \
-              _create_vlan(params[1], params[2], params[3]) or \
-              _create_object(cls, params[1])
+        ref = (is_sr_create and
+               _create_sr(cls, params) or
+               is_vlan_create and
+               _create_vlan(params[1], params[2], params[3]) or
+               _create_object(cls, params[1]))
 
         # Call hook to provide any fixups needed (ex. creating backrefs)
         after_hook = 'after_%s_create' % cls

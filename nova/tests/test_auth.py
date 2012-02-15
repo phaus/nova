@@ -16,10 +16,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from M2Crypto import X509
 import unittest
 
 from nova import crypto
+from nova import exception
 from nova import flags
 from nova import log as logging
 from nova import test
@@ -28,7 +28,7 @@ from nova.api.ec2 import cloud
 from nova.auth import fakeldap
 
 FLAGS = flags.FLAGS
-LOG = logging.getLogger('nova.tests.auth_unittest')
+LOG = logging.getLogger(__name__)
 
 
 class user_generator(object):
@@ -87,6 +87,9 @@ class user_and_project_generator(object):
 
 
 class _AuthManagerBaseTestCase(test.TestCase):
+
+    user_not_found_type = exception.UserNotFound
+
     def setUp(self):
         super(_AuthManagerBaseTestCase, self).setUp()
         self.flags(auth_driver=self.auth_driver,
@@ -106,6 +109,11 @@ class _AuthManagerBaseTestCase(test.TestCase):
             self.assertEqual('herbert', u.name)
             self.assertEqual('classified', u.secret)
             self.assertEqual('private-party', u.access)
+
+    def test_create_user_twice(self):
+        self.manager.create_user('test-1')
+        self.assertRaises(exception.UserExists, self.manager.create_user,
+                          'test-1')
 
     def test_signature_is_valid(self):
         with user_generator(self.manager, name='admin', secret='admin',
@@ -198,9 +206,28 @@ class _AuthManagerBaseTestCase(test.TestCase):
             self.assertEqual('test1', project.project_manager_id)
             self.assertTrue(self.manager.is_project_manager(user, project))
 
+    def test_can_create_project_twice(self):
+        with user_and_project_generator(self.manager) as (user1, project):
+            self.assertRaises(exception.ProjectExists,
+                              self.manager.create_project, "testproj", "test1")
+
     def test_create_project_assigns_manager_to_members(self):
         with user_and_project_generator(self.manager) as (user, project):
             self.assertTrue(self.manager.is_project_member(user, project))
+
+    def test_create_project_with_manager_and_members(self):
+        with user_generator(self.manager, name='test2') as user2:
+            with user_and_project_generator(self.manager,
+                project_state={'member_users': ['test2']}) as (user1, project):
+                    self.assertTrue(self.manager.is_project_member(
+                        user1, project))
+                    self.assertTrue(self.manager.is_project_member(
+                        user2, project))
+
+    def test_create_project_with_manager_and_missing_members(self):
+        self.assertRaises(self.user_not_found_type,
+                          self.manager.create_project, "testproj", "test1",
+                          member_users="test2")
 
     def test_no_extra_project_members(self):
         with user_generator(self.manager, name='test2') as baduser:
@@ -244,28 +271,6 @@ class _AuthManagerBaseTestCase(test.TestCase):
                 self.assertFalse(self.manager.has_role(user, 'developer',
                                                        project))
                 self.assertFalse(self.manager.is_project_member(user, project))
-
-    def test_can_generate_x509(self):
-        # NOTE(todd): this doesn't assert against the auth manager
-        #             so it probably belongs in crypto_unittest
-        #             but I'm leaving it where I found it.
-        with user_and_project_generator(self.manager) as (user, project):
-            # NOTE(vish): Setup runs genroot.sh if it hasn't been run
-            cloud.CloudController().setup()
-            _key, cert_str = crypto.generate_x509_cert(user.id, project.id)
-            LOG.debug(cert_str)
-
-            int_cert = crypto.fetch_ca(project_id=project.id)
-            cloud_cert = crypto.fetch_ca()
-            signed_cert = X509.load_cert_string(cert_str)
-            int_cert = X509.load_cert_string(int_cert)
-            cloud_cert = X509.load_cert_string(cloud_cert)
-            self.assertTrue(signed_cert.verify(int_cert.get_pubkey()))
-
-            if not FLAGS.use_project_ca:
-                self.assertTrue(signed_cert.verify(cloud_cert.get_pubkey()))
-            else:
-                self.assertFalse(signed_cert.verify(cloud_cert.get_pubkey()))
 
     def test_adding_role_to_project_is_ignored_unless_added_to_user(self):
         with user_and_project_generator(self.manager) as (user, project):
@@ -336,12 +341,25 @@ class _AuthManagerBaseTestCase(test.TestCase):
                 self.assertEqual('test2', project.project_manager_id)
                 self.assertEqual('new desc', project.description)
 
+    def test_can_call_modify_project_but_do_nothing(self):
+        with user_and_project_generator(self.manager):
+            self.manager.modify_project('testproj')
+            project = self.manager.get_project('testproj')
+            self.assertEqual('test1', project.project_manager_id)
+            self.assertEqual('testproj', project.description)
+
     def test_modify_project_adds_new_manager(self):
         with user_and_project_generator(self.manager):
             with user_generator(self.manager, name='test2'):
                 self.manager.modify_project('testproj', 'test2', 'new desc')
                 project = self.manager.get_project('testproj')
                 self.assertTrue('test2' in project.member_ids)
+
+    def test_create_project_with_missing_user(self):
+        with user_generator(self.manager):
+            self.assertRaises(self.user_not_found_type,
+                              self.manager.create_project, 'testproj',
+                              'not_real')
 
     def test_can_delete_project(self):
         with user_generator(self.manager):
@@ -367,9 +385,24 @@ class _AuthManagerBaseTestCase(test.TestCase):
             self.assertEqual('secret', user.secret)
             self.assertTrue(user.is_admin())
 
+    def test_can_call_modify_user_but_do_nothing(self):
+        with user_generator(self.manager):
+            old_user = self.manager.get_user('test1')
+            self.manager.modify_user('test1')
+            user = self.manager.get_user('test1')
+            self.assertEqual(old_user.access, user.access)
+            self.assertEqual(old_user.secret, user.secret)
+            self.assertEqual(old_user.is_admin(), user.is_admin())
+
+    def test_get_nonexistent_user_raises_notfound_exception(self):
+        self.assertRaises(exception.NotFound,
+                          self.manager.get_user,
+                          'joeblow')
+
 
 class AuthManagerLdapTestCase(_AuthManagerBaseTestCase):
     auth_driver = 'nova.auth.ldapdriver.FakeLdapDriver'
+    user_not_found_type = exception.LDAPUserNotFound
 
     def test_reconnect_on_server_failure(self):
         self.manager.get_users()
@@ -383,6 +416,7 @@ class AuthManagerLdapTestCase(_AuthManagerBaseTestCase):
 
 class AuthManagerDbTestCase(_AuthManagerBaseTestCase):
     auth_driver = 'nova.auth.dbdriver.DbDriver'
+    user_not_found_type = exception.UserNotFound
 
 
 if __name__ == "__main__":

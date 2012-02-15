@@ -25,18 +25,31 @@ from nova import db
 from nova import exception
 from nova import flags
 from nova import log as logging
+from nova.openstack.common import cfg
 from nova import utils
 
-FLAGS = flags.FLAGS
-flags.DEFINE_integer('reserved_host_disk_mb', 0,
-        'Amount of disk in MB to reserve for host/dom0')
-flags.DEFINE_integer('reserved_host_memory_mb', 512,
-        'Amount of memory in MB to reserve for host/dom0')
-flags.DEFINE_list('default_host_filters', ['RamFilter', 'ComputeFilter'],
-        'Which filters to use for filtering hosts when not specified '
-        'in the request.')
 
-LOG = logging.getLogger('nova.scheduler.host_manager')
+host_manager_opts = [
+    cfg.IntOpt('reserved_host_disk_mb',
+               default=0,
+               help='Amount of disk in MB to reserve for host/dom0'),
+    cfg.IntOpt('reserved_host_memory_mb',
+               default=512,
+               help='Amount of memory in MB to reserve for host/dom0'),
+    cfg.ListOpt('default_host_filters',
+                default=[
+                  'AvailabilityZoneFilter',
+                  'RamFilter',
+                  'ComputeFilter'
+                  ],
+                help='Which filters to use for filtering hosts when not '
+                     'specified in the request.'),
+    ]
+
+FLAGS = flags.FLAGS
+FLAGS.register_opts(host_manager_opts)
+
+LOG = logging.getLogger(__name__)
 
 
 class ReadOnlyDict(UserDict.IterableUserDict):
@@ -93,24 +106,30 @@ class HostState(object):
         # These will change as resources are virtually "consumed".
         self.free_ram_mb = 0
         self.free_disk_mb = 0
+        self.vcpus_total = 0
+        self.vcpus_used = 0
 
     def update_from_compute_node(self, compute):
         """Update information about a host from its compute_node info."""
         all_disk_mb = compute['local_gb'] * 1024
         all_ram_mb = compute['memory_mb']
+        vcpus_total = compute['vcpus']
         if FLAGS.reserved_host_disk_mb > 0:
             all_disk_mb -= FLAGS.reserved_host_disk_mb
         if FLAGS.reserved_host_memory_mb > 0:
             all_ram_mb -= FLAGS.reserved_host_memory_mb
         self.free_ram_mb = all_ram_mb
         self.free_disk_mb = all_disk_mb
+        self.vcpus_total = vcpus_total
 
     def consume_from_instance(self, instance):
         """Update information about a host from instance info."""
-        disk_mb = instance['local_gb'] * 1024
+        disk_mb = (instance['root_gb'] + instance['ephemeral_gb']) * 1024
         ram_mb = instance['memory_mb']
+        vcpus = instance['vcpus']
         self.free_ram_mb -= ram_mb
         self.free_disk_mb -= disk_mb
+        self.vcpus_used += vcpus
 
     def passes_filters(self, filter_fns, filter_properties):
         """Return whether or not this host passes filters."""
@@ -126,8 +145,8 @@ class HostState(object):
         return True
 
     def __repr__(self):
-        return "host '%s': free_ram_mb:%s free_disk_mb:%s" % \
-                    (self.host, self.free_ram_mb, self.free_disk_mb)
+        return ("host '%s': free_ram_mb:%s free_disk_mb:%s" %
+                (self.host, self.free_ram_mb, self.free_disk_mb))
 
 
 class HostManager(object):
@@ -243,8 +262,8 @@ class HostManager(object):
 
     def update_service_capabilities(self, service_name, host, capabilities):
         """Update the per-service capabilities based on this notification."""
-        logging.debug(_("Received %(service_name)s service update from "
-                "%(host)s.") % locals())
+        LOG.debug(_("Received %(service_name)s service update from "
+                    "%(host)s.") % locals())
         service_caps = self.service_states.get(host, {})
         # Copy the capabilities, so we don't modify the original dict
         capab_copy = dict(capabilities)
@@ -256,8 +275,8 @@ class HostManager(object):
         """Check if host service capabilites are not recent enough."""
         allowed_time_diff = FLAGS.periodic_interval * 3
         caps = self.service_states[host][service]
-        if (utils.utcnow() - caps["timestamp"]) <= \
-            datetime.timedelta(seconds=allowed_time_diff):
+        if ((utils.utcnow() - caps["timestamp"]) <=
+            datetime.timedelta(seconds=allowed_time_diff)):
             return False
         return True
 
@@ -294,7 +313,7 @@ class HostManager(object):
         for compute in compute_nodes:
             service = compute['service']
             if not service:
-                logging.warn(_("No service for compute ID %s") % compute['id'])
+                LOG.warn(_("No service for compute ID %s") % compute['id'])
                 continue
             host = service['host']
             capabilities = self.service_states.get(host, None)

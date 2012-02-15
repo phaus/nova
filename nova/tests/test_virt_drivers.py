@@ -29,7 +29,7 @@ from nova.tests import utils as test_utils
 libvirt = None
 FLAGS = flags.FLAGS
 
-LOG = logging.getLogger('nova.tests.test_virt_drivers')
+LOG = logging.getLogger(__name__)
 
 
 def catch_notimplementederror(f):
@@ -175,7 +175,8 @@ class _VirtDriverTestCase(test.TestCase):
         instance_ref, network_info = self._get_running_instance()
         instance_type_ref = test_utils.get_test_instance_type()
         self.connection.migrate_disk_and_power_off(
-            self.ctxt, instance_ref, 'dest_host', instance_type_ref)
+            self.ctxt, instance_ref, 'dest_host', instance_type_ref,
+            network_info)
 
     @catch_notimplementederror
     def test_pause(self):
@@ -211,7 +212,8 @@ class _VirtDriverTestCase(test.TestCase):
 
     @catch_notimplementederror
     def test_destroy_instance_nonexistant(self):
-        fake_instance = {'id': 42, 'name': 'I just made this up!'}
+        fake_instance = {'id': 42, 'name': 'I just made this up!',
+                         'uuid': 'bda5fb9e-b347-40e8-8256-42397848cb00'}
         network_info = test_utils.get_test_network_info()
         self.connection.destroy(fake_instance, network_info)
 
@@ -223,6 +225,12 @@ class _VirtDriverTestCase(test.TestCase):
         self.connection.destroy(instance_ref, network_info)
         self.assertNotIn(instance_ref['name'],
                          self.connection.list_instances())
+
+    @catch_notimplementederror
+    def test_get_volume_connector(self):
+        result = self.connection.get_volume_connector({'id': 'fake'})
+        self.assertTrue('ip' in result)
+        self.assertTrue('initiator' in result)
 
     @catch_notimplementederror
     def test_attach_detach_volume(self):
@@ -281,14 +289,6 @@ class _VirtDriverTestCase(test.TestCase):
         instance_ref, network_info = self._get_running_instance()
         console_output = self.connection.get_console_output(instance_ref)
         self.assertTrue(isinstance(console_output, basestring))
-
-    @catch_notimplementederror
-    def test_get_ajax_console(self):
-        instance_ref, network_info = self._get_running_instance()
-        ajax_console = self.connection.get_ajax_console(instance_ref)
-        self.assertIn('token', ajax_console)
-        self.assertIn('host', ajax_console)
-        self.assertIn('port', ajax_console)
 
     @catch_notimplementederror
     def test_get_vnc_console(self):
@@ -445,13 +445,18 @@ class LibvirtConnTestCase(_VirtDriverTestCase):
         # Point _VirtDriverTestCase at the right module
         self.driver_module = nova.virt.libvirt.connection
         super(LibvirtConnTestCase, self).setUp()
-        FLAGS.rescue_image_id = "2"
-        FLAGS.rescue_kernel_id = "3"
-        FLAGS.rescue_ramdisk_id = None
+        self.flags(firewall_driver=nova.virt.libvirt.firewall.drivers[0],
+                   rescue_image_id="2",
+                   rescue_kernel_id="3",
+                   rescue_ramdisk_id=None)
+
+        def fake_extend(image, size):
+            pass
+
+        self.stubs.Set(nova.virt.libvirt.connection.disk,
+                       'extend', fake_extend)
 
     def tearDown(self):
-        super(LibvirtConnTestCase, self).setUp()
-
         # Restore libvirt
         import nova.virt.libvirt.connection
         import nova.virt.libvirt.firewall
@@ -460,3 +465,10 @@ class LibvirtConnTestCase(_VirtDriverTestCase):
             nova.virt.libvirt.connection.libvirt = self.saved_libvirt
             nova.virt.libvirt.connection.libvirt_utils = self.saved_libvirt
             nova.virt.libvirt.firewall.libvirt = self.saved_libvirt
+        super(LibvirtConnTestCase, self).tearDown()
+
+    @test.skip_test("Test nothing, but this method "
+                    "needed to override superclass.")
+    def test_migrate_disk_and_power_off(self):
+        # there is lack of fake stuff to execute this method. so pass.
+        pass

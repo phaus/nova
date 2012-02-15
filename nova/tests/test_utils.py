@@ -17,7 +17,9 @@
 import __builtin__
 import mox
 import datetime
+import hashlib
 import os
+import StringIO
 import tempfile
 
 import nova
@@ -380,6 +382,18 @@ class GenericUtilsTestCase(test.TestCase):
         self.assertTrue([c for c in password
                          if c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'])
 
+    def test_read_file_as_root(self):
+        def fake_execute(*args, **kwargs):
+            if args[1] == 'bad':
+                raise exception.ProcessExecutionError
+            return 'fakecontents', None
+
+        self.stubs.Set(utils, 'execute', fake_execute)
+        contents = utils.read_file_as_root('good')
+        self.assertEqual(contents, 'fakecontents')
+        self.assertRaises(exception.FileNotFound,
+                          utils.read_file_as_root, 'bad')
+
 
 class IsUUIDLikeTestCase(test.TestCase):
     def assertUUIDLike(self, val, expected):
@@ -489,8 +503,8 @@ class ToPrimitiveTestCase(test.TestCase):
         ret = utils.to_primitive(x)
         self.assertEquals(len(ret), 3)
         self.assertTrue(ret[0].startswith(u"<module 'datetime' from "))
-        self.assertTrue(ret[1].startswith(u'<function foo at 0x'))
-        self.assertEquals(ret[2], u'<built-in function dir>')
+        self.assertTrue(ret[1].startswith('<function foo at 0x'))
+        self.assertEquals(ret[2], '<built-in function dir>')
 
 
 class MonkeyPatchTestCase(test.TestCase):
@@ -679,3 +693,10 @@ class DeprecationTest(test.TestCase):
         self.mox.ReplayAll()
         result = utils.service_is_up(service)
         self.assertFalse(result)
+
+    def test_hash_file(self):
+        data = 'Mary had a little lamb, its fleece as white as snow'
+        flo = StringIO.StringIO(data)
+        h1 = utils.hash_file(flo)
+        h2 = hashlib.sha1(data).hexdigest()
+        self.assertEquals(h1, h2)

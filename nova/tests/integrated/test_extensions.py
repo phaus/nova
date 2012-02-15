@@ -22,13 +22,11 @@ from nova.tests.integrated import integrated_helpers
 
 
 FLAGS = flags.FLAGS
-LOG = logging.getLogger('nova.tests.integrated')
+LOG = logging.getLogger(__name__)
 
 
 class ExtensionsTest(integrated_helpers._IntegratedTestBase):
     def _get_flags(self):
-        extensions.ExtensionManager.reset()
-
         f = super(ExtensionsTest, self)._get_flags()
         f['osapi_compute_extension'] = FLAGS.osapi_compute_extension[:]
         f['osapi_compute_extension'].append(

@@ -136,6 +136,16 @@ class ComputeNode(BASE, NovaBase):
     hypervisor_type = Column(Text)
     hypervisor_version = Column(Integer)
 
+    # Free Ram, amount of activity (resize, migration, boot, etc) and
+    # the number of running VM's are a good starting point for what's
+    # important when making scheduling decisions.
+    #
+    # NOTE(sandy): We'll need to make this extensible for other schedulers.
+    free_ram_mb = Column(Integer)
+    free_disk_gb = Column(Integer)
+    current_workload = Column(Integer)
+    running_vms = Column(Integer)
+
     # Note(masumotok): Expected Strings example:
     #
     # '{"arch":"x86_64",
@@ -213,7 +223,8 @@ class Instance(BASE, NovaBase):
 
     memory_mb = Column(Integer)
     vcpus = Column(Integer)
-    local_gb = Column(Integer)
+    root_gb = Column(Integer)
+    ephemeral_gb = Column(Integer)
 
     hostname = Column(String(255))
     host = Column(String(255))  # , ForeignKey('hosts.id'))
@@ -246,7 +257,7 @@ class Instance(BASE, NovaBase):
     uuid = Column(String(36))
 
     root_device_name = Column(String(255))
-    default_local_device = Column(String(255), nullable=True)
+    default_ephemeral_device = Column(String(255), nullable=True)
     default_swap_device = Column(String(255), nullable=True)
     config_drive = Column(String(255))
 
@@ -326,11 +337,12 @@ class InstanceTypes(BASE, NovaBase):
     """Represent possible instance_types or flavor of VM offered"""
     __tablename__ = "instance_types"
     id = Column(Integer, primary_key=True)
-    name = Column(String(255), unique=True)
+    name = Column(String(255))
     memory_mb = Column(Integer)
     vcpus = Column(Integer)
-    local_gb = Column(Integer)
-    flavorid = Column(String(255), unique=True)
+    root_gb = Column(Integer)
+    ephemeral_gb = Column(Integer)
+    flavorid = Column(String(255))
     swap = Column(Integer, nullable=False, default=0)
     rxtx_factor = Column(Float, nullable=False, default=1)
     vcpu_weight = Column(Integer, nullable=True)
@@ -338,14 +350,17 @@ class InstanceTypes(BASE, NovaBase):
     instances = relationship(Instance,
                            backref=backref('instance_type', uselist=False),
                            foreign_keys=id,
-                           primaryjoin='and_(Instance.instance_type_id == '
-                                       'InstanceTypes.id)')
+                           primaryjoin='and_('
+                               'Instance.instance_type_id == '
+                               'InstanceTypes.id, '
+                               'InstanceTypes.deleted == False)')
 
     vsas = relationship(VirtualStorageArray,
                        backref=backref('vsa_instance_type', uselist=False),
                        foreign_keys=id,
-                       primaryjoin='and_(VirtualStorageArray.instance_type_id'
-                                   ' == InstanceTypes.id)')
+                       primaryjoin='and_('
+                           'VirtualStorageArray.instance_type_id == '
+                           'InstanceTypes.id, InstanceTypes.deleted == False)')
 
 
 class Volume(BASE, NovaBase):
@@ -407,13 +422,14 @@ class VolumeTypes(BASE, NovaBase):
     """Represent possible volume_types of volumes offered"""
     __tablename__ = "volume_types"
     id = Column(Integer, primary_key=True)
-    name = Column(String(255), unique=True)
+    name = Column(String(255))
 
     volumes = relationship(Volume,
                            backref=backref('volume_type', uselist=False),
                            foreign_keys=id,
-                           primaryjoin='and_(Volume.volume_type_id == '
-                                       'VolumeTypes.id)')
+                           primaryjoin='and_('
+                               'Volume.volume_type_id == VolumeTypes.id, '
+                               'VolumeTypes.deleted == False)')
 
 
 class VolumeTypeExtraSpecs(BASE, NovaBase):
@@ -915,7 +931,7 @@ class BandwidthUsage(BASE, NovaBase):
     __tablename__ = 'bw_usage_cache'
     id = Column(Integer, primary_key=True, nullable=False)
     instance_id = Column(Integer, nullable=False)
-    network_label = Column(String(255))
+    mac = Column(String(255), nullable=False)
     start_period = Column(DateTime, nullable=False)
     last_refreshed = Column(DateTime)
     bw_in = Column(BigInteger)

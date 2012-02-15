@@ -27,30 +27,43 @@ from xml.etree import ElementTree
 from nova import exception
 from nova import flags
 from nova import log as logging
+from nova.openstack.common import cfg
 from nova import utils
 from nova.volume import iscsi
 from nova.volume import volume_types
 
 
-LOG = logging.getLogger("nova.volume.driver")
+LOG = logging.getLogger(__name__)
+
+volume_opts = [
+    cfg.StrOpt('volume_group',
+               default='nova-volumes',
+               help='Name for the VG that will contain exported volumes'),
+    cfg.StrOpt('num_shell_tries',
+               default=3,
+               help='number of times to attempt to run flakey shell commands'),
+    cfg.StrOpt('num_iscsi_scan_tries',
+               default=3,
+               help='number of times to rescan iSCSI target to find volume'),
+    cfg.IntOpt('iscsi_num_targets',
+               default=100,
+               help='Number of iscsi target ids per host'),
+    cfg.StrOpt('iscsi_target_prefix',
+               default='iqn.2010-10.org.openstack:',
+               help='prefix for iscsi volumes'),
+    cfg.StrOpt('iscsi_ip_address',
+               default='$my_ip',
+               help='use this ip for iscsi'),
+    cfg.IntOpt('iscsi_port',
+               default=3260,
+               help='The port that the iSCSI daemon is listening on'),
+    cfg.StrOpt('rbd_pool',
+               default='rbd',
+               help='the rbd pool in which volumes are stored'),
+    ]
+
 FLAGS = flags.FLAGS
-flags.DEFINE_string('volume_group', 'nova-volumes',
-                    'Name for the VG that will contain exported volumes')
-flags.DEFINE_string('num_shell_tries', 3,
-                    'number of times to attempt to run flakey shell commands')
-flags.DEFINE_string('num_iscsi_scan_tries', 3,
-                    'number of times to rescan iSCSI target to find volume')
-flags.DEFINE_integer('iscsi_num_targets',
-                    100,
-                    'Number of iscsi target ids per host')
-flags.DEFINE_string('iscsi_target_prefix', 'iqn.2010-10.org.openstack:',
-                    'prefix for iscsi volumes')
-flags.DEFINE_string('iscsi_ip_address', '$my_ip',
-                    'use this ip for iscsi')
-flags.DEFINE_integer('iscsi_port', 3260,
-                     'The port that the iSCSI daemon is listening on')
-flags.DEFINE_string('rbd_pool', 'rbd',
-                    'the rbd pool in which volumes are stored')
+FLAGS.register_opts(volume_opts)
 
 
 class VolumeDriver(object):
@@ -202,12 +215,12 @@ class VolumeDriver(object):
         """Make sure volume is exported."""
         raise NotImplementedError()
 
-    def initialize_connection(self, volume, address):
-        """Allow connection to ip and return connection info."""
+    def initialize_connection(self, volume, connector):
+        """Allow connection to connector and return connection info."""
         raise NotImplementedError()
 
-    def terminate_connection(self, volume, address):
-        """Disallow connection from ip"""
+    def terminate_connection(self, volume, connector):
+        """Disallow connection from connector"""
         raise NotImplementedError()
 
     def get_volume_stats(self, refresh=False):
@@ -396,7 +409,7 @@ class ISCSIDriver(VolumeDriver):
                          '-v', property_value)
         return self._run_iscsiadm(iscsi_properties, iscsi_command)
 
-    def initialize_connection(self, volume, address):
+    def initialize_connection(self, volume, connector):
         """Initializes the connection and returns connection info.
 
         The iscsi driver returns a driver_volume_type of 'iscsi'.
@@ -420,7 +433,7 @@ class ISCSIDriver(VolumeDriver):
             'data': iscsi_properties
         }
 
-    def terminate_connection(self, volume, address):
+    def terminate_connection(self, volume, connector):
         pass
 
     def check_for_export(self, context, volume_id):
@@ -433,8 +446,8 @@ class ISCSIDriver(VolumeDriver):
             # Instances remount read-only in this case.
             # /etc/init.d/iscsitarget restart and rebooting nova-volume
             # is better since ensure_export() works at boot time.
-            logging.error(_("Cannot confirm exported volume "
-                            "id:%(volume_id)s.") % locals())
+            LOG.error(_("Cannot confirm exported volume "
+                        "id:%(volume_id)s.") % locals())
             raise
 
 
@@ -448,13 +461,13 @@ class FakeISCSIDriver(ISCSIDriver):
         """No setup necessary in fake mode."""
         pass
 
-    def initialize_connection(self, volume, address):
+    def initialize_connection(self, volume, connector):
         return {
             'driver_volume_type': 'iscsi',
             'data': {}
         }
 
-    def terminate_connection(self, volume, address):
+    def terminate_connection(self, volume, connector):
         pass
 
     @staticmethod
@@ -519,7 +532,7 @@ class RBDDriver(VolumeDriver):
         """Removes an export for a logical volume"""
         pass
 
-    def initialize_connection(self, volume, address):
+    def initialize_connection(self, volume, connector):
         return {
             'driver_volume_type': 'rbd',
             'data': {
@@ -527,7 +540,7 @@ class RBDDriver(VolumeDriver):
             }
         }
 
-    def terminate_connection(self, volume, address):
+    def terminate_connection(self, volume, connector):
         pass
 
 
@@ -588,7 +601,7 @@ class SheepdogDriver(VolumeDriver):
         """Removes an export for a logical volume"""
         pass
 
-    def initialize_connection(self, volume, address):
+    def initialize_connection(self, volume, connector):
         return {
             'driver_volume_type': 'sheepdog',
             'data': {
@@ -596,7 +609,7 @@ class SheepdogDriver(VolumeDriver):
             }
         }
 
-    def terminate_connection(self, volume, address):
+    def terminate_connection(self, volume, connector):
         pass
 
 
@@ -625,10 +638,10 @@ class LoggingVolumeDriver(VolumeDriver):
     def remove_export(self, context, volume):
         self.log_action('remove_export', volume)
 
-    def initialize_connection(self, volume, address):
+    def initialize_connection(self, volume, connector):
         self.log_action('initialize_connection', volume)
 
-    def terminate_connection(self, volume, address):
+    def terminate_connection(self, volume, connector):
         self.log_action('terminate_connection', volume)
 
     def check_for_export(self, context, volume_id):
@@ -713,8 +726,8 @@ class ZadaraBEDriver(ISCSIDriver):
         volume_type = volume_types.get_volume_type(None,
                                             volume['volume_type_id'])
         if volume_type is not None:
-            qosstr = volume_type['extra_specs']['drive_type'] + \
-                     ("_%s" % volume_type['extra_specs']['drive_size'])
+            qosstr = '_'.join([volume_type['extra_specs']['drive_type'],
+                               volume_type['extra_specs']['drive_size']])
 
         vsa_id = None
         for i in volume.get('volume_metadata'):
@@ -970,13 +983,15 @@ class ZadaraBEDriver(ISCSIDriver):
                 # two types of elements -  property of qos-group & sub property
                 # classify them accordingly
                 if child.text:
-                    qos_group[child.tag] = int(child.text) \
-                        if child.text.isdigit() else child.text
+                    qos_group[child.tag] = (int(child.text)
+                                            if child.text.isdigit()
+                                            else child.text)
                 else:
                     subelement = {}
                     for subchild in child.getchildren():
-                        subelement[subchild.tag] = int(subchild.text) \
-                            if subchild.text.isdigit() else subchild.text
+                        subelement[subchild.tag] = (int(subchild.text)
+                                                    if subchild.text.isdigit()
+                                                    else subchild.text)
                     qos_group[child.tag] = subelement
 
             # Now add this group to the master qos_groups

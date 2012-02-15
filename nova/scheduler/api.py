@@ -26,17 +26,21 @@ from nova import db
 from nova import exception
 from nova import flags
 from nova import log as logging
+from nova.openstack.common import cfg
 from nova import rpc
 from nova import utils
 
 from eventlet import greenpool
 
-FLAGS = flags.FLAGS
-flags.DEFINE_bool('enable_zone_routing',
-    False,
-    'When True, routing to child zones will occur.')
 
-LOG = logging.getLogger('nova.scheduler.api')
+enable_zone_routing_opt = cfg.BoolOpt('enable_zone_routing',
+        default=False,
+        help='When True, routing to child zones will occur.')
+
+FLAGS = flags.FLAGS
+FLAGS.register_opt(enable_zone_routing_opt)
+
+LOG = logging.getLogger(__name__)
 
 
 def _call_scheduler(method, context, params=None):
@@ -255,7 +259,7 @@ class RedirectResult(exception.Error):
     def __init__(self, results):
         self.results = results
         super(RedirectResult, self).__init__(
-               message=_("Uncaught Zone redirection exception"))
+               _("Uncaught Zone redirection exception"))
 
 
 class reroute_compute(object):
@@ -305,8 +309,8 @@ class reroute_compute(object):
     def __call__(self, f):
         @functools.wraps(f)
         def wrapped_f(*args, **kwargs):
-            collection, context, item_id_or_uuid = \
-                            self.get_collection_context_and_id(args, kwargs)
+            _collection_info = self.get_collection_context_and_id(args, kwargs)
+            collection, context, item_id_or_uuid = _collection_info
 
             attempt_reroute = False
             if utils.is_uuid_like(item_id_or_uuid):
@@ -419,3 +423,15 @@ def redirect_handler(f):
                 raise e.results
             return e.results
     return new_f
+
+
+def live_migration(context, block_migration, disk_over_commit,
+                   instance_id, dest, topic):
+    """Migrate a server to a new host"""
+    params = {"instance_id": instance_id,
+              "dest": dest,
+              "topic": topic,
+              "block_migration": block_migration,
+              "disk_over_commit": disk_over_commit}
+    return _call_scheduler("live_migration", context=context,
+                           params=params)

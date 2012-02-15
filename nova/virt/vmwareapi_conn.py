@@ -41,6 +41,7 @@ from nova import db
 from nova import exception
 from nova import flags
 from nova import log as logging
+from nova.openstack.common import cfg
 from nova import utils
 from nova.virt import driver
 from nova.virt.vmwareapi import error_util
@@ -49,33 +50,37 @@ from nova.virt.vmwareapi import vim_util
 from nova.virt.vmwareapi.vmops import VMWareVMOps
 
 
-LOG = logging.getLogger("nova.virt.vmwareapi_conn")
+LOG = logging.getLogger(__name__)
+
+vmwareapi_opts = [
+    cfg.StrOpt('vmwareapi_host_ip',
+               default=None,
+               help='URL for connection to VMWare ESX host.Required if '
+                    'connection_type is vmwareapi.'),
+    cfg.StrOpt('vmwareapi_host_username',
+               default=None,
+               help='Username for connection to VMWare ESX host. '
+                    'Used only if connection_type is vmwareapi.'),
+    cfg.StrOpt('vmwareapi_host_password',
+               default=None,
+               help='Password for connection to VMWare ESX host. '
+                    'Used only if connection_type is vmwareapi.'),
+    cfg.FloatOpt('vmwareapi_task_poll_interval',
+                 default=5.0,
+                 help='The interval used for polling of remote tasks. '
+                       'Used only if connection_type is vmwareapi'),
+    cfg.FloatOpt('vmwareapi_api_retry_count',
+                 default=10,
+                 help='The number of times we retry on failures, e.g., '
+                      'socket error, etc. '
+                      'Used only if connection_type is vmwareapi'),
+    cfg.StrOpt('vmwareapi_vlan_interface',
+               default='vmnic0',
+               help='Physical ethernet adapter name for vlan networking'),
+    ]
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string('vmwareapi_host_ip',
-                    None,
-                    'URL for connection to VMWare ESX host.'
-                    'Required if connection_type is vmwareapi.')
-flags.DEFINE_string('vmwareapi_host_username',
-                    None,
-                    'Username for connection to VMWare ESX host.'
-                    'Used only if connection_type is vmwareapi.')
-flags.DEFINE_string('vmwareapi_host_password',
-                    None,
-                    'Password for connection to VMWare ESX host.'
-                    'Used only if connection_type is vmwareapi.')
-flags.DEFINE_float('vmwareapi_task_poll_interval',
-                   5.0,
-                   'The interval used for polling of remote tasks '
-                   'Used only if connection_type is vmwareapi')
-flags.DEFINE_float('vmwareapi_api_retry_count',
-                   10,
-                   'The number of times we retry on failures, '
-                   'e.g., socket error, etc.'
-                   'Used only if connection_type is vmwareapi')
-flags.DEFINE_string('vmwareapi_vlan_interface',
-                   'vmnic0',
-                   'Physical ethernet adapter name for vlan networking')
+FLAGS.register_opts(vmwareapi_opts)
 
 TIME_BETWEEN_API_CALL_RETRIES = 2.0
 
@@ -169,9 +174,14 @@ class VMWareESXConnection(driver.ComputeDriver):
         """Return snapshot of console."""
         return self._vmops.get_console_output(instance)
 
-    def get_ajax_console(self, instance):
-        """Return link to instance's ajax console."""
-        return self._vmops.get_ajax_console(instance)
+    def get_volume_connector(self, _instance):
+        """Return volume connector information"""
+        # TODO(vish): When volume attaching is supported, return the
+        #             proper initiator iqn.
+        return {
+            'ip': FLAGS.vmwareapi_host_ip,
+            'initiator': None
+        }
 
     def attach_volume(self, connection_info, instance_name, mountpoint):
         """Attach volume storage to VM instance."""

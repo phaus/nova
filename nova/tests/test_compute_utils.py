@@ -29,9 +29,10 @@ import nova.image.fake
 from nova.compute import utils as compute_utils
 from nova.compute import instance_types
 from nova.notifier import test_notifier
+from nova.tests import fake_network
 
 
-LOG = logging.getLogger('nova.tests.compute_utils')
+LOG = logging.getLogger(__name__)
 FLAGS = flags.FLAGS
 flags.DECLARE('stub_network', 'nova.compute.manager')
 
@@ -39,7 +40,15 @@ flags.DECLARE('stub_network', 'nova.compute.manager')
 class UsageInfoTestCase(test.TestCase):
 
     def setUp(self):
+        def fake_get_nw_info(cls, ctxt, instance):
+            self.assertTrue(ctxt.is_admin)
+            return fake_network.fake_get_instance_nw_info(self.stubs, 1, 1,
+                                                          spectacular=True)
+
         super(UsageInfoTestCase, self).setUp()
+        self.stubs.Set(nova.network.API, 'get_instance_nw_info',
+                       fake_get_nw_info)
+
         self.flags(connection_type='fake',
                    stub_network=True,
                    notification_driver='nova.notifier.test_notifier',
@@ -66,6 +75,8 @@ class UsageInfoTestCase(test.TestCase):
         type_id = instance_types.get_instance_type_by_name('m1.tiny')['id']
         inst['instance_type_id'] = type_id
         inst['ami_launch_index'] = 0
+        inst['root_gb'] = 0
+        inst['ephemeral_gb'] = 0
         inst.update(params)
         return db.instance_create(self.context, inst)['id']
 
