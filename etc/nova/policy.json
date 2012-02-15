@@ -7,7 +7,7 @@
     "compute:create:attach_network": [],
     "compute:create:attach_volume": [],
     "compute:get_all": [],
-
+    "compute:update": [],
 
     "admin_api": [["role:admin"]],
     "compute_extension:accounts": [["rule:admin_api"]],
