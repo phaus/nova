@@ -79,7 +79,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         '''
         nova_ctx = environ['nova.context']
         
-        # TODO: query for correct project_id based on auth token?
+        # query for correct project_id based on auth token?
         # There are multiple options here:
         #  1. extract project_id from URL e.g.:
         #     create compute: POST /compute/1/
@@ -91,19 +91,17 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         #  Or....
         #  Just use the openstack header! Ya ha ha ha!
         
-        #TODO this should be pushed into the context middleware
+        #L8R this might be pushed into the context middleware
         nova_ctx.project_id = environ.get('HTTP_X_AUTH_PROJECT_ID', None)
         if nova_ctx.project_id == None:
             LOG.error('No project ID header was supplied in the request')
         
-        # TODO:(dizz) this is not optimal - this should be done when the
-        # query interface is invoked.
         # register openstack images
         self._register_os_mixins(backends.OsMixinBackend(), nova_ctx)
         # register openstack instance types (flavours)
         self._register_resource_mixins(backends.ResourceMixinBackend())
         
-        return self._call_occi(environ, response, nova_ctx=nova_ctx)
+        return self._call_occi(environ, response, nova_ctx=nova_ctx, registry=self.registry)
 
     def _setup_occi_service(self):
         '''
@@ -118,6 +116,8 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         ipnetworking_backend = networklink.IpNetworkInterfaceBackend()
         storage_link_backend = storagelink.StorageLinkBackend()
         networkinterface_backend = networklink.NetworkInterfaceBackend()
+        admin_password_backend = extensions.AdminPasswordBackend()
+        key_pair_backend = extensions.KeyPairBackend()
 
         # register kinds with backends
         self.register_backend(infrastructure.COMPUTE, compute_backend)
@@ -125,12 +125,6 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         self.register_backend(infrastructure.STOP, compute_backend)
         self.register_backend(infrastructure.RESTART, compute_backend)
         self.register_backend(infrastructure.SUSPEND, compute_backend)
-
-        # OS-OCCI Action extensions 
-        self.register_backend(extensions.OS_CHG_PWD, compute_backend)
-        self.register_backend(extensions.OS_REBUILD, compute_backend)
-        self.register_backend(extensions.OS_REVERT_RESIZE, compute_backend)
-        self.register_backend(extensions.OS_CONFIRM_RESIZE, compute_backend)
 
         self.register_backend(infrastructure.NETWORK, network_backend)
         self.register_backend(infrastructure.UP, network_backend)
@@ -151,14 +145,26 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         self.register_backend(infrastructure.NETWORKINTERFACE,
                                           networkinterface_backend)
         
+        # OS-OCCI Action extensions 
+        self.register_backend(extensions.OS_CHG_PWD, compute_backend)
+        self.register_backend(extensions.OS_REBUILD, compute_backend)
+        self.register_backend(extensions.OS_REVERT_RESIZE, compute_backend)
+        self.register_backend(extensions.OS_CONFIRM_RESIZE, compute_backend)
+     
+        # OS-OCCI Mixin extensions
+        self.register_backend(extensions.ADMIN_PWD_EXT, admin_password_backend)
+        self.register_backend(extensions.KEY_PAIR_EXT, key_pair_backend)
+        
         #This must be done as by default OpenStack has a default network
         # to which all new VM instances are attached.
         LOG.info('Registering default network with web app.')
         self._register_default_network()
 
     def _register_default_network(self, name='DEFAULT_NETWORK'):
-        #TODO: should the default network expose details e.g. broadcast etc.?
-        default_network = Resource('', infrastructure.NETWORK, [infrastructure.IPNETWORK], [], 'summary', 'title')
+        # TODO: expose details - make config so that empty strings can be used
+        default_network = Resource('', infrastructure.NETWORK, \
+                            [infrastructure.IPNETWORK], [], 'summary', 'title')
+        default_network.identifier = name
         default_network.attributes['occi.core.id'] = name
         self.registry.add_resource('name', default_network)
 
@@ -172,25 +178,26 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
 
         os_flavours = instance_types.get_all_types()
         
-        #TODO: attributes are not constructed correctly
         for itype in os_flavours:
             resource_template = extensions.ResourceTemplate(term=itype,
                 scheme=template_schema,
                 related=[resource_schema],
-                attributes=os_flavours[itype],
+                attributes=self._get_attributes(os_flavours[itype]),
                 title='This is an openstack ' + itype + ' flavor.',
                 location=itype)
             LOG.debug('Regsitering an OpenStack flavour/instance type as: ' + \
                                                         str(resource_template))
-            #TODO:(dizz) - no check is done to see if the template is exists
+            
             self.register_backend(resource_template, resource_mixin_backend)
+    
+    #TODO: implement me! Attributes are not constructed correctly
+    def _get_attributes(self, attrs):
+        return attrs
 
     def _register_os_mixins(self, os_mixin_backend, context):
         '''
         Register the os mixins from information retrieved frrom glance.
         '''
-        #TODO: kernel, ramdisk images should NOT be listed
-
         template_schema = 'http://schemas.openstack.org/template/os#'
         os_schema = 'http://schemas.ogf.org/occi/infrastructure#os_tpl'
 
@@ -199,8 +206,8 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         images = image_service.detail(context)
 
         for img in images:
-            # filter out ram and kernel images
-            # TODO: make configurable, to filter or not?        
+            # L8R: now the API allows users to supply RAM and Kernel images
+            # filter out ram and kernel images        
             if (img['container_format'] or img['disk_format']) not in ('ari', 'aki'):
                 os_template = extensions.OsTemplate(term=img['name'],
                                         scheme=template_schema, \

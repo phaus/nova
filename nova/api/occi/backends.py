@@ -27,8 +27,10 @@ class MyBackend(KindBackend, ActionBackend):
 
     def update(self, old, new, extras):
         
-        # TODO: if updating a compute and it's a vertical scaling
-        # use the resize functionality to do so.
+        #TODO update title and description
+        
+        # if updating a compute and it's a vertical scaling
+        # use the resize functionality to do so. ONLY with XEN :-(
         
         # here you can check what information from new_entity you wanna bring
         # into old_entity
@@ -46,7 +48,6 @@ class MyBackend(KindBackend, ActionBackend):
         old.attributes['occi.compute.state'] = 'inactive'
 
 
-# TODO: Move these elsewhere?
 class ResourceMixinBackend(MixinBackend):
     pass
 

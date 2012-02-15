@@ -13,25 +13,31 @@
 #    under the License.
 
 import random
+import uuid        
+import json
 
 from nova import flags
 from nova import compute
+import nova.network.api
 from nova import exception
 from nova import log as logging
 from nova.compute import task_states
 from nova.compute import vm_states
-from nova.api.occi.backends import MyBackend
-from nova.api.occi.extensions import ResourceTemplate
-from nova.api.occi.extensions import OsTemplate
 from nova.compute import instance_types
 from nova.rpc import common as rpc_common
 import nova.policy
+from nova.api.occi.backends import MyBackend
+from nova.api.occi.extensions import ResourceTemplate, KEY_PAIR_EXT, \
+    ADMIN_PWD_EXT
+from nova.api.occi.extensions import OsTemplate
 
 from occi.exceptions import HTTPError
 from occi.extensions import infrastructure
 from nova.api.occi import extensions
 from webob import exc
-
+from occi.extensions.infrastructure import NETWORKINTERFACE
+from occi.core_model import Link
+from occi.extensions.infrastructure import IPNETWORKINTERFACE
 
 FLAGS = flags.FLAGS
 
@@ -48,8 +54,13 @@ class ComputeBackend(MyBackend):
         nova.policy.reset()
         nova.policy.init()
         self.compute_api = compute.API()
+        self.network_api = nova.network.api.API()
 
     def create(self, resource, extras):
+
+        #TODO: if a request arrives with explicit values for certain attrs
+        # like occi.compute.cores then a bad request must be issued
+        # OpenStack does not support this. 
 
         LOG.info('Creating the virtual machine with id: ' + resource.identifier)
 
@@ -59,14 +70,14 @@ class ComputeBackend(MyBackend):
             name = resource.attributes['occi.core.title'] = \
                             str(random.randrange(0, 99999999)) + \
                                                         '-compute.occi-wg.org'
-        
+
         key_name = None
         key_data = None
+        password = None
         metadata = {}
         access_ip_v4 = None
         access_ip_v6 = None
         injected_files = []
-        password = 'password'
         zone_blob = None
         reservation_id = None
         min_count = max_count = 1
@@ -78,16 +89,12 @@ class ComputeBackend(MyBackend):
         availability_zone = None
         config_drive = None
         block_device_mapping = None
-        #TODO: this can be specified through OS Templates
+        #L8R: this can be specified through OS Templates
         kernel_id = None
-        #TODO: this can be specified through OS Templates
+        #L8R: this can be specified through OS Templates
         ramdisk_id = None
         auto_disk_config = None
-        
-        # context is mainly authorisation information
-        # its assembled in AuthMiddleware - we can pipeline this with the 
-        # OCCI service
-        context = extras['nova_ctx']
+        scheduler_hints = None
         
         # Essential, required to get a vm image e.g. 
         #            image_href = 'http: // 10.211.55.20:9292/v1/images/1'
@@ -95,6 +102,7 @@ class ComputeBackend(MyBackend):
         # Flavor name is the term
         os_tpl_url = None
         flavor_name = None
+        
         if len(resource.mixins) > 0:
             rc = oc = 0
             for mixin in resource.mixins:
@@ -104,13 +112,23 @@ class ComputeBackend(MyBackend):
                 elif isinstance(mixin, OsTemplate):
                     o = mixin
                     oc += 1
+                elif (mixin.scheme + mixin.term) == \
+                                    (KEY_PAIR_EXT.scheme + KEY_PAIR_EXT.term):
+                    key_name = resource.attributes\
+                                ['org.openstack.credentials.publickey.name']
+                    key_data = resource.attributes\
+                                ['org.openstack.credentials.publickey.data']
+                elif (mixin.scheme + mixin.term) == \
+                                (ADMIN_PWD_EXT.scheme + ADMIN_PWD_EXT.term):
+                    password = resource.attributes\
+                                        ['org.openstack.credentials.admin_pwd']
 
             if rc > 1:
                 msg = 'There is more than one resource template in the request'
                 LOG.error(msg)
                 raise AttributeError(msg=unicode(msg))
             if oc > 1:
-                msg = 'There is more than one resource template in the request'
+                msg = 'There is more than one OS template in the request'
                 LOG.error(msg)
                 raise AttributeError()
 
@@ -133,7 +151,7 @@ class ComputeBackend(MyBackend):
                 raise HTTPError(404, msg)
 
             (instances, resv_id) = self.compute_api.create(
-                                    context,
+                                    context=extras['nova_ctx'],
                                     instance_type=inst_type,
                                     image_href=os_tpl_url,
                                     kernel_id=kernel_id,
@@ -157,7 +175,8 @@ class ComputeBackend(MyBackend):
                                     access_ip_v6=access_ip_v6,
                                     requested_networks=requested_networks,
                                     config_drive=config_drive,
-                                    auto_disk_config=auto_disk_config)
+                                    auto_disk_config=auto_disk_config,
+                                    scheduler_hints=scheduler_hints)
             
         except exception.QuotaError as error:
             self._handle_quota_error(error)
@@ -183,7 +202,8 @@ class ComputeBackend(MyBackend):
         
         resource.attributes['occi.core.id'] = instances[0]['uuid']
         resource.attributes['occi.compute.hostname'] = instances[0]['hostname']
-        # TODO: can't we tell this from the image used?
+        # TODO: extract architecture from either image name, description or
+        # metadata
         # The architecture is sometimes encoded in the image file's name
         # This is not reliable. db::glance::image_properties could be used
         # reliably so long as the information is supplied.
@@ -191,7 +211,7 @@ class ComputeBackend(MyBackend):
         # metadata.
         resource.attributes['occi.compute.architecture'] = 'x86'
         resource.attributes['occi.compute.cores'] = str(instances[0]['vcpus'])
-        # occi.compute.speed is not available in instances by default.
+        # L8R: occi.compute.speed is not available in instances by default.
         # CPU speed is not available but could be made available through
         # db::nova::compute_nodes::cpu_info
         # additional code is required in 
@@ -203,11 +223,58 @@ class ComputeBackend(MyBackend):
                                 str(float(instances[0]['memory_mb']) / 1024)
         resource.attributes['occi.compute.state'] = 'active'
 
-        # TODO: Once created, the VM is attached to a public network with an 
+        # this must be called on create as the cached info 
+        # has not been updated at this point
+        self._get_network_info(instances[0], resource, extras, True)
+
+    def _get_network_info(self, instance, resource, extras, live_query):
+        # Once created, the VM is attached to a public network with an 
         # addresses allocated by DHCP
-        # Then create link to this network (IP) and set the ip to that of the
+        # A link is created to this network (IP) and set the ip to that of the
         # allocated ip
-        # To create an OS floating IP then dhcp would be switched to static
+    
+        if live_query:
+            sj = self.network_api.get_instance_nw_info(extras['nova_ctx'], instance)
+        else:
+            sj = instance['info_cache'].network_info
+        
+        # TODO: currently this assumes one adapter on the VM. It must account
+        # for more than one adaptor
+        # can probably remove this check 
+        if sj != None:
+            dj = json.loads(sj)
+            vm_iface = dj[0]['network']['meta']['bridge_interface']
+            address = dj[0]['network']['subnets'][0]['ips'][0]['address']
+            gateway = dj[0]['network']['subnets'][0]['gateway']['address']
+        else:
+            vm_iface = ''
+            address = ''
+            gateway = ''
+        
+        #Get a handle to the default network
+        registry = extras['registry']
+        default_network = registry.get_resource('/network/DEFAULT_NETWORK')
+        source = resource
+        target = default_network
+    
+        identifier = str(uuid.uuid4())
+        link = Link(identifier, NETWORKINTERFACE, [IPNETWORKINTERFACE], source, target)
+        
+        link.attributes['occi.core.id'] = identifier 
+        link.attributes['occi.networkinterface.interface'] = vm_iface
+        #TODO mac address info is not available
+        link.attributes['occi.networkinterface.mac'] = 'DE:AD:BE:EF:BA:BE'
+        link.attributes['occi.networkinterface.state'] = 'active'
+        link.attributes['occi.networkinterface.address'] = address
+        link.attributes['occi.networkinterface.gateway'] = gateway
+        link.attributes['occi.networkinterface.allocation'] = 'dhcp'
+        
+    #        target = 'ssh://' + address + ':22'
+    #        identifier = str(uuid.uuid4())
+    #        sshlink = Link(identifier, Link.kind, [], source, target)
+    #        sshlink.attributes['occi.core.id'] = identifier
+        
+        resource.links = [link] #, sshlink
 
     def _handle_quota_error(self, error):
         """
@@ -239,7 +306,6 @@ class ComputeBackend(MyBackend):
         
         uid = entity.attributes['occi.core.id']
         
-        # TODO at some stage the uid gets munged with location.
         #if uid.find(entity.kind.location) > -1:
         #    uid = uid.replace(entity.kind.location, '')
   
@@ -256,7 +322,6 @@ class ComputeBackend(MyBackend):
         #  - inactive == the oppose! :-)
         #  - suspended == machine in a frozen state e.g. via suspend or pause
         #
-        # TODO expose OS specific states by mixin
          
         # change password - OS 
         # confirm resized server
@@ -301,6 +366,9 @@ class ComputeBackend(MyBackend):
                        task_states.RESIZE_REVERTING):
             entity.attributes['occi.compute.state'] = 'inactive'
             entity.actions = []
+        
+        #Now we have the instance state, get its network info
+        self._get_network_info(instance, entity, extras)
         
         return instance
 
@@ -356,8 +424,7 @@ class ComputeBackend(MyBackend):
                 LOG.info('Rebuild requested')
                 raise exc.HTTPForbidden
                 image_href = mixin.os_id
-                # TODO: where's best to supply this info?
-                # as an atttribute?
+                # where's best to supply this info? as an atttribute?
                 admin_password = 'TODO'
                 old.attributes['occi.compute.state'] = 'inactive'
                 self.compute_api.rebuild(context, instance, image_href, \
@@ -385,9 +452,6 @@ class ComputeBackend(MyBackend):
             raise exc.HTTPBadRequest()
 
     def action(self, entity, action, extras):
-
-        # TODO: Review: when retrieve is called the representation of the 
-        # resource is rendered. Do we want that?
 
         # As there is no callback mechanism to update the state  
         # of computes known by occi, a call to get the latest representation 
@@ -456,7 +520,7 @@ class ComputeBackend(MyBackend):
             self.compute_api.set_admin_password(context, instance, \
                                                 entity.attributes['method'])
         elif action == extensions.OS_REBUILD:
-            #TODO: there must be an OsTemplate mixin with the request and
+            #L8R: there must be an OsTemplate mixin with the request and
             #      there must be the admin password to the instance
             raise exc.HTTPNotImplemented()
         
