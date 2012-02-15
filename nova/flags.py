@@ -271,7 +271,7 @@ global_opts = [
     cfg.StrOpt('occiapi_host',
                default='$my_ip',
                help='ip of OCCI api server'),
-    cfg.IntOpt('occiapi_port',
+    cfg.IntOpt('occiapi_listen_port',
                default=8787,
                help='OCCI cloud controller port'),
     cfg.StrOpt('default_project',
