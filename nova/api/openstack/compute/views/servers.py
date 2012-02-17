@@ -26,7 +26,7 @@ from nova import log as logging
 from nova import utils
 
 
-LOG = logging.getLogger('nova.api.openstack.compute.views.servers')
+LOG = logging.getLogger(__name__)
 
 
 class ViewBuilder(common.ViewBuilder):
@@ -136,7 +136,7 @@ class ViewBuilder(common.ViewBuilder):
     @staticmethod
     def _get_metadata(instance):
         metadata = instance.get("metadata", [])
-        return dict((item['key'], str(item['value'])) for item in metadata)
+        return dict((item['key'], item['value']) for item in metadata)
 
     @staticmethod
     def _get_vm_state(instance):

@@ -45,7 +45,7 @@ from nova.tests.glance import stubs as glance_stubs
 from nova.tests import fake_network
 from nova.tests import fake_utils
 
-LOG = logging.getLogger('nova.tests.test_xenapi')
+LOG = logging.getLogger(__name__)
 
 FLAGS = flags.FLAGS
 
@@ -399,7 +399,14 @@ class XenAPIVMTestCase(test.TestCase):
     def _check_vdis(self, start_list, end_list):
         for vdi_ref in end_list:
             if not vdi_ref in start_list:
-                self.fail('Found unexpected VDI:%s' % vdi_ref)
+                vdi_rec = xenapi_fake.get_record('VDI', vdi_ref)
+                # If the cache is turned on then the base disk will be
+                # there even after the cleanup
+                if 'other_config' in vdi_rec:
+                    if vdi_rec['other_config']['image-id'] is None:
+                        self.fail('Found unexpected VDI:%s' % vdi_ref)
+                else:
+                    self.fail('Found unexpected VDI:%s' % vdi_ref)
 
     def _test_spawn(self, image_ref, kernel_id, ramdisk_id,
                     instance_type_id="3", os_type="linux",
@@ -687,7 +694,7 @@ class XenAPIVMTestCase(test.TestCase):
 
         conn = xenapi_conn.get_connection(False)
         conn._vmops = VMOpsMock()
-        conn.finish_revert_migration(instance)
+        conn.finish_revert_migration(instance, None)
         self.assertTrue(conn._vmops.finish_revert_migration_called)
 
     def _create_instance(self, instance_id=1, spawn=True):
@@ -842,7 +849,7 @@ class XenAPIMigrateInstance(test.TestCase):
         stubs.stubout_session(self.stubs, stubs.FakeSessionForMigrationTests)
         conn = xenapi_conn.get_connection(False)
         conn.migrate_disk_and_power_off(self.context, instance,
-                                        '127.0.0.1', instance_type)
+                                        '127.0.0.1', instance_type, None)
 
     def test_migrate_disk_and_power_off_passes_exceptions(self):
         instance = db.instance_create(self.context, self.instance_values)
@@ -856,7 +863,8 @@ class XenAPIMigrateInstance(test.TestCase):
         conn = xenapi_conn.get_connection(False)
         self.assertRaises(exception.MigrationError,
                           conn.migrate_disk_and_power_off,
-                          self.context, instance, '127.0.0.1', instance_type)
+                          self.context, instance,
+                          '127.0.0.1', instance_type, None)
 
     def test_revert_migrate(self):
         instance = db.instance_create(self.context, self.instance_values)
@@ -903,7 +911,7 @@ class XenAPIMigrateInstance(test.TestCase):
         self.assertEqual(self.called, True)
         self.assertEqual(self.fake_vm_start_called, True)
 
-        conn.finish_revert_migration(instance)
+        conn.finish_revert_migration(instance, network_info)
         self.assertEqual(self.fake_finish_revert_migration_called, True)
 
     def test_finish_migrate(self):

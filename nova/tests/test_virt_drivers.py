@@ -29,7 +29,7 @@ from nova.tests import utils as test_utils
 libvirt = None
 FLAGS = flags.FLAGS
 
-LOG = logging.getLogger('nova.tests.test_virt_drivers')
+LOG = logging.getLogger(__name__)
 
 
 def catch_notimplementederror(f):
@@ -175,7 +175,8 @@ class _VirtDriverTestCase(test.TestCase):
         instance_ref, network_info = self._get_running_instance()
         instance_type_ref = test_utils.get_test_instance_type()
         self.connection.migrate_disk_and_power_off(
-            self.ctxt, instance_ref, 'dest_host', instance_type_ref)
+            self.ctxt, instance_ref, 'dest_host', instance_type_ref,
+            network_info)
 
     @catch_notimplementederror
     def test_pause(self):
@@ -211,7 +212,8 @@ class _VirtDriverTestCase(test.TestCase):
 
     @catch_notimplementederror
     def test_destroy_instance_nonexistant(self):
-        fake_instance = {'id': 42, 'name': 'I just made this up!'}
+        fake_instance = {'id': 42, 'name': 'I just made this up!',
+                         'uuid': 'bda5fb9e-b347-40e8-8256-42397848cb00'}
         network_info = test_utils.get_test_network_info()
         self.connection.destroy(fake_instance, network_info)
 
@@ -464,3 +466,9 @@ class LibvirtConnTestCase(_VirtDriverTestCase):
             nova.virt.libvirt.connection.libvirt_utils = self.saved_libvirt
             nova.virt.libvirt.firewall.libvirt = self.saved_libvirt
         super(LibvirtConnTestCase, self).tearDown()
+
+    @test.skip_test("Test nothing, but this method "
+                    "needed to override superclass.")
+    def test_migrate_disk_and_power_off(self):
+        # there is lack of fake stuff to execute this method. so pass.
+        pass

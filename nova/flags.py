@@ -269,14 +269,12 @@ global_opts = [
     cfg.IntOpt('metadata_port',
                default=8775,
                help='Metadata API port'),
-    
     cfg.StrOpt('occiapi_host',
                default='$my_ip',
                help='OCCI API server'),
     cfg.IntOpt('occiapi_listen_port',
                default=8787,
                help='OCCI API port'),
-               
     cfg.StrOpt('default_project',
                default='openstack',
                help='default project for openstack'),
@@ -454,6 +452,12 @@ global_opts = [
     cfg.ListOpt('isolated_hosts',
                 default=[],
                 help='Host reserved for specific images'),
+    cfg.BoolOpt('cache_images',
+                default=True,
+                help='Cache glance images locally'),
+    cfg.BoolOpt('use_cow_images',
+                default=True,
+                help='Whether to use cow images')
     ]
 
 FLAGS.register_opts(global_opts)
