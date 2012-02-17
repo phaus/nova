@@ -165,7 +165,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         default_network = Resource(name, infrastructure.NETWORK, \
                             [infrastructure.IPNETWORK], [], 'summary', 'title')
         default_network.attributes = {'occi.core.id': name, 'occi.network.state': 'Up'}
-        self.registry.add_resource('name', default_network)
+        self.registry.add_resource(name, default_network)
 
     def _register_resource_mixins(self, resource_mixin_backend):
         '''
@@ -183,7 +183,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                 related=[resource_schema],
                 attributes=self._get_attributes(os_flavours[itype]),
                 title='This is an openstack ' + itype + ' flavor.',
-                location= '/' + itype + '/')
+                location='/' + itype + '/')
             LOG.debug('Regsitering an OpenStack flavour/instance type as: ' + \
                                                         str(resource_template))
             
@@ -212,8 +212,8 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                                         scheme=template_schema, \
                     os_id=img['id'], related=[os_schema], \
                     attributes=None, title='This is an OS ' + img['name'] + \
-                                                ' image', 
-		    location= '/' + img['name'] + '/')
+                                                ' image',
+		    location='/' + img['name'] + '/')
                 LOG.debug('Registering an OS image type as: ' + str(os_template))
                 self.register_backend(os_template, os_mixin_backend)
 
