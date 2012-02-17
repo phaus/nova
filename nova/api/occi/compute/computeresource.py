@@ -232,7 +232,7 @@ class ComputeBackend(MyBackend):
         # addresses allocated by DHCP
         # A link is created to this network (IP) and set the ip to that of the
         # allocated ip
-    
+        
         if live_query:
             sj = self.network_api.get_instance_nw_info(extras['nova_ctx'], instance)
         else:
@@ -242,10 +242,9 @@ class ComputeBackend(MyBackend):
         # for more than one adaptor
         # can probably remove this check 
         if sj != None:
-            dj = json.loads(sj)
-            vm_iface = dj[0]['network']['meta']['bridge_interface']
-            address = dj[0]['network']['subnets'][0]['ips'][0]['address']
-            gateway = dj[0]['network']['subnets'][0]['gateway']['address']
+            vm_iface = sj[0]['network']['meta']['bridge_interface']
+            address = sj[0]['network']['subnets'][0]['ips'][0]['address']
+            gateway = sj[0]['network']['subnets'][0]['gateway']['address']
         else:
             vm_iface = ''
             address = ''
