@@ -47,7 +47,7 @@ OS_CONFIRM_RESIZE = core_model.Action(
                  {'method': ''})
 
 # Trusted Compute Pool technology mixin definition
-TCP_ATTRIBUTES = {'come.intel.compute.tcp': '', }
+TCP_ATTRIBUTES = {'eu.fi-ware.compute.tcp': '', }
 TCP = core_model.Mixin(\
     'http://schemas.fi-ware.eu/occi/infrastructure/compute#',
     'tcp', attributes=TCP_ATTRIBUTES)
