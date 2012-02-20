@@ -161,10 +161,40 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         self._register_default_network()
 
     def _register_default_network(self, name='DEFAULT_NETWORK'):
-        # TODO: expose details - make config so that empty strings can be used
         default_network = Resource(name, infrastructure.NETWORK, \
-                            [infrastructure.IPNETWORK], [], 'summary', 'title')
-        default_network.attributes = {'occi.core.id': name, 'occi.network.state': 'Up'}
+                            [infrastructure.IPNETWORK], [],
+                            'This is the network all VMs are attached to.',
+                            'Default Network')
+        
+        show_default_net_config = False
+        
+        if show_default_net_config:
+            default_network.attributes = {
+                    'occi.core.id': name,
+                    
+                    'occi.network.vlan': '',
+                    'occi.network.label': 'public',
+                    'occi.network.state': 'up',
+                    
+                    'occi.network.address': '',
+                    'occi.network.gateway': '',
+                    'occi.network.allocation': ''
+            }
+        else:
+            #TODO: get values from API. right now they reflect default
+            # devstack setup
+            default_network.attributes = {
+                    'occi.core.id': name,
+                    
+                    'occi.network.vlan': '',
+                    'occi.network.label': 'public',
+                    'occi.network.state': 'up',
+                    
+                    'occi.network.address': '10.0.0.0/24',
+                    'occi.network.gateway': '10.0.0.1',
+                    'occi.network.allocation': 'static'
+            }
+        
         self.registry.add_resource(name, default_network)
 
     def _register_resource_mixins(self, resource_mixin_backend):
@@ -181,7 +211,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
             resource_template = extensions.ResourceTemplate(term=itype,
                 scheme=template_schema,
                 related=[resource_schema],
-                attributes=self._get_attributes(os_flavours[itype]),
+                attributes=self._get_resource_attributes(os_flavours[itype]),
                 title='This is an openstack ' + itype + ' flavor.',
                 location='/' + itype + '/')
             LOG.debug('Regsitering an OpenStack flavour/instance type as: ' + \
@@ -189,9 +219,37 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
             
             self.register_backend(resource_template, resource_mixin_backend)
     
-    #TODO: implement me! Attributes are not constructed correctly
-    def _get_attributes(self, attrs):
+    def _get_resource_attributes(self, attrs):
+        
+#        import ipdb
+#        ipdb.set_trace()
+        
+#        test_attrs = {
+#                      'root_gb': 10, 'name': 'm1.medium',
+#                      'deleted': False, 'created_at': None,
+#                      'ephemeral_gb': 40, 'updated_at': None,
+#                      'memory_mb': 4096, 'vcpus': 2, 'flavorid': '3',
+#                      'swap': 0L, 'rxtx_factor': 1.0,
+#                      'extra_specs': {}, 'deleted_at': None,
+#                      'vcpu_weight': None, 'id': 1L
+#                      }
+#        
+#        test_attrs['root_gb']
+#        test_attrs['ephemeral_gb']
+#        test_attrs['memory_mb']
+#        test_attrs['vcpus']
+#        test_attrs['swap']
+        
+        #This is hardcoded atm - might be good to have it configurable
+        attrs = { 
+                 'occi.compute.cores': 'immutable',
+                 'occi.compute.memory': 'immutable',
+                 'org.openstack.compute.swap': 'immutable',
+                 'org.openstack.compute.storage.root': 'immutable',
+                 'org.openstack.compute.storage.ephemeral': 'immutable',
+                 }
         return attrs
+       
 
     def _register_os_mixins(self, os_mixin_backend, context):
         '''
