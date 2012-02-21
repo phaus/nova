@@ -16,6 +16,7 @@ import random
 import uuid        
 import json
 
+from nova import image
 from nova import flags
 from nova import compute
 import nova.network.api
@@ -61,13 +62,14 @@ class ComputeBackend(MyBackend):
         # If a request arrives with explicit values for certain attrs
         # like occi.compute.cores then a bad request must be issued
         # OpenStack does not support this. 
-        
-        if 'occi.compute.cores' or 'occi.compute.speed' \
-            'occi.compute.memory' or 'occi.compute.architecture' \
-        in resource['attributes']:
-            msg = 'There are unsupported attributes in the request.'
-            LOG.error(msg)
-            raise AttributeError(msg=unicode(msg))
+
+        if ('occi.compute.cores' in resource.attributes) \
+            or ('occi.compute.speed' in resource.attributes) \
+            or ('occi.compute.memory' in resource.attributes) \
+            or ('occi.compute.architecture' in resource.attributes):
+                msg = 'There are unsupported attributes in the request.'
+                LOG.error(msg)
+                raise AttributeError(msg)
         
         LOG.info('Creating the virtual machine with id: ' + resource.identifier)
 
@@ -77,10 +79,14 @@ class ComputeBackend(MyBackend):
             name = resource.attributes['occi.compute.hostname'] = \
                             str(random.randrange(0, 99999999)) + \
                                                         '-compute.occi-wg.org'
-
+        
+        # Supplied by OCCI extension
         key_name = None
         key_data = None
+        
+        #Supplied by OCCI extension
         password = None
+        
         metadata = {}
         access_ip_v4 = None
         access_ip_v6 = None
@@ -89,9 +95,11 @@ class ComputeBackend(MyBackend):
         reservation_id = None
         min_count = max_count = 1
         requested_networks = None
+        #L8R: would be good to specify security groups via OCCI
         sg_names = []
         sg_names.append('default')
         sg_names = list(set(sg_names))
+        #L8R: would be good to specify user_data via OCCI
         user_data = None
         availability_zone = None
         config_drive = None
@@ -102,6 +110,7 @@ class ComputeBackend(MyBackend):
         ramdisk_id = None
         auto_disk_config = None
         scheduler_hints = None
+        
         os_tpl_url = None
         flavor_name = None
         
@@ -116,13 +125,13 @@ class ComputeBackend(MyBackend):
                     oc += 1
                 elif (mixin.scheme + mixin.term) == \
                                     (KEY_PAIR_EXT.scheme + KEY_PAIR_EXT.term):
-                    key_name = resource.attributes\
+                    key_name = resource.attributes \
                                 ['org.openstack.credentials.publickey.name']
-                    key_data = resource.attributes\
+                    key_data = resource.attributes \
                                 ['org.openstack.credentials.publickey.data']
                 elif (mixin.scheme + mixin.term) == \
                                 (ADMIN_PWD_EXT.scheme + ADMIN_PWD_EXT.term):
-                    password = resource.attributes\
+                    password = resource.attributes \
                                         ['org.openstack.credentials.admin_pwd']
 
             if rc > 1:
@@ -136,6 +145,11 @@ class ComputeBackend(MyBackend):
 
             flavor_name = r.term
             os_tpl_url = o.os_id
+        
+        import ipdb
+        ipdb.set_trace()
+        resource.attributes['occi.compute.architecture'] = \
+                                    self._get_vm_arch(extras['nova_ctx'], o)
         
         try:
             if flavor_name:
@@ -206,6 +220,7 @@ class ComputeBackend(MyBackend):
         resource.attributes['occi.compute.hostname'] = instances[0]['hostname']
         resource.attributes['occi.compute.architecture'] = \
                                     self._get_vm_arch(extras['nova_ctx'], o)
+        # We try to guess this
         resource.attributes['occi.compute.cores'] = str(instances[0]['vcpus'])
         # L8R: occi.compute.speed is not available in instances by default.
         # CPU speed is not available but could be made available through
@@ -225,34 +240,40 @@ class ComputeBackend(MyBackend):
         
     def _get_vm_arch(self, context, os_template_mixin):
 
-        # Extract architecture from either image name, description or
-        # metadata
-        # The architecture is sometimes encoded in the image file's name
-        # This is not reliable. 
-        # db::glance::image_properties could be used
-        # reliably so long as the information is supplied.
-        # To use this the image must be registered with the required
-        # metadata.
+        # Extract architecture from either: 
+        # - image name, title or metadata. The architecture is sometimes 
+        #   encoded in the image's name
+        # - db::glance::image_properties could be used reliably so long as the 
+        # information is supplied when registering an image with glance.
         
-        # heuristic:
-        # if term, title or description has x86 or x64
-        # if associated OS image has properties that equal x86 or x64
+        # Heuristic:
+        # - if term, title or description has x86_32 or x86_x64 then the arch
+        #   is x86 or x64 respectively.
+        # - if associated OS image has properties arch or architecture that 
+        #   equal x86 or x64.
         
-        x = ''
-        if True:
-            x = os_template_mixin.term
-        elif True:
-            x = os_template_mixin.title
-        elif True:
-            x = os_template_mixin.description
-        elif True:
-            from nova import image
+        arch = ''
+        
+        if (os_template_mixin.term.find('x86_64') \
+                        or os_template_mixin.title.find('x86_64')) >= 0:
+            arch = 'x64'
+        elif (os_template_mixin.term.find('x86_32') \
+                        or os_template_mixin.title.find('x86_32')) >= 0:
+            arch = 'x86'
+        else:
             image_service = image.get_default_image_service()
             img = image_service.show(context, os_template_mixin.os_id)
-        else:
+            img_props = img['properties']
+            if ('arch' in img_props):
+                arch = img['properties']['arch']
+            elif ('architecture' in img_props):
+                arch = img['properties']['architecture']
+        
+        # if all attempts fail set it to a default value 
+        if arch == '':
             arch = 'x86'
         
-        return 'x86'
+        return arch
 
     def _get_network_info(self, instance, resource, extras, live_query):
         # Once created, the VM is attached to a public network with an 
