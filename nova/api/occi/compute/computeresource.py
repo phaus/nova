@@ -58,16 +58,23 @@ class ComputeBackend(MyBackend):
 
     def create(self, resource, extras):
 
-        #TODO: if a request arrives with explicit values for certain attrs
+        # If a request arrives with explicit values for certain attrs
         # like occi.compute.cores then a bad request must be issued
         # OpenStack does not support this. 
-
+        
+        if 'occi.compute.cores' or 'occi.compute.speed' \
+            'occi.compute.memory' or 'occi.compute.architecture' \
+        in resource['attributes']:
+            msg = 'There are unsupported attributes in the request.'
+            LOG.error(msg)
+            raise AttributeError(msg=unicode(msg))
+        
         LOG.info('Creating the virtual machine with id: ' + resource.identifier)
 
         try:
-            name = resource.attributes['occi.core.title']
+            name = resource.attributes['occi.compute.hostname']
         except KeyError:
-            name = resource.attributes['occi.core.title'] = \
+            name = resource.attributes['occi.compute.hostname'] = \
                             str(random.randrange(0, 99999999)) + \
                                                         '-compute.occi-wg.org'
 
@@ -95,11 +102,6 @@ class ComputeBackend(MyBackend):
         ramdisk_id = None
         auto_disk_config = None
         scheduler_hints = None
-        
-        # Essential, required to get a vm image e.g. 
-        #            image_href = 'http: // 10.211.55.20:9292/v1/images/1'
-        # Extract resource template from link and get the flavor name. 
-        # Flavor name is the term
         os_tpl_url = None
         flavor_name = None
         
@@ -130,7 +132,7 @@ class ComputeBackend(MyBackend):
             if oc > 1:
                 msg = 'There is more than one OS template in the request'
                 LOG.error(msg)
-                raise AttributeError()
+                raise AttributeError(msg=unicode(msg))
 
             flavor_name = r.term
             os_tpl_url = o.os_id
@@ -202,14 +204,8 @@ class ComputeBackend(MyBackend):
         
         resource.attributes['occi.core.id'] = instances[0]['uuid']
         resource.attributes['occi.compute.hostname'] = instances[0]['hostname']
-        # TODO: extract architecture from either image name, description or
-        # metadata
-        # The architecture is sometimes encoded in the image file's name
-        # This is not reliable. db::glance::image_properties could be used
-        # reliably so long as the information is supplied.
-        # To use this the image must be registered with the required
-        # metadata.
-        resource.attributes['occi.compute.architecture'] = 'x86'
+        resource.attributes['occi.compute.architecture'] = \
+                                    self._get_vm_arch(extras['nova_ctx'], o)
         resource.attributes['occi.compute.cores'] = str(instances[0]['vcpus'])
         # L8R: occi.compute.speed is not available in instances by default.
         # CPU speed is not available but could be made available through
@@ -226,6 +222,37 @@ class ComputeBackend(MyBackend):
         # this must be called on create as the cached info 
         # has not been updated at this point
         self._get_network_info(instances[0], resource, extras, True)
+        
+    def _get_vm_arch(self, context, os_template_mixin):
+
+        # Extract architecture from either image name, description or
+        # metadata
+        # The architecture is sometimes encoded in the image file's name
+        # This is not reliable. 
+        # db::glance::image_properties could be used
+        # reliably so long as the information is supplied.
+        # To use this the image must be registered with the required
+        # metadata.
+        
+        # heuristic:
+        # if term, title or description has x86 or x64
+        # if associated OS image has properties that equal x86 or x64
+        
+        x = ''
+        if True:
+            x = os_template_mixin.term
+        elif True:
+            x = os_template_mixin.title
+        elif True:
+            x = os_template_mixin.description
+        elif True:
+            from nova import image
+            image_service = image.get_default_image_service()
+            img = image_service.show(context, os_template_mixin.os_id)
+        else:
+            arch = 'x86'
+        
+        return 'x86'
 
     def _get_network_info(self, instance, resource, extras, live_query):
         # Once created, the VM is attached to a public network with an 
@@ -238,9 +265,8 @@ class ComputeBackend(MyBackend):
         else:
             sj = instance['info_cache'].network_info
         
-        # TODO: currently this assumes one adapter on the VM. It must account
-        # for more than one adaptor
-        # can probably remove this check 
+        # TODO: currently this assumes one adapter on the VM.
+        # It must account for more than one adaptor
         if sj != None:
             vm_iface = sj[0]['network']['meta']['bridge_interface']
             address = sj[0]['network']['subnets'][0]['ips'][0]['address']
