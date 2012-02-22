@@ -245,6 +245,12 @@ class ComputeBackend(MyBackend):
         
         self._get_console_info(instances[0], resource, extras)
         
+        #set valid actions
+        resource.actions = [infrastructure.STOP, \
+                              infrastructure.SUSPEND, \
+                              infrastructure.RESTART, \
+                              extensions.OS_CHG_PWD]
+        
     def _get_vm_arch(self, context, os_template_mixin):
 
         # Extract architecture from either: 
@@ -363,6 +369,7 @@ class ComputeBackend(MyBackend):
 #        resource.links.append(sshlink)
         pass
     
+    #L8R: Note this is a direct lift from nova/api/openstack/compute/servers.py
     def _handle_quota_error(self, error):
         """
         Reraise quota errors as api-specific http exceptions
@@ -375,15 +382,15 @@ class ComputeBackend(MyBackend):
                     _("Personality file path too long"),
             "OnsetFileContentLimitExceeded":
                     _("Personality file content too long"),
-            "InstanceLimitExceeded":
-                    _("Instance quotas have been exceeded")}
 
-        expl = code_mappings.get(error.code)
-        if expl:
-            raise exc.HTTPRequestEntityTooLarge(explanation=expl,
-                                                headers={'Retry-After': 0})
-        # if the original error is okay, just reraise it
-        raise error
+            # NOTE(bcwaldon): expose the message generated below in order
+            # to better explain how the quota was exceeded
+            "InstanceLimitExceeded": error.message,
+        }
+
+        expl = code_mappings.get(error.kwargs['code'], error.message)
+        raise exc.HTTPRequestEntityTooLarge(explanation=expl,
+                                            headers={'Retry-After': 0})
 
     def retrieve(self, entity, extras):
         self._retrieve(entity, extras)
@@ -412,29 +419,39 @@ class ComputeBackend(MyBackend):
          
         # change password - OS 
         # confirm resized server
-        if instance['vm_state'] in (vm_states.ACTIVE, task_states.UPDATING_PASSWORD, \
-                     task_states.RESIZE_VERIFY):
+        if instance['vm_state'] in (vm_states.ACTIVE, \
+                                    task_states.UPDATING_PASSWORD, \
+                                    task_states.RESIZE_VERIFY):
             entity.attributes['occi.compute.state'] = 'active'
-            entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
-                                                        infrastructure.RESTART]
+            entity.actions = [infrastructure.STOP, \
+                              infrastructure.SUSPEND, \
+                              infrastructure.RESTART, \
+                              extensions.OS_CONFIRM_RESIZE, \
+                              extensions.OS_REVERT_RESIZE, \
+                              extensions.OS_CHG_PWD]
         
         # reboot server - OS, OCCI
         # start server - OCCI
-        elif instance['vm_state'] in (task_states.STARTING, task_states.POWERING_ON, \
-                       task_states.REBOOTING, task_states.REBOOTING_HARD):
+        elif instance['vm_state'] in (task_states.STARTING, \
+                                      task_states.POWERING_ON, \
+                                      task_states.REBOOTING, \
+                                      task_states.REBOOTING_HARD):
             entity.attributes['occi.compute.state'] = 'inactive'
             entity.actions = []
         
         # pause server - OCCI, suspend server - OCCI, stop server - OCCI
-        elif instance['vm_state'] in (task_states.STOPPING, task_states.POWERING_OFF):
+        elif instance['vm_state'] in (task_states.STOPPING, \
+                                      task_states.POWERING_OFF):
             entity.attributes['occi.compute.state'] = 'inactive'
             entity.actions = [infrastructure.START]
         
         # resume server - OCCI
-        elif instance['vm_state'] in (task_states.RESUMING, task_states.PAUSING, \
-                       task_states.SUSPENDING):
+        elif instance['vm_state'] in (task_states.RESUMING, \
+                                      task_states.PAUSING, \
+                                      task_states.SUSPENDING):
             entity.attributes['occi.compute.state'] = 'suspended'
-            if instance['vm_state'] in (vm_states.PAUSED, vm_states.SUSPENDED):
+            if instance['vm_state'] in (vm_states.PAUSED, \
+                                        vm_states.SUSPENDED):
                 entity.actions = [infrastructure.START]
             else:
                 entity.actions = []
@@ -544,7 +561,8 @@ class ComputeBackend(MyBackend):
                 for m in old.mixins:
                     if m.term == mixin.term and m.scheme == mixin.scheme:
                         m = mixin
-                        LOG.debug('Resource template is changed: ' + m.scheme + m.term)
+                        LOG.debug('Resource template is changed: ' + m.scheme \
+                                                                    + m.term)
                 
             # check for new os rebuild in new
             # supported by all hypervisors
@@ -572,7 +590,8 @@ class ComputeBackend(MyBackend):
                 for m in old.mixins:
                     if m.term == mixin.term and m.scheme == mixin.scheme:
                         m = mixin
-                        LOG.debug('OS template is changed: ' + m.scheme + m.term)
+                        LOG.debug('OS template is changed: ' + m.scheme + \
+                                                                        m.term)
             else:
                 LOG.error('I\'ve no idea what this mixin is! ' + \
                                                     mixin.scheme + mixin.term)
@@ -623,7 +642,7 @@ class ComputeBackend(MyBackend):
 
     def _stop_vm(self, entity, instance, context):
         # OCCI -> graceful, acpioff, poweroff
-    # OS -> unclear
+        # OS -> unclear
         LOG.info('Stopping virtual machine with id' + entity.identifier)
         if entity.attributes.has_key('method'):
             LOG.info('OS only allows one type of stop. \
@@ -633,7 +652,7 @@ class ComputeBackend(MyBackend):
         try:
             self.compute_api.stop(context, instance)
             #self.compute_api.pause(context, instance)
-        except Exception as e:
+        except Exception:
             LOG.error('Error in stopping VM')
             raise exc.HTTPServerError()
 
@@ -679,7 +698,11 @@ class ComputeBackend(MyBackend):
         # FIXME: Use the password extension? 
         # Review - it'll need the password sent as well as the 
         # new password value.
+    
+        
         raise exc.HTTPNotImplemented()
+    
+    
         if not entity.attributes.has_key('method'):
             raise exc.HTTPBadRequest()
         entity.attributes['occi.compute.state'] = 'active'
