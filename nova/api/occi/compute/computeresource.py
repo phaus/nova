@@ -249,7 +249,8 @@ class ComputeBackend(MyBackend):
         resource.actions = [infrastructure.STOP, \
                               infrastructure.SUSPEND, \
                               infrastructure.RESTART, \
-                              extensions.OS_CHG_PWD]
+                              extensions.OS_CHG_PWD, \
+                              extensions.OS_CREATE_IMAGE]
         
     def _get_vm_arch(self, context, os_template_mixin):
 
@@ -428,7 +429,8 @@ class ComputeBackend(MyBackend):
                               infrastructure.RESTART, \
                               extensions.OS_CONFIRM_RESIZE, \
                               extensions.OS_REVERT_RESIZE, \
-                              extensions.OS_CHG_PWD]
+                              extensions.OS_CHG_PWD, \
+                              extensions.OS_CREATE_IMAGE]
         
         # reboot server - OS, OCCI
         # start server - OCCI
@@ -628,6 +630,8 @@ class ComputeBackend(MyBackend):
             self._os_revert_resize_vm(entity, instance, context)
         elif action == extensions.OS_CONFIRM_RESIZE:
             self._os_confirm_resize_vm(entity, instance, context)
+        elif action == extensions.OS_CREATE_IMAGE:
+            self._os_create_image(entity, instance, context)
         else:
             raise exc.HTTPBadRequest()
         
@@ -699,21 +703,19 @@ class ComputeBackend(MyBackend):
 
     def _os_chg_passwd_vm(self, entity, instance, context):
         # FIXME: Use the password extension? 
-        # Review - it'll need the password sent as well as the 
-        # new password value.
+        # Review - sending the password as a POST may not be the most
+        # secure method
     
+        if 'password' not in entity.attributes:
+            exc.HTTPBadRequest()
+            
+        new_password = entity.attributes['password']
         
-        raise exc.HTTPNotImplemented()
-    
-    
-        if not entity.attributes.has_key('method'):
-            raise exc.HTTPBadRequest()
         entity.attributes['occi.compute.state'] = 'active'
         entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
                                                         infrastructure.RESTART]
         
-        self.compute_api.set_admin_password(context, instance, \
-                                                entity.attributes['method'])
+        self.compute_api.set_admin_password(context, instance, new_password)
 
     def _os_revert_resize_vm(self, entity, instance, context):
         LOG.info('Reverting resized virtual machine with id' \
@@ -742,4 +744,24 @@ class ComputeBackend(MyBackend):
         except Exception as e:
             LOG.exception(_("Error in confirm-resize %s"), e)
             raise exc.HTTPBadRequest()
+    
+    def _os_create_image(self, entity, instance, context):
+        LOG.info('Creating image from virtual machine with id' + \
+                                                            entity.identifier)
+        raise exc.HTTPNotImplemented()
+    
+        if 'image_name' not in entity.attributes:
+            exc.HTTPBadRequest()
+            
+        image_name = entity.attributes['image_name']
+        props = {}
 
+        try:
+            image = self.compute_api.snapshot(context,
+                                              instance,
+                                              image_name,
+                                              extra_properties=props)
+        except exception.InstanceInvalidState:
+            exc.HTTPConflict()
+    
+    

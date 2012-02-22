@@ -26,7 +26,6 @@ from nova.api.occi.storage import storageresource
 from nova.compute import instance_types
 
 from occi import registry
-from occi import workflow
 from occi import wsgi as occi_wsgi
 from occi.core_model import Resource
 from occi.extensions import infrastructure
@@ -149,6 +148,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         self.register_backend(extensions.OS_CHG_PWD, compute_backend)
         self.register_backend(extensions.OS_REVERT_RESIZE, compute_backend)
         self.register_backend(extensions.OS_CONFIRM_RESIZE, compute_backend)
+        self.register_backend(extensions.OS_CREATE_IMAGE, compute_backend)
      
         # OS-OCCI Mixin extensions
         self.register_backend(extensions.ADMIN_PWD_EXT, admin_password_backend)

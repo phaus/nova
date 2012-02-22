@@ -25,19 +25,22 @@ FLAGS = flags.FLAGS
 OS_CHG_PWD = core_model.Action(
                 'http://schemas.openstack.org/instance/action#',
                  'chg_pwd', 'Removes all data on the server and replaces' + \
-                                     'it with the specified image (via Mixin).',
-                 {'method': ''})
+                                    'it with the specified image (via Mixin).',
+                 {'password': ''})
 
 OS_REVERT_RESIZE = core_model.Action(
                 'http://schemas.openstack.org/instance/action#',
                  'revert_resize', 'Revert the resize and roll back to \
-                                                     the original server',
-                 {'method': ''})
+                                                     the original server')
 
 OS_CONFIRM_RESIZE = core_model.Action(
                 'http://schemas.openstack.org/instance/action#',
-                 'confirm_resize', 'Use this to confirm the resize action',
-                 {'method': ''})
+                 'confirm_resize', 'Use this to confirm the resize action')
+
+OS_CREATE_IMAGE = core_model.Action(
+                'http://schemas.openstack.org/instance/action#',
+                 'create_image', 'Creates a new image for the given server.',
+                 {'image_name': ''})
 
 # Trusted Compute Pool technology mixin definition
 TCP_ATTRIBUTES = {'eu.fi-ware.compute.tcp': '', }
