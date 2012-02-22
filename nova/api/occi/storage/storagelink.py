@@ -85,7 +85,6 @@ class StorageLinkBackend(KindBackend):
     def retrieve(self, link, extras):
         pass
         #raise exc.HTTPNotImplemented
-        #TODO: process states
 #        import ipdb
 #        ipdb.set_trace()
 #        if link.attributes['occi.storagelink.state'] == 'active':
