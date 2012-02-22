@@ -746,6 +746,8 @@ class ComputeBackend(MyBackend):
             raise exc.HTTPBadRequest()
     
     def _os_create_image(self, entity, instance, context):
+        #L8R: There might be a more 'occi' way of doing this
+        #     e.g. a POST against /-/
         LOG.info('Creating image from virtual machine with id' + \
                                                             entity.identifier)
         raise exc.HTTPNotImplemented()
