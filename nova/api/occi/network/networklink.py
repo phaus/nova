@@ -12,14 +12,19 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from webob import exc
+
 from nova import log as logging
 from occi.backend import KindBackend, MixinBackend
-from occi.extensions.infrastructure import NETWORKINTERFACE
+#from occi.extensions.infrastructure import NETWORKINTERFACE
 
-# TODO: implement create - note: this must handle either nova-network or
-#        quantum APIs - detect via flags and secondarily via import exceptions
-# TODO: implement delete
-# TODO: implement retreive
+# Retrieve functionality is already present via pyssf
+
+# With Quantum:
+#     TODO: implement create - note: this must handle either nova-network or
+#            quantum APIs - detect via flags and secondarily via import exceptions
+#           implement delete
+#           implement update
 
 #Hi I'm a logger, use me! :-)
 LOG = logging.getLogger('nova.api.occi.backends.network.link')
@@ -31,18 +36,20 @@ class NetworkInterfaceBackend(KindBackend):
 
     def create(self, link, extras):
         # TODO implement with Quantum
-        pass
+        raise exc.HTTPNotImplemented()
         #link.attributes['occi.networkinterface.state'] = 'up'
         #link.attributes['occi.networkinterface.mac'] = 'aa:bb:cc:dd:ee:ff'
         #link.attributes['occi.networkinterface.interface'] = 'eth0'
 
     def update(self, old, new, extras):
         print 'update called in network interface BE'
+        raise exc.HTTPNotImplemented()
 
     def delete(self, link, extras):
-        link.attributes.pop('occi.networkinterface.state')
-        link.attributes.pop('occi.networkinterface.mac')
-        link.attributes.pop('occi.networkinterface.interface')
+        raise exc.HTTPNotImplemented()
+#        link.attributes.pop('occi.networkinterface.state')
+#        link.attributes.pop('occi.networkinterface.mac')
+#        link.attributes.pop('occi.networkinterface.interface')
 
 class IpNetworkInterfaceBackend(MixinBackend):
     '''
@@ -50,13 +57,16 @@ class IpNetworkInterfaceBackend(MixinBackend):
     '''
 
     def create(self, link, extras):
-        if not link.kind == NETWORKINTERFACE:
-            raise AttributeError('This mixin cannot be applied to this kind.')
-        link.attributes['occi.networkinterface.address'] = '10.0.0.65'
-        link.attributes['occi.networkinterface.gateway'] = '10.0.0.1'
-        link.attributes['occi.networkinterface.allocation'] = 'dynamic'
+        raise exc.HTTPNotImplemented()
+    
+#        if not link.kind == NETWORKINTERFACE:
+#            raise AttributeError('This mixin cannot be applied to this kind.')
+#        link.attributes['occi.networkinterface.address'] = '10.0.0.65'
+#        link.attributes['occi.networkinterface.gateway'] = '10.0.0.1'
+#        link.attributes['occi.networkinterface.allocation'] = 'dynamic'
 
     def delete(self, entity, extras):
-        entity.attributes.pop('occi.networkinterface.address')
-        entity.attributes.pop('occi.networkinterface.gateway')
-        entity.attributes.pop('occi.networkinterface.allocation')
+        raise exc.HTTPNotImplemented()
+#        entity.attributes.pop('occi.networkinterface.address')
+#        entity.attributes.pop('occi.networkinterface.gateway')
+#        entity.attributes.pop('occi.networkinterface.allocation')

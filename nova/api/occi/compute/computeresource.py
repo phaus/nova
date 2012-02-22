@@ -524,10 +524,13 @@ class ComputeBackend(MyBackend):
                 raise exc.HTTPBadRequest
 
         # FIXME: how does this fit in terms of pyssf? Does it call update
-        # or does it know to call create?     
+        # or does it know to call create?
+        #     
         # Do we just not support inline links?
-        # TODO: this will be important to enable linking of a resource to 
+        # This will be important to enable linking of a resource to 
         # another inline linking. Must handle Storage and Network links.
+        #
+        # Is it a matter of calling occi.workflow?
         if len(new.links) > 0:
             LOG.info('Associate resource with another.')
             raise exc.HTTPNotImplemented()

@@ -14,7 +14,7 @@
 
 
 # TODO: implement actions
-# TODO: implement updates
+#       implement updates
 
 import random
 
@@ -149,7 +149,6 @@ class StorageBackend(MyBackend):
         
         # NOTE: OCCI has no way to manage snapshots or backups :-(
         
-        #TODO: Implement mappings to OpenStack
         raise exc.HTTPNotImplemented
         
         if action not in entity.actions:

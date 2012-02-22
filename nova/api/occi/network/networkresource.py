@@ -14,10 +14,10 @@
 
 # TODO: implement create - note: this must handle either nova-network or
 #        quantum APIs - detect via flags and secondarily via import exceptions
-# TODO: implement delete
-# TODO: implement retreive
-# TODO: implement actions
-# TODO: implement updates
+#       implement delete
+#       implement retreive
+#       implement actions
+#       implement updates
 
 from nova import flags, log as logging
 from nova.api.occi.backends import MyBackend
