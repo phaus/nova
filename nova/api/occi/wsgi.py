@@ -147,7 +147,6 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         
         # OS-OCCI Action extensions 
         self.register_backend(extensions.OS_CHG_PWD, compute_backend)
-        self.register_backend(extensions.OS_REBUILD, compute_backend)
         self.register_backend(extensions.OS_REVERT_RESIZE, compute_backend)
         self.register_backend(extensions.OS_CONFIRM_RESIZE, compute_backend)
      

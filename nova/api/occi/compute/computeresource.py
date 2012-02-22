@@ -508,7 +508,7 @@ class ComputeBackend(MyBackend):
 
         # FIXME: how does this fit in terms of pyssf? Does it call update
         # or does it know to call create?     
-        # FIXME: do we just not support inline links?
+        # Do we just not support inline links?
         # TODO: this will be important to enable linking of a resource to 
         # another inline linking. Must handle Storage and Network links.
         if len(new.links) > 0:
@@ -527,8 +527,18 @@ class ComputeBackend(MyBackend):
                 flavor = \
                         instance_types.get_instance_type_by_name(mixin.term)
                 kwargs = {}
-                self.compute_api.resize(extras['nova_ctx'], instance, flavor_id=flavor['flavorid'], **kwargs)
                 
+                try:
+                    self.compute_api.resize(extras['nova_ctx'], instance, \
+                                        flavor_id=flavor['flavorid'], **kwargs)
+                except exception.FlavorNotFound:
+                    msg = _("Unable to locate requested flavor.")
+                    raise exc.HTTPBadRequest(explanation=msg)
+                except exception.CannotResizeToSameSize:
+                    msg = _("Resize requires a change in size.")
+                    raise exc.HTTPBadRequest(explanation=msg)
+                except exception.InstanceInvalidState:
+                    exc.HTTPConflict()
                 old.attributes['occi.compute.state'] = 'inactive'
                 #now update the mixin info
                 for m in old.mixins:
@@ -545,9 +555,18 @@ class ComputeBackend(MyBackend):
                 admin_password = utils.generate_password(FLAGS.password_length)
                 kwargs = {}
                 
-                self.compute_api.rebuild(extras['nova_ctx'], instance, \
+                try:
+                    self.compute_api.rebuild(extras['nova_ctx'], instance, \
                                          image_href, admin_password, **kwargs)
-
+                except exception.InstanceInvalidState:
+                    exc.HTTPConflict()
+                except exception.InstanceNotFound:
+                    msg = _("Instance could not be found")
+                    raise exc.HTTPNotFound(explanation=msg)
+                except exception.ImageNotFound:
+                    msg = _("Cannot find image for rebuild")
+                    raise exc.HTTPBadRequest(explanation=msg)
+                
                 old.attributes['occi.compute.state'] = 'inactive'                
                 #now update the mixin info
                 for m in old.mixins:
@@ -564,7 +583,6 @@ class ComputeBackend(MyBackend):
             raise exc.HTTPNotImplemented()
 
     def action(self, entity, action, extras):
-
         # As there is no callback mechanism to update the state  
         # of computes known by occi, a call to get the latest representation 
         # must be made.
@@ -575,83 +593,127 @@ class ComputeBackend(MyBackend):
         if action not in entity.actions:
             raise AttributeError("This action is not currently applicable.")
         elif action == infrastructure.START:
-            LOG.info('Starting virtual machine with id' + entity.identifier)
-            entity.attributes['occi.compute.state'] = 'active'
-            entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
-                                                        infrastructure.RESTART]
-            self.compute_api.start(context, instance)
-
+            self._start_vm(entity, instance, context)
         elif action == infrastructure.STOP:
-            # OCCI -> graceful, acpioff, poweroff
-            # OS -> unclear
-            LOG.info('Stopping virtual machine with id' + entity.identifier)
-            if entity.attributes.has_key('method'):
-                LOG.info('OS only allows one type of stop. What is \
-                            specified in the request will be ignored.')
-            entity.attributes['occi.compute.state'] = 'inactive'
-            entity.actions = [infrastructure.START]
-            self.compute_api.stop(context, instance)
-            self.compute_api.pause(context, instance)
-            
+            self._stop_vm(entity, instance, context)
         elif action == infrastructure.RESTART:
-            LOG.info('Restarting virtual machine with id' + entity.identifier)
-            entity.attributes['occi.compute.state'] = 'inactive'
-            entity.actions = []
-            # OS types == SOFT, HARD
-            # OCCI -> graceful, warm and cold
-            # mapping:
-            #  - SOFT -> graceful, warm
-            #  - HARD -> cold
-            if not entity.attributes.has_key('method'):
-                raise exc.HTTPBadRequest()
-            if entity.attributes['method'] in ('graceful', 'warm'):
-                reboot_type = 'SOFT'
-            elif entity.attributes['method'] is 'cold':
-                reboot_type = 'HARD'
-            else:
-                raise exc.HTTPBadRequest()
-            self.compute_api.reboot(context, instance, reboot_type)
+            self._restart_vm(entity, instance, context)
         elif action == infrastructure.SUSPEND:
-            LOG.info('Suspending virtual machine with id' + entity.identifier)
-            if entity.attributes.has_key('method'):
-                LOG.info('OS only allows one type of suspend. What is \
-                            specified in the request will be ignored.')
-            entity.attributes['occi.compute.state'] = 'suspended'
-            entity.actions = [infrastructure.START]
-            self.compute_api.suspend(context, instance)
+            self._suspend_vm(entity, instance, context)
         elif action == extensions.OS_CHG_PWD:
-            # TODO: Review - it'll need the password sent as well as the
-            #                new password value.
-            raise exc.HTTPNotImplemented()
-        
-            if not entity.attributes.has_key('method'):
-                raise exc.HTTPBadRequest()
-            entity.attributes['occi.compute.state'] = 'active'
-            entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
-                                                        infrastructure.RESTART]
-            self.compute_api.set_admin_password(context, instance, \
-                                                entity.attributes['method'])
-        elif action == extensions.OS_REBUILD:
-            #L8R: there must be an OsTemplate mixin with the request and
-            #      there must be the admin password to the instance
-            raise exc.HTTPNotImplemented()
-        
-            image_href = 'TODO'
-            admin_password = 'TODO'
-            entity.attributes['occi.compute.state'] = 'inactive'
-            self.compute_api.rebuild(context, instance, image_href, \
-                                            admin_password, None, None, None)
+            self._os_chg_passwd_vm(entity, instance, context)
         elif action == extensions.OS_REVERT_RESIZE:
-            raise exc.HTTPNotImplemented()
-            LOG.info('Reverting resized virtual machine with id' + \
-                                                            entity.identifier)
-            self.compute_api.revert_resize(context, instance)
+            self._os_revert_resize_vm(entity, instance, context)
         elif action == extensions.OS_CONFIRM_RESIZE:
-            raise exc.HTTPNotImplemented()
-            LOG.info('Confirming resize of virtual machine with id' + \
-                                                            entity.identifier)
-            self.compute_api.confirm_resize(context, instance)
+            self._os_confirm_resize_vm(entity, instance, context)
         else:
             raise exc.HTTPBadRequest()
         
+    def _start_vm(self, entity, instance, context):
+        LOG.info('Starting virtual machine with id' + entity.identifier)
+        entity.attributes['occi.compute.state'] = 'active'
+        entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
+                                                        infrastructure.RESTART]
+        try:
+            self.compute_api.start(context, instance)
+        except Exception as e:
+            LOG.error('Error in starting VM')
+            raise exc.HTTPServerError()
+
+
+    def _stop_vm(self, entity, instance, context):
+        # OCCI -> graceful, acpioff, poweroff
+    # OS -> unclear
+        LOG.info('Stopping virtual machine with id' + entity.identifier)
+        if entity.attributes.has_key('method'):
+            LOG.info('OS only allows one type of stop. \
+                            What is specified in the request will be ignored.')
+        entity.attributes['occi.compute.state'] = 'inactive'
+        entity.actions = [infrastructure.START]
+        try:
+            self.compute_api.stop(context, instance)
+            #self.compute_api.pause(context, instance)
+        except Exception as e:
+            LOG.error('Error in stopping VM')
+            raise exc.HTTPServerError()
+
+    def _restart_vm(self, entity, instance, context):
+        LOG.info('Restarting virtual machine with id' + entity.identifier)
+        entity.attributes['occi.compute.state'] = 'inactive'
+        entity.actions = []
+        # OS types == SOFT, HARD
+        # OCCI -> graceful, warm and cold
+        # mapping:
+        #  - SOFT -> graceful, warm
+        #  - HARD -> cold
+        if not entity.attributes.has_key('method'):
+            raise exc.HTTPBadRequest()
+        if entity.attributes['method'] in ('graceful', 'warm'):
+            reboot_type = 'SOFT'
+        elif entity.attributes['method'] is 'cold':
+            reboot_type = 'HARD'
+        else:
+            raise exc.HTTPBadRequest()
+        try:
+            self.compute_api.reboot(context, instance, reboot_type)
+        except exception.InstanceInvalidState:
+            exc.HTTPConflict()
+        except Exception as e:
+            LOG.exception(_("Error in reboot %s"), e)
+            raise exc.HTTPUnprocessableEntity()
+
+    def _suspend_vm(self, entity, instance, context):
+        LOG.info('Suspending virtual machine with id' + entity.identifier)
+        if entity.attributes.has_key('method'):
+            LOG.info('OS only allows one type of suspend. \
+                            What is specified in the request will be ignored.')
+        entity.attributes['occi.compute.state'] = 'suspended'
+        entity.actions = [infrastructure.START]
+        try:
+            self.compute_api.suspend(context, instance)
+        except Exception:
+            LOG.error('Error in stopping VM')
+            raise exc.HTTPServerError()
+
+    def _os_chg_passwd_vm(self, entity, instance, context):
+        # FIXME: Use the password extension? 
+        # Review - it'll need the password sent as well as the 
+        # new password value.
+        raise exc.HTTPNotImplemented()
+        if not entity.attributes.has_key('method'):
+            raise exc.HTTPBadRequest()
+        entity.attributes['occi.compute.state'] = 'active'
+        entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
+                                                        infrastructure.RESTART]
+        
+        self.compute_api.set_admin_password(context, instance, \
+                                                entity.attributes['method'])
+
+    def _os_revert_resize_vm(self, entity, instance, context):
+        LOG.info('Reverting resized virtual machine with id' \
+                                                        + entity.identifier)
+        try:
+            self.compute_api.revert_resize(context, instance)
+        except exception.MigrationNotFound:
+            msg = _("Instance has not been resized.")
+            raise exc.HTTPBadRequest(explanation=msg)
+        except exception.InstanceInvalidState:
+            exc.HTTPConflict()
+        except Exception as e:
+            LOG.exception(_("Error in revert-resize %s"), e)
+            raise exc.HTTPBadRequest()
+
+    def _os_confirm_resize_vm(self, entity, instance, context):
+        LOG.info('Confirming resize of virtual machine with id' + \
+                                                            entity.identifier)
+        try:
+            self.compute_api.confirm_resize(context, instance)
+        except exception.MigrationNotFound:
+            msg = _("Instance has not been resized.")
+            raise exc.HTTPBadRequest(explanation=msg)
+        except exception.InstanceInvalidState:
+            exc.HTTPConflict()
+        except Exception as e:
+            LOG.exception(_("Error in confirm-resize %s"), e)
+            raise exc.HTTPBadRequest()
 

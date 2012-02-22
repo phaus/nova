@@ -29,11 +29,11 @@ OS_CHG_PWD = core_model.Action(
                                      'it with the specified image (via Mixin).',
                  {'method': ''})
 
-OS_REBUILD = core_model.Action(
-                'http://schemas.openstack.org/instance/action#',
-                 'rebuild', 'Removes all data on the server and replaces \
-                                 it with the specified image (via Mixin).',
-                 {'method': ''})
+#OS_REBUILD = core_model.Action(
+#                'http://schemas.openstack.org/instance/action#',
+#                 'rebuild', 'Removes all data on the server and replaces \
+#                                 it with the specified image (via Mixin).',
+#                 {'method': ''})
 
 OS_REVERT_RESIZE = core_model.Action(
                 'http://schemas.openstack.org/instance/action#',
