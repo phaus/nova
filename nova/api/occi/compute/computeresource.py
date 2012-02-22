@@ -642,7 +642,7 @@ class ComputeBackend(MyBackend):
                                                         infrastructure.RESTART]
         try:
             self.compute_api.start(context, instance)
-        except Exception as e:
+        except Exception:
             LOG.error('Error in starting VM')
             raise exc.HTTPServerError()
 
