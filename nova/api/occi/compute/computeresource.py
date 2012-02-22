@@ -16,6 +16,7 @@ import random
 import uuid        
 import json
 
+from nova import utils
 from nova import image
 from nova import flags
 from nova import compute
@@ -85,9 +86,10 @@ class ComputeBackend(MyBackend):
         key_data = None
         
         #Supplied by OCCI extension
-        password = None
+        password = utils.generate_password(FLAGS.password_length)
         
         metadata = {}
+        # L8R: see what the effect on VM network config is when these are set
         access_ip_v4 = None
         access_ip_v6 = None
         injected_files = []
@@ -145,11 +147,6 @@ class ComputeBackend(MyBackend):
 
             flavor_name = r.term
             os_tpl_url = o.os_id
-        
-        import ipdb
-        ipdb.set_trace()
-        resource.attributes['occi.compute.architecture'] = \
-                                    self._get_vm_arch(extras['nova_ctx'], o)
         
         try:
             if flavor_name:
@@ -229,14 +226,24 @@ class ComputeBackend(MyBackend):
         #     nova/nova/virt/libvirt/connection.py::get_cpu_info()
         # note: this would be the physical node's speed not necessarily
         #     the VMs.
+        
+        #FIXME: if we can't find out the speed we should set it to ''
         resource.attributes['occi.compute.speed'] = str(2.4)
         resource.attributes['occi.compute.memory'] = \
                                 str(float(instances[0]['memory_mb']) / 1024)
         resource.attributes['occi.compute.state'] = 'active'
 
-        # this must be called on create as the cached info 
+        # Once created, the VM is attached to a public network with an 
+        # addresses allocated by DHCP
+        # A link is created to this network (IP) and set the ip to that of the
+        # allocated ip
+        
+        # this must be called as 'live' on create as the cached info 
         # has not been updated at this point
-        self._get_network_info(instances[0], resource, extras, True)
+        vm_net_info = self._get_adapter_info(instances[0], extras, True)
+        self._attach_to_default_network(vm_net_info, resource, extras)
+        
+        self._get_console_info(instances[0], resource, extras)
         
     def _get_vm_arch(self, context, os_template_mixin):
 
@@ -274,54 +281,88 @@ class ComputeBackend(MyBackend):
             arch = 'x86'
         
         return arch
-
-    def _get_network_info(self, instance, resource, extras, live_query):
-        # Once created, the VM is attached to a public network with an 
-        # addresses allocated by DHCP
-        # A link is created to this network (IP) and set the ip to that of the
-        # allocated ip
+    
+    def _get_adapter_info(self, instance, extras, live_query=False):
+        
+        vm_net_info = {'vm_iface':'', 'address': '', 'gateway': ''}
         
         if live_query:
-            sj = self.network_api.get_instance_nw_info(extras['nova_ctx'], instance)
+            sj = self.network_api.get_instance_nw_info(extras['nova_ctx'], \
+                                                                    instance)
         else:
             sj = instance['info_cache'].network_info
         
-        # TODO: currently this assumes one adapter on the VM.
-        # It must account for more than one adaptor
-        if sj != None:
-            vm_iface = sj[0]['network']['meta']['bridge_interface']
-            address = sj[0]['network']['subnets'][0]['ips'][0]['address']
-            gateway = sj[0]['network']['subnets'][0]['gateway']['address']
-        else:
-            vm_iface = ''
-            address = ''
-            gateway = ''
+        #catches an odd error whereby no network info is returned back
+        if len(sj) <= 0:
+            LOG.warn('No network info was returned either live or cached.')
+            return vm_net_info
         
-        #Get a handle to the default network
+        # L8R: currently this assumes one adapter on the VM.
+        # It's likely that this will not be the case when using 
+        # Quantum
+        if not live_query:
+            sj = json.loads(sj)
+        vm_net_info['vm_iface'] = \
+                        sj[0]['network']['meta']['bridge_interface']
+        vm_net_info['address'] = \
+                        sj[0]['network']['subnets'][0]['ips'][0]['address']
+        vm_net_info['gateway'] = \
+                        sj[0]['network']['subnets'][0]['gateway']['address']
+        
+        return vm_net_info
+    
+    def _attach_to_default_network(self, vm_net_info, resource, extras):
+        # check that existing network does not exist
+        if len(resource.links) > 0:
+            for link in resource.links:
+                if link.kind.term == "networkinterface" and \
+                link.kind.scheme == "http://schemas.ogf.org/occi/infrastructure#":
+                    LOG.debug('A link to the network already exists. \
+                                            Will update the links attributes.')
+                    link.attributes['occi.networkinterface.interface'] = \
+                                                        vm_net_info['vm_iface']
+                    link.attributes['occi.networkinterface.address'] = \
+                                                        vm_net_info['address']
+                    link.attributes['occi.networkinterface.gateway'] = \
+                                                        vm_net_info['gateway']
+                    return
+        
+        # If the network association does not exist...        
+        # Get a handle to the default network
+        # Could use occi.workflow for this
         registry = extras['registry']
         default_network = registry.get_resource('/network/DEFAULT_NETWORK')
         source = resource
         target = default_network
-    
+
+        # Create the link to the default network
         identifier = str(uuid.uuid4())
-        link = Link(identifier, NETWORKINTERFACE, [IPNETWORKINTERFACE], source, target)
-        
+        link = Link(identifier, NETWORKINTERFACE, [IPNETWORKINTERFACE], \
+                                                            source, target)
         link.attributes['occi.core.id'] = identifier 
-        link.attributes['occi.networkinterface.interface'] = vm_iface
+        link.attributes['occi.networkinterface.interface'] = vm_net_info['vm_iface']
         #TODO mac address info is not available
-        link.attributes['occi.networkinterface.mac'] = 'DE:AD:BE:EF:BA:BE'
+        link.attributes['occi.networkinterface.mac'] = ''
         link.attributes['occi.networkinterface.state'] = 'active'
-        link.attributes['occi.networkinterface.address'] = address
-        link.attributes['occi.networkinterface.gateway'] = gateway
+        link.attributes['occi.networkinterface.address'] = vm_net_info['address']
+        link.attributes['occi.networkinterface.gateway'] = vm_net_info['gateway']
+        #TODO set this based on data not by default
         link.attributes['occi.networkinterface.allocation'] = 'dhcp'
         
-    #        target = 'ssh://' + address + ':22'
-    #        identifier = str(uuid.uuid4())
-    #        sshlink = Link(identifier, Link.kind, [], source, target)
-    #        sshlink.attributes['occi.core.id'] = identifier
+        resource.links.append(link)
         
-        resource.links = [link] #, sshlink
-
+        registry.add_resource(identifier, link)
+    
+    def _get_console_info(self, instance, resource, extras):
+        #TODO implement me! Note needs pyssf support
+        #Ensure only one ssh console link exists
+#        target = 'ssh://' + address + ':22'
+#        identifier = str(uuid.uuid4())
+#        sshlink = Link(identifier, Link.kind, [], source, target)
+#        sshlink.attributes['occi.core.id'] = identifier
+#        resource.links.append(sshlink)
+        pass
+    
     def _handle_quota_error(self, error):
         """
         Reraise quota errors as api-specific http exceptions
@@ -413,8 +454,9 @@ class ComputeBackend(MyBackend):
             entity.attributes['occi.compute.state'] = 'inactive'
             entity.actions = []
         
-        #Now we have the instance state, get its network info
-        self._get_network_info(instance, entity, extras)
+        #Now we have the instance state, get its updated network info
+        vm_net_info = self._get_adapter_info(instance, extras)
+        self._attach_to_default_network(vm_net_info, entity, extras)
         
         return instance
 
@@ -424,16 +466,15 @@ class ComputeBackend(MyBackend):
               + entity.identifier)
 
         context = extras['nova_ctx']
-        
         uid = entity.attributes['occi.core.id']
-        # TODO at some stage the uid gets munged with location.
-        #if uid.find(entity.kind.location) > -1:
-        #    uid = uid.replace(entity.kind.location, '')
         
         try:
             instance = self.compute_api.routing_get(context, uid)
         except exception.NotFound:
             raise exc.HTTPNotFound()
+        
+        # if links exist, these must be removed before deletion
+        entity.links = []
 
         if FLAGS.reclaim_instance_interval:
             self.compute_api.soft_delete(context, instance)
@@ -446,8 +487,33 @@ class ComputeBackend(MyBackend):
         LOG.info('Partial update requested for instance: ' + \
                                             old.attributes['occi.core.id'])
         
-        context = extras['nova_ctx']
         instance = self._retrieve(old, extras)
+
+        # update attributes.
+        if len(new.attributes) > 0:
+            LOG.info('Updating mutable attributes of instance')
+            # support only title and summary changes now.
+            if ('occi.core.title' in new.attributes) \
+                                    or ('occi.core.title' in new.attributes):
+                if len(new.attributes['occi.core.title']) > 0:
+                    old.attributes['occi.core.title'] = \
+                                            new.attributes['occi.core.title'] 
+
+                if len(new.attributes['occi.core.summary']) > 0:
+                    old.attributes['occi.core.summary'] = \
+                                            new.attributes['occi.core.summary'] 
+            else:
+                LOG.error('Cannot update the supplied attributes.')
+                raise exc.HTTPBadRequest
+
+        # FIXME: how does this fit in terms of pyssf? Does it call update
+        # or does it know to call create?     
+        # FIXME: do we just not support inline links?
+        # TODO: this will be important to enable linking of a resource to 
+        # another inline linking. Must handle Storage and Network links.
+        if len(new.links) > 0:
+            LOG.info('Associate resource with another.')
+            raise exc.HTTPNotImplemented()
         
         # for now we will only handle one mixin change per request
         if len(new.mixins) == 1:
@@ -456,46 +522,46 @@ class ComputeBackend(MyBackend):
             # check for scale up in new
             if isinstance(mixin, ResourceTemplate):
                 LOG.info('Resize requested')
-                raise exc.HTTPForbidden
-                # XXX: Ok, this sucks a little... resize is only supported on 
-                #      Xen: http://wiki.openstack.org/HypervisorSupportMatrix
+                # Update: libvirt now supports resize see:
+                # http://wiki.openstack.org/HypervisorSupportMatrix
                 flavor = \
                         instance_types.get_instance_type_by_name(mixin.term)
-                self.compute_api.resize(context, instance, flavor['flavorid'])
-                #now update the mixin info
+                kwargs = {}
+                self.compute_api.resize(extras['nova_ctx'], instance, flavor_id=flavor['flavorid'], kwargs)
                 
+                old.attributes['occi.compute.state'] = 'inactive'
+                #now update the mixin info
+                for m in old.mixins:
+                    if m.term == mixin.term and m.scheme == mixin.scheme:
+                        m = mixin
+                        LOG.debug('Resource template is changed: ' + m.scheme + m.term)
                 
             # check for new os rebuild in new
+            # supported by all hypervisors
             elif isinstance(mixin, OsTemplate):
                 LOG.info('Rebuild requested')
-                raise exc.HTTPForbidden
                 image_href = mixin.os_id
-                # where's best to supply this info? as an atttribute?
-                admin_password = 'TODO'
-                old.attributes['occi.compute.state'] = 'inactive'
-                self.compute_api.rebuild(context, instance, image_href, \
-                                            admin_password, None, None, None)
+                # L8R: Use the admin_password extension
+                admin_password = utils.generate_password(FLAGS.password_length)
+                kwargs = {}
+                
+                self.compute_api.rebuild(extras['nova_ctx'], instance, \
+                                         image_href, admin_password, **kwargs)
+
+                old.attributes['occi.compute.state'] = 'inactive'                
+                #now update the mixin info
+                for m in old.mixins:
+                    if m.term == mixin.term and m.scheme == mixin.scheme:
+                        m = mixin
+                        LOG.debug('OS template is changed: ' + m.scheme + m.term)
             else:
                 LOG.error('I\'ve no idea what this mixin is! ' + \
                                                     mixin.scheme + mixin.term)
                 raise exc.HTTPBadRequest()
-        elif len(new.mixins) > 1:
-            raise exc.HTTPBadRequest()
         
-        # if new.attributes > 0 then ignore for now
-        # you can change occi.core.title, what about hostname?
-        # in the specific case of openstack, you cannot directly change things
-        # like occi.core.memory - you must resize i.e. change the resource
-        # template 
-        if new.attributes > 0:
-            LOG.info('Updating mutable attributes of instance')
-
-        # if new.links > 0 then ignore
-        # this will be important to enable linking of a resource to another
-        if new.links == 1:
-            LOG.info('Associate resource with another.')
         elif len(new.mixins) > 1:
-            raise exc.HTTPBadRequest()
+            LOG.error('Unsupported: >1 mixin received in the request.')
+            raise exc.HTTPNotImplemented()
 
     def action(self, entity, action, extras):
 

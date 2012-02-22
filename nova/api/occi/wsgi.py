@@ -183,6 +183,10 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         else:
             #TODO: get values from API. right now they reflect default
             # devstack setup
+            # Suggestion go direct to the DB
+            # db_driver = FLAGS.db_driver
+            # self.db = utils.import_object(db_driver)
+            # self.db.*
             default_network.attributes = {
                     'occi.core.id': name,
                     

@@ -30,9 +30,14 @@ class NetworkInterfaceBackend(KindBackend):
     '''
 
     def create(self, link, extras):
-        link.attributes['occi.networkinterface.state'] = 'up'
-        link.attributes['occi.networkinterface.mac'] = 'aa:bb:cc:dd:ee:ff'
-        link.attributes['occi.networkinterface.interface'] = 'eth0'
+        # TODO implement with Quantum
+        pass
+        #link.attributes['occi.networkinterface.state'] = 'up'
+        #link.attributes['occi.networkinterface.mac'] = 'aa:bb:cc:dd:ee:ff'
+        #link.attributes['occi.networkinterface.interface'] = 'eth0'
+
+    def update(self, old, new, extras):
+        print 'update called in network interface BE'
 
     def delete(self, link, extras):
         link.attributes.pop('occi.networkinterface.state')
