@@ -527,7 +527,7 @@ class ComputeBackend(MyBackend):
                 flavor = \
                         instance_types.get_instance_type_by_name(mixin.term)
                 kwargs = {}
-                self.compute_api.resize(extras['nova_ctx'], instance, flavor_id=flavor['flavorid'], kwargs)
+                self.compute_api.resize(extras['nova_ctx'], instance, flavor_id=flavor['flavorid'], **kwargs)
                 
                 old.attributes['occi.compute.state'] = 'inactive'
                 #now update the mixin info
