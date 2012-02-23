@@ -25,6 +25,7 @@ from occi.extensions.infrastructure import COMPUTE
 
 from webob import exc
 
+
 #Hi I'm a logger, use me! :-)
 LOG = logging.getLogger('nova.api.occi.backends.storage.link')
 
@@ -57,20 +58,21 @@ class StorageLinkBackend(KindBackend):
   
     
     def _get_vol_to_attach(self, context, link):
-        if link.target.kind == STORAGE: 
+        if link.target.kind == STORAGE:
+            
             vol_to_attach = self.volume_api.get(context, \
                                         link.target.attributes['occi.core.id'])
         elif link.source.kind == STORAGE:
             vol_to_attach = self.volume_api.get(context, \
                                         link.source.attributes['occi.core.id'])
         else:
-            exc.HTTPBadRequest
+            raise exc.HTTPBadRequest()
 
         return vol_to_attach
  
     
     def _get_inst_to_attach(self, context, link):
-        #it's instance_id not UUID!!!
+        # it's instance_id not UUID
         if link.target.kind == COMPUTE:
             instance = self.compute_api.routing_get(context, \
                                         link.target.attributes['occi.core.id'])
@@ -78,7 +80,7 @@ class StorageLinkBackend(KindBackend):
             instance = self.compute_api.routing_get(context, \
                                         link.source.attributes['occi.core.id'])
         else:
-            raise exc.HTTPBadRequest
+            raise exc.HTTPBadRequest()
         return instance
   
     
@@ -96,8 +98,12 @@ class StorageLinkBackend(KindBackend):
     def delete(self, link, extras):
         LOG.info('Unlinking entity from storage via StorageLink.')
         
-        vol_to_detach = self._get_vol_to_attach(extras['nova_ctx'], link) 
-        self.volume_api.detach(extras['nova_ctx'], vol_to_detach)
+        try:
+            vol_to_detach = self._get_vol_to_attach(extras['nova_ctx'], link) 
+            self.volume_api.detach(extras['nova_ctx'], vol_to_detach)
+        except Exception, e:
+            LOG.error('Error in detaching storage volume. ' + str(e))
+            raise e
         
         link.attributes.pop('occi.storagelink.deviceid')
         link.attributes.pop('occi.storagelink.mountpoint')
@@ -105,5 +111,5 @@ class StorageLinkBackend(KindBackend):
 
 
     def action(self, entity, action, extras):
-        raise exc.HTTPNotImplemented
+        raise exc.HTTPBadRequest()
 
