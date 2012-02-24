@@ -39,7 +39,7 @@ from occi.extensions import infrastructure
 LOG = log.getLogger('nova.api.occi.wsgi')
 
 #Setup options
-occi_opts = [
+OCCI_OPTS = [
              cfg.BoolOpt("show_default_net_config",
                 default=False,
                 help="Whether to show the default network configuration to clients"),
@@ -48,7 +48,7 @@ occi_opts = [
                 help="Whether to show the Kernel and RAM images to clients"),
              ]
 FLAGS = flags.FLAGS
-FLAGS.register_opts(occi_opts)
+FLAGS.register_opts(OCCI_OPTS)
 
 class OpenStackOCCIRegistry(registry.NonePersistentRegistry):
     '''
