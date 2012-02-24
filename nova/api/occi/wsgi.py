@@ -12,7 +12,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-
+from nova import context
 from nova import image
 from nova import log
 from nova import wsgi
@@ -200,12 +200,12 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         else:
             # get values from API. right now they reflect default
             
-            context = context.get_admin_context()
+            ctx = context.get_admin_context()
             authorize = os_extensions.extension_authorizer('compute', 'networks')
-            authorize(context)
+            authorize(ctx)
             
             self.network_api = nova.network.api.API()
-            networks = self.network_api.get_all(context)
+            networks = self.network_api.get_all(ctx)
             
             if networks > 0:
                 LOG.warn('There is more that one network.')
