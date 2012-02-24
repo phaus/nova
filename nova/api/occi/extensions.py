@@ -16,7 +16,7 @@ from nova import flags, log
 from occi import backend, core_model
 
 #TODO: This all has to be abstracted and made easy to use and provide other
-#      extensions
+#      extensions. E.g. scan all classes in extensions.py and load dynamically
 
 #Hi I'm a logger, use me! :-)
 LOG = log.getLogger('nova.api.occi.extensions')

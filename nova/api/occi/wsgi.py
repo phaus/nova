@@ -16,6 +16,11 @@
 from nova import image
 from nova import log
 from nova import wsgi
+from nova import flags
+from nova.openstack.common import cfg
+import nova.network.api
+from nova import context
+from nova.api.openstack import extensions as os_extensions
 from nova.api.occi import backends
 from nova.api.occi import extensions
 from nova.api.occi.compute import computeresource
@@ -33,6 +38,17 @@ from occi.extensions import infrastructure
 #Hi I'm a logger, use me! :-)
 LOG = log.getLogger('nova.api.occi.wsgi')
 
+#Setup options
+occi_opts = [
+             cfg.BoolOpt("show_default_net_config",
+                default=False,
+                help="Whether to show the default network configuration to clients"),
+             cfg.BoolOpt("filter_kernel_and_ram_images",
+                default=True,
+                help="Whether to show the Kernel and RAM images to clients"),
+             ]
+FLAGS = flags.FLAGS
+FLAGS.register_opts(occi_opts)
 
 class OpenStackOCCIRegistry(registry.NonePersistentRegistry):
 
@@ -165,7 +181,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                             'This is the network all VMs are attached to.',
                             'Default Network')
         
-        show_default_net_config = False
+        show_default_net_config = FLAGS.get("show_default_net_config", False)
         
         if show_default_net_config:
             default_network.attributes = {
@@ -180,12 +196,20 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                     'occi.network.allocation': ''
             }
         else:
-            #TODO: get values from API. right now they reflect default
-            # devstack setup
-            # Suggestion go direct to the DB
-            # db_driver = FLAGS.db_driver
-            # self.db = utils.import_object(db_driver)
-            # self.db.*
+            # get values from API. right now they reflect default
+            
+            context = context.get_admin_context()
+            authorize = os_extensions.extension_authorizer('compute', 'networks')
+            authorize(context)
+            
+            self.network_api = nova.network.api.API()
+            networks = self.network_api.get_all(context)
+            
+            if networks > 0:
+                LOG.warn('There is more that one network.')
+                LOG.warn('Current implmentation assumes only one.')
+                LOG.warn('Using the first network: id' + networks[0]['id'])
+            
             default_network.attributes = {
                     'occi.core.id': name,
                     
@@ -193,9 +217,9 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                     'occi.network.label': 'public',
                     'occi.network.state': 'up',
                     
-                    'occi.network.address': '10.0.0.0/24',
-                    'occi.network.gateway': '10.0.0.1',
-                    'occi.network.allocation': 'static'
+                    'occi.network.address': networks[0]['cidr'],
+                    'occi.network.gateway': networks[0]['gateway'],
+                    'occi.network.allocation': 'dhcp'
             }
         
         self.registry.add_resource(name, default_network)
@@ -261,27 +285,38 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         template_schema = 'http://schemas.openstack.org/template/os#'
         os_schema = 'http://schemas.ogf.org/occi/infrastructure#os_tpl'
 
-        #this is a HTTP call out to the image service
         image_service = image.get_default_image_service()
         images = image_service.detail(context)
 
+        # L8R: now the API allows users to supply RAM and Kernel images
+        filter_kernel_and_ram_images = \
+                                FLAGS.get("filter_kernel_and_ram_images", True)
+
         for img in images:
-            # L8R: now the API allows users to supply RAM and Kernel images
-            # filter out ram and kernel images        
-            if (img['container_format'] or img['disk_format']) not in ('ari', 'aki'):
-                os_template = extensions.OsTemplate(term=img['name'],
-                                        scheme=template_schema, \
-                    os_id=img['id'], related=[os_schema], \
-                    attributes=None, title='This is an OS ' + img['name'] + \
-                                                ' image',
-		    location='/' + img['name'] + '/')
-                LOG.debug('Registering an OS image type as: ' + str(os_template))
-                self.register_backend(os_template, os_mixin_backend)
+            #If the image is a kernel or ram one 
+            # and we're not to filter them out then register it.
+            if ((img['container_format'] or img['disk_format']) \
+                    in ('ari', 'aki')) and filter_kernel_and_ram_images:
+                LOG.warn('Not registering kernel/RAM image.')
+                continue
+
+            os_template = extensions.OsTemplate(
+                                term=img['name'],
+                                scheme=template_schema, \
+                                os_id=img['id'], related=[os_schema], \
+                                attributes=None,
+                                title='This is an OS ' + img['name'] + \
+                                                            ' VM image',
+	                            location='/' + img['name'] + '/')
+            
+            LOG.debug('Registering an OS image type as: ' \
+                                                    + str(os_template))
+            self.register_backend(os_template, os_mixin_backend)
+
 
     def _register_occi_extensions(self):
         '''
         Register some other OCCI extensions.
         '''
-        # TODO:(dizz) scan all classes in extensions.py and load dynamically
         # self.register_backend(extensions.TCP, extensions.TCPBackend())
         pass
