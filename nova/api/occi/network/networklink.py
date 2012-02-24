@@ -39,28 +39,27 @@ class NetworkInterfaceBackend(KindBackend):
 
     def create(self, link, extras):
         # TODO implement with Quantum
-        raise exc.HTTPNotImplemented()
+        raise exc.HTTPBadRequest
         #link.attributes['occi.networkinterface.state'] = 'up'
         #link.attributes['occi.networkinterface.mac'] = 'aa:bb:cc:dd:ee:ff'
         #link.attributes['occi.networkinterface.interface'] = 'eth0'
 
     def update(self, old, new, extras):
-        print 'update called in network interface BE'
-        raise exc.HTTPNotImplemented()
+        raise exc.HTTPBadRequest()
 
     def delete(self, link, extras):
-        raise exc.HTTPNotImplemented()
+        raise exc.HTTPBadRequest()
 #        link.attributes.pop('occi.networkinterface.state')
 #        link.attributes.pop('occi.networkinterface.mac')
 #        link.attributes.pop('occi.networkinterface.interface')
 
 class IpNetworkInterfaceBackend(MixinBackend):
     '''
-    A mixin backend for the IPnetowkringinterface.
+    A mixin backend for the IpNetworkingInterface.
     '''
 
     def create(self, link, extras):
-        raise exc.HTTPNotImplemented()
+        raise exc.HTTPBadRequest()
     
 #        if not link.kind == NETWORKINTERFACE:
 #            raise AttributeError('This mixin cannot be applied to this kind.')
@@ -69,7 +68,7 @@ class IpNetworkInterfaceBackend(MixinBackend):
 #        link.attributes['occi.networkinterface.allocation'] = 'dynamic'
 
     def delete(self, entity, extras):
-        raise exc.HTTPNotImplemented()
+        raise exc.HTTPBadRequest()
 #        entity.attributes.pop('occi.networkinterface.address')
 #        entity.attributes.pop('occi.networkinterface.gateway')
 #        entity.attributes.pop('occi.networkinterface.allocation')

@@ -18,7 +18,7 @@ from nova import log
 from nova import wsgi
 from nova import flags
 from nova.openstack.common import cfg
-import nova.network.api
+from nova.network import api as network_api
 from nova import context
 from nova.api.openstack import extensions as os_extensions
 from nova.api.occi import backends
@@ -42,7 +42,7 @@ LOG = log.getLogger('nova.api.occi.wsgi')
 occi_opts = [
              cfg.BoolOpt("show_default_net_config",
                 default=False,
-                help="Whether to show the default network configuration to clients"),
+                help="Whether to show the default network config to clients"),
              cfg.BoolOpt("filter_kernel_and_ram_images",
                 default=True,
                 help="Whether to show the Kernel and RAM images to clients"),
@@ -63,8 +63,8 @@ class OpenStackOCCIRegistry(registry.NonePersistentRegistry):
 
 class OCCIApplication(occi_wsgi.Application, wsgi.Application):
     '''
-    Adapter which 'translates' represents a nova WSGI application into and OCCI
-    WSGI application.
+    Adapter which 'translates' represents a nova WSGI application 
+    into and OCCI WSGI application.
     '''
 
     def __init__(self):
@@ -79,6 +79,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
 
         # register extensions to the basic occi entities
         self._register_occi_extensions()
+
 
     def __call__(self, environ, response):
         '''
@@ -116,7 +117,9 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         # register openstack instance types (flavours)
         self._register_resource_mixins(backends.ResourceMixinBackend())
         
-        return self._call_occi(environ, response, nova_ctx=nova_ctx, registry=self.registry)
+        return self._call_occi(environ, response, nova_ctx=nova_ctx, \
+                                                        registry=self.registry)
+
 
     def _setup_occi_service(self):
         '''
@@ -175,6 +178,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         LOG.info('Registering default network with web app.')
         self._register_default_network()
 
+
     def _register_default_network(self, name='DEFAULT_NETWORK'):
         default_network = Resource(name, infrastructure.NETWORK, \
                             [infrastructure.IPNETWORK], [],
@@ -199,10 +203,11 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
             # get values from API. right now they reflect default
             
             context = context.get_admin_context()
-            authorize = os_extensions.extension_authorizer('compute', 'networks')
+            authorize = os_extensions.extension_authorizer(
+                                                        'compute', 'networks')
             authorize(context)
             
-            self.network_api = nova.network.api.API()
+            self.network_api = network_api.API()
             networks = self.network_api.get_all(context)
             
             if networks > 0:
@@ -223,6 +228,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
             }
         
         self.registry.add_resource(name, default_network)
+
 
     def _register_resource_mixins(self, resource_mixin_backend):
         '''
@@ -245,6 +251,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                                                         str(resource_template))
             
             self.register_backend(resource_template, resource_mixin_backend)
+    
     
     def _get_resource_attributes(self, attrs):
         
@@ -298,7 +305,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
             if ((img['container_format'] or img['disk_format']) \
                     in ('ari', 'aki')) and filter_kernel_and_ram_images:
                 LOG.warn('Not registering kernel/RAM image.')
-                continue
+                continue 
 
             os_template = extensions.OsTemplate(
                                 term=img['name'],

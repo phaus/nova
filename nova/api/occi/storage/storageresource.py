@@ -34,6 +34,8 @@ from webob import exc
 LOG = logging.getLogger('nova.api.occi.backends.storage')
 
 #NOTE: for this to operate the nova-vol service must be running
+# TODO: remove MyBackend
+# pop/delete attributes on DELETE
 class StorageBackend(MyBackend):
     '''
     Backend to handle storage resources.
@@ -102,6 +104,7 @@ class StorageBackend(MyBackend):
         if new_volume['status'] == 'available':
             resource.attributes['occi.storage.state'] = 'online'
         
+        # TODO: fix imports e.g. infra.OFFLINE
         resource.actions = [OFFLINE, BACKUP, SNAPSHOT, RESIZE]
 
 
@@ -155,7 +158,7 @@ class StorageBackend(MyBackend):
             
             LOG.warn('Online storage requested resource with id: ' + \
                                                             entity.identifier)
-            raise exc.HTTPNotImplemented()
+            raise exc.HTTPBadRequest()
             
         elif action == OFFLINE:
             # OFFLINE, disconnected? disconnection supported in API otherwise
@@ -165,22 +168,20 @@ class StorageBackend(MyBackend):
             # By default storage cannot be brought OFFLINE
             LOG.warn('Offline storage requested resource with id: ' + \
                                                             entity.identifier)
-            raise exc.HTTPNotImplemented()
+            raise exc.HTTPBadRequest()
             
-        elif action == BACKUP:
+        elif action == BACKUP: #CDMI?!
             # FIXME: Same as a snapshot?
             # BACKUP: create a complete copy of the volume.
-            # self.volume_api.create_snapshot(\
-            #                               context, volume, name, description)
             print('Backing up...storage resource with id: '
                   + entity.identifier)
-            self._snapshot_storage(entity, extras)
+            raise exc.HTTPBadRequest()
+            #self._snapshot_storage(entity, extras)
             
-        elif action == SNAPSHOT:
+        elif action == SNAPSHOT: #CDMI?!
             # SNAPSHOT: create a time-stamped copy of the volume? Supported in 
             # OS volume API
             self._snapshot_storage(entity, extras)
-            
 
         elif action == RESIZE:
             # L8R: not supported by API. Patch to OS?
@@ -201,6 +202,7 @@ class StorageBackend(MyBackend):
             name = 'backup name'
             description = 'backup description'
         else:
+            # occi.core.title, occi.core.summary
             name = 'snapshot name'
             description = 'snapshot description'
         self.volume_api.create_snapshot(extras['nova_ctx'],

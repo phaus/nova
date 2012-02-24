@@ -59,7 +59,6 @@ class StorageLinkBackend(KindBackend):
     
     def _get_vol_to_attach(self, context, link):
         if link.target.kind == STORAGE:
-            
             vol_to_attach = self.volume_api.get(context, \
                                         link.target.attributes['occi.core.id'])
         elif link.source.kind == STORAGE:
@@ -84,17 +83,6 @@ class StorageLinkBackend(KindBackend):
         return instance
   
     
-    def retrieve(self, link, extras):
-        pass
-        #raise exc.HTTPNotImplemented
-#        import ipdb
-#        ipdb.set_trace()
-#        if link.attributes['occi.storagelink.state'] == 'active':
-#            link.actions = []
-#        elif link.attributes['occi.storagelink.state'] == 'inactive':
-#            link.actions = []
- 
-    
     def delete(self, link, extras):
         LOG.info('Unlinking entity from storage via StorageLink.')
         
@@ -108,8 +96,3 @@ class StorageLinkBackend(KindBackend):
         link.attributes.pop('occi.storagelink.deviceid')
         link.attributes.pop('occi.storagelink.mountpoint')
         link.attributes.pop('occi.storagelink.state')
-
-
-    def action(self, entity, action, extras):
-        raise exc.HTTPBadRequest()
-

@@ -63,6 +63,8 @@ ADMIN_PWD_EXT = core_model.Mixin(\
     'http://schemas.openstack.org/instance/credentials#',
     'admin_pwd', attributes=ADMIN_PWD_ATTRIBUTES)
 
+# use empty backend - kind/mixin
+
 class TCPBackend(backend.MixinBackend):
     '''
     Trusted Compute Pool technology mixin backend handler

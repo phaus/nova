@@ -46,6 +46,9 @@ FLAGS = flags.FLAGS
 # Hi I'm a logger, use me! :-)
 LOG = logging.getLogger('nova.api.occi.backends.compute')
 
+# pop/delete attributes on DELETE
+# TODO: use OCCI exceptions
+# TODO: remove MyBackend
 class ComputeBackend(MyBackend):
     '''
     A Backend for compute instances.
@@ -77,15 +80,14 @@ class ComputeBackend(MyBackend):
         try:
             name = resource.attributes['occi.compute.hostname']
         except KeyError:
-            name = resource.attributes['occi.compute.hostname'] = \
-                            str(random.randrange(0, 99999999)) + \
-                                                        '-compute.occi-wg.org'
+            name = None 
+            #str(random.randrange(0, 99999999)) + '-compute.occi-wg.org'
         
         # Supplied by OCCI extension
         key_name = None
         key_data = None
         
-        #Supplied by OCCI extension
+        #Auto-gen'ed 1st if OCCI extension supplied this will overwrite this
         password = utils.generate_password(FLAGS.password_length)
         
         metadata = {}
@@ -145,7 +147,9 @@ class ComputeBackend(MyBackend):
                 msg = 'There is more than one OS template in the request'
                 LOG.error(msg)
                 raise AttributeError(msg=unicode(msg))
-
+            
+            # TODO: if rc & oc != 1 all is well
+            
             flavor_name = r.term
             os_tpl_url = o.os_id
         
@@ -193,6 +197,7 @@ class ComputeBackend(MyBackend):
                                     scheduler_hints=scheduler_hints)
             
         except exception.QuotaError as error:
+            #TODO: import this 
             self._handle_quota_error(error)
         except exception.InstanceTypeMemoryTooSmall as error:
             raise exc.HTTPBadRequest(explanation=unicode(error))
@@ -228,8 +233,8 @@ class ComputeBackend(MyBackend):
         # note: this would be the physical node's speed not necessarily
         #     the VMs.
         
-        #FIXME: if we can't find out the speed we should set it to ''
-        resource.attributes['occi.compute.speed'] = str(2.4)
+        #L8R: find a way to get CPU speed
+        resource.attributes['occi.compute.speed'] = str(0.0)
         resource.attributes['occi.compute.memory'] = \
                                 str(float(instances[0]['memory_mb']) / 1024)
         resource.attributes['occi.compute.state'] = 'active'
@@ -266,6 +271,7 @@ class ComputeBackend(MyBackend):
         #   is x86 or x64 respectively.
         # - if associated OS image has properties arch or architecture that 
         #   equal x86 or x64.
+        # - else return a default of x86
         
         arch = ''
         
@@ -338,6 +344,8 @@ class ComputeBackend(MyBackend):
         # If the network association does not exist...        
         # Get a handle to the default network
         # Could use occi.workflow for this
+        # TODO: use occi.workflow
+        # TODO: remove registry from extras
         registry = extras['registry']
         default_network = registry.get_resource('/network/DEFAULT_NETWORK')
         source = resource
@@ -349,12 +357,12 @@ class ComputeBackend(MyBackend):
                                                             source, target)
         link.attributes['occi.core.id'] = identifier 
         link.attributes['occi.networkinterface.interface'] = vm_net_info['vm_iface']
-        #TODO mac address info is not available
+        #TODO: mac address info is not available
         link.attributes['occi.networkinterface.mac'] = ''
         link.attributes['occi.networkinterface.state'] = 'active'
         link.attributes['occi.networkinterface.address'] = vm_net_info['address']
         link.attributes['occi.networkinterface.gateway'] = vm_net_info['gateway']
-        #TODO set this based on data not by default
+        #TODO: set this based on data not by default
         link.attributes['occi.networkinterface.allocation'] = 'dhcp'
         
         resource.links.append(link)
@@ -363,6 +371,7 @@ class ComputeBackend(MyBackend):
     
     def _get_console_info(self, instance, resource, extras):
         #TODO implement me! Note needs pyssf support
+        #     otherwise implement Kind
         #Ensure only one ssh console link exists
 #        target = 'ssh://' + address + ':22'
 #        identifier = str(uuid.uuid4())
@@ -371,7 +380,7 @@ class ComputeBackend(MyBackend):
 #        resource.links.append(sshlink)
         pass
     
-    #L8R: Note this is a direct lift from nova/api/openstack/compute/servers.py
+    #TODO: Note this is a direct lift from nova/api/openstack/compute/servers.py
     def _handle_quota_error(self, error):
         """
         Reraise quota errors as api-specific http exceptions
@@ -395,9 +404,6 @@ class ComputeBackend(MyBackend):
                                             headers={'Retry-After': 0})
 
     def retrieve(self, entity, extras):
-        self._retrieve(entity, extras)
-
-    def _retrieve(self, entity, extras):
         context = extras['nova_ctx']
         
         uid = entity.attributes['occi.core.id']
@@ -417,7 +423,6 @@ class ComputeBackend(MyBackend):
         #            can be from users or VMs
         #  - inactive == the oppose! :-)
         #  - suspended == machine in a frozen state e.g. via suspend or pause
-        #
          
         # change password - OS 
         # confirm resized server
@@ -465,6 +470,7 @@ class ComputeBackend(MyBackend):
         elif instance['vm_state'] in (
                        vm_states.RESIZING,
                        vm_states.REBUILDING,
+                       # TODO: make sure this is ok
                        task_states.RESIZE_CONFIRMING,
                        task_states.RESIZE_FINISH,
                        task_states.RESIZE_MIGRATED,
@@ -493,9 +499,6 @@ class ComputeBackend(MyBackend):
         except exception.NotFound:
             raise exc.HTTPNotFound()
         
-        # if links exist, these must be removed before deletion
-        entity.links = []
-
         if FLAGS.reclaim_instance_interval:
             self.compute_api.soft_delete(context, instance)
         else:
@@ -507,7 +510,7 @@ class ComputeBackend(MyBackend):
         LOG.info('Partial update requested for instance: ' + \
                                             old.attributes['occi.core.id'])
         
-        instance = self._retrieve(old, extras)
+        instance = self.retrieve(old, extras)
 
         # update attributes.
         if len(new.attributes) > 0:
@@ -526,92 +529,80 @@ class ComputeBackend(MyBackend):
                 LOG.error('Cannot update the supplied attributes.')
                 raise exc.HTTPBadRequest
 
-        # FIXME: how does this fit in terms of pyssf? Does it call update
-        # or does it know to call create?
-        #     
-        # Do we just not support inline links?
-        # This will be important to enable linking of a resource to 
-        # another inline linking. Must handle Storage and Network links.
-        #
-        # Is it a matter of calling occi.workflow?
-        if len(new.links) > 0:
-            LOG.info('Associate resource with another.')
-            raise exc.HTTPNotImplemented()
-        
         # for now we will only handle one mixin change per request
-        if len(new.mixins) == 1:
-            #Find out what the mixin is.
-            mixin = new.mixins[0]
-            # check for scale up in new
-            if isinstance(mixin, ResourceTemplate):
-                LOG.info('Resize requested')
-                # Update: libvirt now supports resize see:
-                # http://wiki.openstack.org/HypervisorSupportMatrix
-                flavor = \
-                        instance_types.get_instance_type_by_name(mixin.term)
-                kwargs = {}
-                
-                try:
-                    self.compute_api.resize(extras['nova_ctx'], instance, \
-                                        flavor_id=flavor['flavorid'], **kwargs)
-                except exception.FlavorNotFound:
-                    msg = _("Unable to locate requested flavor.")
-                    raise exc.HTTPBadRequest(explanation=msg)
-                except exception.CannotResizeToSameSize:
-                    msg = _("Resize requires a change in size.")
-                    raise exc.HTTPBadRequest(explanation=msg)
-                except exception.InstanceInvalidState:
-                    exc.HTTPConflict()
-                old.attributes['occi.compute.state'] = 'inactive'
-                #now update the mixin info
-                for m in old.mixins:
-                    if m.term == mixin.term and m.scheme == mixin.scheme:
-                        m = mixin
-                        LOG.debug('Resource template is changed: ' + m.scheme \
-                                                                    + m.term)
-                
-            # check for new os rebuild in new
-            # supported by all hypervisors
-            elif isinstance(mixin, OsTemplate):
-                LOG.info('Rebuild requested')
-                image_href = mixin.os_id
-                # L8R: Use the admin_password extension
-                admin_password = utils.generate_password(FLAGS.password_length)
-                kwargs = {}
-                
-                try:
-                    self.compute_api.rebuild(extras['nova_ctx'], instance, \
-                                         image_href, admin_password, **kwargs)
-                except exception.InstanceInvalidState:
-                    exc.HTTPConflict()
-                except exception.InstanceNotFound:
-                    msg = _("Instance could not be found")
-                    raise exc.HTTPNotFound(explanation=msg)
-                except exception.ImageNotFound:
-                    msg = _("Cannot find image for rebuild")
-                    raise exc.HTTPBadRequest(explanation=msg)
-                
-                old.attributes['occi.compute.state'] = 'inactive'                
-                #now update the mixin info
-                for m in old.mixins:
-                    if m.term == mixin.term and m.scheme == mixin.scheme:
-                        m = mixin
-                        LOG.debug('OS template is changed: ' + m.scheme + \
-                                                                        m.term)
-            else:
-                LOG.error('I\'ve no idea what this mixin is! ' + \
-                                                    mixin.scheme + mixin.term)
-                raise exc.HTTPBadRequest()
         
-        elif len(new.mixins) > 1:
-            LOG.error('Unsupported: >1 mixin received in the request.')
-            raise exc.HTTPNotImplemented()
+        # TODO: move this code out of here and then move it to the 
+        #       relevant mixin backend 
+        
+        #Find out what the mixin is.
+        mixin = new.mixins[0]
+        # check for scale up in new
+        if isinstance(mixin, ResourceTemplate):
+            LOG.info('Resize requested')
+            # Update: libvirt now supports resize see:
+            # http://wiki.openstack.org/HypervisorSupportMatrix
+            flavor = \
+                    instance_types.get_instance_type_by_name(mixin.term)
+            kwargs = {}
+            
+            try:
+                self.compute_api.resize(extras['nova_ctx'], instance, \
+                                    flavor_id=flavor['flavorid'], **kwargs)
+            except exception.FlavorNotFound:
+                msg = _("Unable to locate requested flavor.")
+                raise exc.HTTPBadRequest(explanation=msg)
+            except exception.CannotResizeToSameSize:
+                msg = _("Resize requires a change in size.")
+                raise exc.HTTPBadRequest(explanation=msg)
+            except exception.InstanceInvalidState:
+                exc.HTTPConflict()
+            old.attributes['occi.compute.state'] = 'inactive'
+            #now update the mixin info
+            for m in old.mixins:
+                if m.term == mixin.term and m.scheme == mixin.scheme:
+                    m = mixin
+                    LOG.debug('Resource template is changed: ' + m.scheme \
+                                                                + m.term)
+            
+        # check for new os rebuild in new
+        # supported by all hypervisors
+        elif isinstance(mixin, OsTemplate):
+            LOG.info('Rebuild requested')
+            image_href = mixin.os_id
+            # L8R: Use the admin_password extension
+            admin_password = utils.generate_password(FLAGS.password_length)
+            kwargs = {}
+            
+            try:
+                self.compute_api.rebuild(extras['nova_ctx'], instance, \
+                                     image_href, admin_password, **kwargs)
+            except exception.InstanceInvalidState:
+                exc.HTTPConflict()
+            except exception.InstanceNotFound:
+                msg = _("Instance could not be found")
+                raise exc.HTTPNotFound(explanation=msg)
+            except exception.ImageNotFound:
+                msg = _("Cannot find image for rebuild")
+                raise exc.HTTPBadRequest(explanation=msg)
+            
+            old.attributes['occi.compute.state'] = 'inactive'                
+            #now update the mixin info
+            for m in old.mixins:
+                if m.term == mixin.term and m.scheme == mixin.scheme:
+                    m = mixin
+                    LOG.debug('OS template is changed: ' + m.scheme + \
+                                                                    m.term)
+        else:
+            LOG.error('I\'ve no idea what this mixin is! ' + \
+                                                mixin.scheme + mixin.term)
+            raise exc.HTTPBadRequest()
+        
 
     def action(self, entity, action, extras):
         # As there is no callback mechanism to update the state  
         # of computes known by occi, a call to get the latest representation 
         # must be made.
-        instance = self._retrieve(entity, extras)
+        instance = self.retrieve(entity, extras)
 
         context = extras['nova_ctx']
 
@@ -636,9 +627,11 @@ class ComputeBackend(MyBackend):
         else:
             raise exc.HTTPBadRequest()
         
+
     def _start_vm(self, entity, instance, context):
         LOG.info('Starting virtual machine with id' + entity.identifier)
         entity.attributes['occi.compute.state'] = 'active'
+        #TODO: update these
         entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
                                                         infrastructure.RESTART]
         try:
@@ -663,6 +656,7 @@ class ComputeBackend(MyBackend):
         except Exception:
             LOG.error('Error in stopping VM')
             raise exc.HTTPServerError()
+
 
     def _restart_vm(self, entity, instance, context):
         LOG.info('Restarting virtual machine with id' + entity.identifier)
@@ -689,6 +683,7 @@ class ComputeBackend(MyBackend):
             LOG.exception(_("Error in reboot %s"), e)
             raise exc.HTTPUnprocessableEntity()
 
+
     def _suspend_vm(self, entity, instance, context):
         LOG.info('Suspending virtual machine with id' + entity.identifier)
         if entity.attributes.has_key('method'):
@@ -702,21 +697,23 @@ class ComputeBackend(MyBackend):
             LOG.error('Error in stopping VM')
             raise exc.HTTPServerError()
 
+
+    # TODO: move _os_* to their own backend
     def _os_chg_passwd_vm(self, entity, instance, context):
-        # FIXME: Use the password extension? 
-        # Review - sending the password as a POST may not be the most
-        # secure method
+        # Use the password extension? 
     
-        if 'password' not in entity.attributes:
+        #TODO: change in extension
+        if 'org.openstack.compute.password' not in entity.attributes:
             exc.HTTPBadRequest()
             
-        new_password = entity.attributes['password']
+        new_password = entity.attributes['org.openstack.compute.password']
         
         entity.attributes['occi.compute.state'] = 'active'
         entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
                                                         infrastructure.RESTART]
         
         self.compute_api.set_admin_password(context, instance, new_password)
+
 
     def _os_revert_resize_vm(self, entity, instance, context):
         LOG.info('Reverting resized virtual machine with id' \
@@ -732,6 +729,7 @@ class ComputeBackend(MyBackend):
             LOG.exception(_("Error in revert-resize %s"), e)
             raise exc.HTTPBadRequest()
 
+
     def _os_confirm_resize_vm(self, entity, instance, context):
         LOG.info('Confirming resize of virtual machine with id' + \
                                                             entity.identifier)
@@ -745,6 +743,7 @@ class ComputeBackend(MyBackend):
         except Exception as e:
             LOG.exception(_("Error in confirm-resize %s"), e)
             raise exc.HTTPBadRequest()
+
     
     def _os_create_image(self, entity, instance, context):
         #L8R: There might be a more 'occi' way of doing this
@@ -753,10 +752,10 @@ class ComputeBackend(MyBackend):
                                                             entity.identifier)
         raise exc.HTTPNotImplemented()
     
-        if 'image_name' not in entity.attributes:
+        if 'org.openstack.snapshot.image_name' not in entity.attributes:
             exc.HTTPBadRequest()
             
-        image_name = entity.attributes['image_name']
+        image_name = entity.attributes['org.openstack.snapshot.image_name']
         props = {}
 
         try:
@@ -764,7 +763,7 @@ class ComputeBackend(MyBackend):
                                               instance,
                                               image_name,
                                               extra_properties=props)
+
         except exception.InstanceInvalidState:
             exc.HTTPConflict()
-    
     

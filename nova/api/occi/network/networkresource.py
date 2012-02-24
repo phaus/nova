@@ -37,6 +37,7 @@ LOG = logging.getLogger('nova.api.occi.backends.network')
 
 FLAGS = flags.FLAGS
 
+#TODO: clean the crud out!
 
 class NetworkBackend(MyBackend):
     '''
