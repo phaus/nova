@@ -127,6 +127,7 @@ class ComputeBackend(MyBackend):
                     oc += 1
                 elif (mixin.scheme + mixin.term) == \
                                     (KEY_PAIR_EXT.scheme + KEY_PAIR_EXT.term):
+                    # TODO: see nova/api/openstack/compute/contrib/keypairs.py
                     key_name = resource.attributes \
                                 ['org.openstack.credentials.publickey.name']
                     key_data = resource.attributes \

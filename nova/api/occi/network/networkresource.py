@@ -12,12 +12,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+
 # TODO: implement create - note: this must handle either nova-network or
 #        quantum APIs - detect via flags and secondarily via import exceptions
 #       implement delete
 #       implement retreive
 #       implement actions
 #       implement updates
+
+# Also see nova/api/openstack/compute/contrib/networks.py
+
 
 from nova import flags, log as logging
 from nova.api.occi.backends import MyBackend

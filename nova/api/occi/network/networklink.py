@@ -26,6 +26,9 @@ from occi.backend import KindBackend, MixinBackend
 #           implement delete
 #           implement update
 
+# Also see nova/api/openstack/compute/contrib/multinic.py
+
+
 #Hi I'm a logger, use me! :-)
 LOG = logging.getLogger('nova.api.occi.backends.network.link')
 
