@@ -51,6 +51,9 @@ FLAGS = flags.FLAGS
 FLAGS.register_opts(occi_opts)
 
 class OpenStackOCCIRegistry(registry.NonePersistentRegistry):
+    '''
+    Simple SSF registry for OpenStack.
+    '''
 
     def add_resource(self, key, resource):
         '''
