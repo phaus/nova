@@ -19,7 +19,6 @@ from nova import wsgi
 from nova import flags
 from nova.openstack.common import cfg
 import nova.network.api
-from nova import context
 from nova.api.openstack import extensions as os_extensions
 from nova.api.occi import backends
 from nova.api.occi import extensions
