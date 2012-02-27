@@ -14,6 +14,7 @@
 
 import uuid        
 import json
+# TODO: use OCCI exceptions
 from webob import exc
 
 from nova import utils
@@ -34,8 +35,6 @@ from nova.api.occi import backends
 
 from occi.exceptions import HTTPError
 from occi.extensions import infrastructure
-
-
 from occi.core_model import Link
 
 FLAGS = flags.FLAGS
@@ -44,7 +43,7 @@ FLAGS = flags.FLAGS
 LOG = logging.getLogger('nova.api.occi.backends.compute')
 
 # pop/delete attributes on DELETE
-# TODO: use OCCI exceptions
+# TODO: move _os_* actions to their own backend
 # TODO: remove MyBackend
 class ComputeBackend(backends.MyBackend):
     '''
@@ -610,6 +609,7 @@ class ComputeBackend(backends.MyBackend):
         # As there is no callback mechanism to update the state  
         # of computes known by occi, a call to get the latest representation 
         # must be made.
+        # openstack also allows pause and unpause
         instance = self.retrieve(entity, extras)
 
         context = extras['nova_ctx']
@@ -638,6 +638,15 @@ class ComputeBackend(backends.MyBackend):
 
     def _start_vm(self, entity, instance, context):
         LOG.info('Starting virtual machine with id' + entity.identifier)
+        
+        try:
+            if entity.attributes['occi.compute.state'] == 'suspended':
+                self.compute_api.resume(context, instance)
+            else:
+                self.compute_api.start(context, instance)
+        except Exception:
+            LOG.error('Error in starting VM')
+            raise exc.HTTPServerError()
         entity.attributes['occi.compute.state'] = 'active'
         entity.actions = [infrastructure.STOP,
                           infrastructure.SUSPEND, \
@@ -645,12 +654,6 @@ class ComputeBackend(backends.MyBackend):
                           extensions.OS_REVERT_RESIZE, \
                           extensions.OS_CONFIRM_RESIZE, \
                           extensions.OS_CREATE_IMAGE]
-        try:
-            self.compute_api.start(context, instance)
-        except Exception:
-            LOG.error('Error in starting VM')
-            raise exc.HTTPServerError()
-
 
     def _stop_vm(self, entity, instance, context):
         # OCCI -> graceful, acpioff, poweroff
@@ -659,20 +662,16 @@ class ComputeBackend(backends.MyBackend):
         if entity.attributes.has_key('method'):
             LOG.info('OS only allows one type of stop. \
                             What is specified in the request will be ignored.')
-        entity.attributes['occi.compute.state'] = 'inactive'
-        entity.actions = [infrastructure.START]
         try:
             self.compute_api.stop(context, instance)
-            #self.compute_api.pause(context, instance)
         except Exception:
             LOG.error('Error in stopping VM')
             raise exc.HTTPServerError()
-
+        entity.attributes['occi.compute.state'] = 'inactive'
+        entity.actions = [infrastructure.START]
 
     def _restart_vm(self, entity, instance, context):
         LOG.info('Restarting virtual machine with id' + entity.identifier)
-        entity.attributes['occi.compute.state'] = 'inactive'
-        entity.actions = []
         # OS types == SOFT, HARD
         # OCCI -> graceful, warm and cold
         # mapping:
@@ -693,6 +692,8 @@ class ComputeBackend(backends.MyBackend):
         except Exception as e:
             LOG.exception(_("Error in reboot %s"), e)
             raise exc.HTTPUnprocessableEntity()
+        entity.attributes['occi.compute.state'] = 'inactive'
+        entity.actions = []
 
 
     def _suspend_vm(self, entity, instance, context):
@@ -700,29 +701,29 @@ class ComputeBackend(backends.MyBackend):
         if entity.attributes.has_key('method'):
             LOG.info('OS only allows one type of suspend. \
                             What is specified in the request will be ignored.')
-        entity.attributes['occi.compute.state'] = 'suspended'
-        entity.actions = [infrastructure.START]
         try:
             self.compute_api.suspend(context, instance)
         except Exception:
             LOG.error('Error in stopping VM')
             raise exc.HTTPServerError()
+        entity.attributes['occi.compute.state'] = 'suspended'
+        entity.actions = [infrastructure.START]
 
 
-    # TODO: move _os_* to their own backend
     def _os_chg_passwd_vm(self, entity, instance, context):
-        # Use the password extension? 
-    
+        # Use the password extension?
+        LOG.info('Changing admin password of virtual machine with id' \
+                                                        + entity.identifier)
         if 'org.openstack.credentials.admin_pwd' not in entity.attributes:
             exc.HTTPBadRequest()
             
         new_password = entity.attributes['org.openstack.credentials.admin_pwd']
+        self.compute_api.set_admin_password(context, instance, new_password)
         
         entity.attributes['occi.compute.state'] = 'active'
+        #TODO: update actions
         entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
                                                         infrastructure.RESTART]
-        
-        self.compute_api.set_admin_password(context, instance, new_password)
 
 
     def _os_revert_resize_vm(self, entity, instance, context):
@@ -738,6 +739,7 @@ class ComputeBackend(backends.MyBackend):
         except Exception as e:
             LOG.exception(_("Error in revert-resize %s"), e)
             raise exc.HTTPBadRequest()
+        #TODO: update actions
 
 
     def _os_confirm_resize_vm(self, entity, instance, context):
@@ -753,6 +755,7 @@ class ComputeBackend(backends.MyBackend):
         except Exception as e:
             LOG.exception(_("Error in confirm-resize %s"), e)
             raise exc.HTTPBadRequest()
+        #TODO: update actions
 
     
     def _os_create_image(self, entity, instance, context):
@@ -774,4 +777,5 @@ class ComputeBackend(backends.MyBackend):
 
         except exception.InstanceInvalidState:
             exc.HTTPConflict()
+        #TODO: update actions
     
