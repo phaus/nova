@@ -198,8 +198,6 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                     'occi.network.allocation': ''
             }
         else:
-            # get values from API. right now they reflect default
-            
             ctx = context.get_admin_context()
             authorize = os_extensions.extension_authorizer('compute', 'networks')
             authorize(ctx)
@@ -210,7 +208,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
             if networks > 0:
                 LOG.warn('There is more that one network.')
                 LOG.warn('Current implmentation assumes only one.')
-                LOG.warn('Using the first network: id' + networks[0]['id'])
+                LOG.warn('Using the first network: id' + str(networks[0]['id']))
             
             default_network.attributes = {
                     'occi.core.id': name,
