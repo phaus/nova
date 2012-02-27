@@ -48,7 +48,8 @@ class NetworkInterfaceBackend(KindBackend):
         raise exc.HTTPBadRequest()
 
     def delete(self, link, extras):
-        raise exc.HTTPBadRequest()
+        pass
+#        raise exc.HTTPBadRequest()
 #        link.attributes.pop('occi.networkinterface.state')
 #        link.attributes.pop('occi.networkinterface.mac')
 #        link.attributes.pop('occi.networkinterface.interface')
@@ -68,7 +69,8 @@ class IpNetworkInterfaceBackend(MixinBackend):
 #        link.attributes['occi.networkinterface.allocation'] = 'dynamic'
 
     def delete(self, entity, extras):
-        raise exc.HTTPBadRequest()
+        pass
+        #raise exc.HTTPBadRequest()
 #        entity.attributes.pop('occi.networkinterface.address')
 #        entity.attributes.pop('occi.networkinterface.gateway')
 #        entity.attributes.pop('occi.networkinterface.allocation')

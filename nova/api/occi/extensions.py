@@ -28,7 +28,7 @@ OS_CHG_PWD = core_model.Action(
                 'http://schemas.openstack.org/instance/action#',
                  'chg_pwd', 'Removes all data on the server and replaces' + \
                                     'it with the specified image (via Mixin).',
-                 {'password': ''})
+                 {'org.openstack.credentials.admin_pwd': ''})
 
 OS_REVERT_RESIZE = core_model.Action(
                 'http://schemas.openstack.org/instance/action#',
@@ -43,6 +43,18 @@ OS_CREATE_IMAGE = core_model.Action(
                 'http://schemas.openstack.org/instance/action#',
                  'create_image', 'Creates a new image for the given server.',
                  {'image_name': ''})
+
+# SSH Console Kind Extension
+SSH_CONSOLE_ATTRIBUTES = {'org.openstack.compute.console.ssh': '', }
+SSH_CONSOLE = core_model.Mixin(\
+    'http://schemas.openstack.org/occi/infrastructure/compute#',
+    'ssh_console', attributes=SSH_CONSOLE_ATTRIBUTES)
+
+# VNC Console Kind Extension
+VNC_CONSOLE_ATTRIBUTES = {'org.openstack.compute.console.vnc': '', }
+VNC_CONSOLE = core_model.Mixin(\
+    'http://schemas.openstack.org/occi/infrastructure/compute#',
+    'vnc_console', attributes=VNC_CONSOLE_ATTRIBUTES)
 
 # Trusted Compute Pool technology mixin definition
 TCP_ATTRIBUTES = {'eu.fi-ware.compute.tcp': '', }
@@ -63,7 +75,13 @@ ADMIN_PWD_EXT = core_model.Mixin(\
     'http://schemas.openstack.org/instance/credentials#',
     'admin_pwd', attributes=ADMIN_PWD_ATTRIBUTES)
 
-# use empty backend - kind/mixin
+# TODO: use empty backend - kind/mixin
+
+class ConsoleBackend(backend.MixinBackend):
+    '''
+    Console mixin backend handler
+    '''
+    pass
 
 class TCPBackend(backend.MixinBackend):
     '''

@@ -12,34 +12,31 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import random
 import uuid        
 import json
+from webob import exc
 
 from nova import utils
 from nova import image
 from nova import flags
 from nova import compute
-import nova.network.api
+from nova.network import api as net_api
 from nova import exception
 from nova import log as logging
 from nova.compute import task_states
 from nova.compute import vm_states
 from nova.compute import instance_types
 from nova.rpc import common as rpc_common
-import nova.policy
-from nova.api.occi.backends import MyBackend
-from nova.api.occi.extensions import ResourceTemplate, KEY_PAIR_EXT, \
-    ADMIN_PWD_EXT
-from nova.api.occi.extensions import OsTemplate
+from nova import policy
+
+from nova.api.occi import extensions
+from nova.api.occi import backends
 
 from occi.exceptions import HTTPError
 from occi.extensions import infrastructure
-from nova.api.occi import extensions
-from webob import exc
-from occi.extensions.infrastructure import NETWORKINTERFACE
+
+
 from occi.core_model import Link
-from occi.extensions.infrastructure import IPNETWORKINTERFACE
 
 FLAGS = flags.FLAGS
 
@@ -49,17 +46,17 @@ LOG = logging.getLogger('nova.api.occi.backends.compute')
 # pop/delete attributes on DELETE
 # TODO: use OCCI exceptions
 # TODO: remove MyBackend
-class ComputeBackend(MyBackend):
+class ComputeBackend(backends.MyBackend):
     '''
     A Backend for compute instances.
     '''
 
     def __init__(self):
-        
-        nova.policy.reset()
-        nova.policy.init()
+        #super(backends.MyBackend, self).__init__()
+        policy.reset()
+        policy.init()
         self.compute_api = compute.API()
-        self.network_api = nova.network.api.API()
+        self.network_api = net_api.API()
 
     def create(self, resource, extras):
 
@@ -71,9 +68,9 @@ class ComputeBackend(MyBackend):
             or ('occi.compute.speed' in resource.attributes) \
             or ('occi.compute.memory' in resource.attributes) \
             or ('occi.compute.architecture' in resource.attributes):
-                msg = 'There are unsupported attributes in the request.'
-                LOG.error(msg)
-                raise AttributeError(msg)
+            msg = 'There are unsupported attributes in the request.'
+            LOG.error(msg)
+            raise AttributeError(msg)
         
         LOG.info('Creating the virtual machine with id: ' + resource.identifier)
 
@@ -95,8 +92,6 @@ class ComputeBackend(MyBackend):
         access_ip_v4 = None
         access_ip_v6 = None
         injected_files = []
-        zone_blob = None
-        reservation_id = None
         min_count = max_count = 1
         requested_networks = None
         #L8R: would be good to specify security groups via OCCI
@@ -121,24 +116,27 @@ class ComputeBackend(MyBackend):
         if len(resource.mixins) > 0:
             rc = oc = 0
             for mixin in resource.mixins:
-                if isinstance(mixin, ResourceTemplate):
+                if isinstance(mixin, extensions.ResourceTemplate):
                     r = mixin
                     rc += 1
-                elif isinstance(mixin, OsTemplate):
+                elif isinstance(mixin, extensions.OsTemplate):
                     o = mixin
                     oc += 1
                 elif (mixin.scheme + mixin.term) == \
-                                    (KEY_PAIR_EXT.scheme + KEY_PAIR_EXT.term):
+                                    (extensions.KEY_PAIR_EXT.scheme + extensions.KEY_PAIR_EXT.term):
                     # TODO: see nova/api/openstack/compute/contrib/keypairs.py
                     key_name = resource.attributes \
                                 ['org.openstack.credentials.publickey.name']
                     key_data = resource.attributes \
                                 ['org.openstack.credentials.publickey.data']
                 elif (mixin.scheme + mixin.term) == \
-                                (ADMIN_PWD_EXT.scheme + ADMIN_PWD_EXT.term):
+                                (extensions.ADMIN_PWD_EXT.scheme + extensions.ADMIN_PWD_EXT.term):
                     password = resource.attributes \
                                         ['org.openstack.credentials.admin_pwd']
 
+            if rc < 1 and oc < 1:
+                LOG.error('No resource or OS template in the request.')
+                exc.HTTPBadRequest()
             if rc > 1:
                 msg = 'There is more than one resource template in the request'
                 LOG.error(msg)
@@ -147,8 +145,6 @@ class ComputeBackend(MyBackend):
                 msg = 'There is more than one OS template in the request'
                 LOG.error(msg)
                 raise AttributeError(msg=unicode(msg))
-            
-            # TODO: if rc & oc != 1 all is well
             
             flavor_name = r.term
             os_tpl_url = o.os_id
@@ -186,8 +182,6 @@ class ComputeBackend(MyBackend):
                                     metadata=metadata,
                                     injected_files=injected_files,
                                     admin_password=password,
-                                    zone_blob=zone_blob,
-                                    reservation_id=reservation_id,
                                     block_device_mapping=block_device_mapping,
                                     access_ip_v4=access_ip_v4,
                                     access_ip_v6=access_ip_v6,
@@ -197,7 +191,6 @@ class ComputeBackend(MyBackend):
                                     scheduler_hints=scheduler_hints)
             
         except exception.QuotaError as error:
-            #TODO: import this 
             self._handle_quota_error(error)
         except exception.InstanceTypeMemoryTooSmall as error:
             raise exc.HTTPBadRequest(explanation=unicode(error))
@@ -249,15 +242,17 @@ class ComputeBackend(MyBackend):
         vm_net_info = self._get_adapter_info(instances[0], extras, True)
         self._attach_to_default_network(vm_net_info, resource, extras)
         
-        self._get_console_info(instances[0], resource, extras)
+        self._get_console_info(resource)
         
         #set valid actions
-        resource.actions = [infrastructure.STOP, \
-                              infrastructure.SUSPEND, \
-                              infrastructure.RESTART, \
-                              extensions.OS_CHG_PWD, \
-                              extensions.OS_CREATE_IMAGE]
+        resource.actions = [infrastructure.STOP,
+                          infrastructure.SUSPEND, \
+                          infrastructure.RESTART, \
+                          extensions.OS_REVERT_RESIZE, \
+                          extensions.OS_CONFIRM_RESIZE, \
+                          extensions.OS_CREATE_IMAGE]
         
+
     def _get_vm_arch(self, context, os_template_mixin):
 
         # Extract architecture from either: 
@@ -343,9 +338,8 @@ class ComputeBackend(MyBackend):
         
         # If the network association does not exist...        
         # Get a handle to the default network
-        # Could use occi.workflow for this
         # TODO: use occi.workflow
-        # TODO: remove registry from extras
+        #       this will remove need of registry in extras
         registry = extras['registry']
         default_network = registry.get_resource('/network/DEFAULT_NETWORK')
         source = resource
@@ -353,8 +347,8 @@ class ComputeBackend(MyBackend):
 
         # Create the link to the default network
         identifier = str(uuid.uuid4())
-        link = Link(identifier, NETWORKINTERFACE, [IPNETWORKINTERFACE], \
-                                                            source, target)
+        link = Link(identifier, infrastructure.NETWORKINTERFACE, \
+                    [infrastructure.IPNETWORKINTERFACE], source, target)
         link.attributes['occi.core.id'] = identifier 
         link.attributes['occi.networkinterface.interface'] = vm_net_info['vm_iface']
         #TODO: mac address info is not available
@@ -362,25 +356,43 @@ class ComputeBackend(MyBackend):
         link.attributes['occi.networkinterface.state'] = 'active'
         link.attributes['occi.networkinterface.address'] = vm_net_info['address']
         link.attributes['occi.networkinterface.gateway'] = vm_net_info['gateway']
-        #TODO: set this based on data not by default
+        #TODO: set this based on API not by default
         link.attributes['occi.networkinterface.allocation'] = 'dhcp'
         
         resource.links.append(link)
         
         registry.add_resource(identifier, link)
     
-    def _get_console_info(self, instance, resource, extras):
-        #TODO implement me! Note needs pyssf support
-        #     otherwise implement Kind
-        #Ensure only one ssh console link exists
-#        target = 'ssh://' + address + ':22'
-#        identifier = str(uuid.uuid4())
-#        sshlink = Link(identifier, Link.kind, [], source, target)
-#        sshlink.attributes['occi.core.id'] = identifier
-#        resource.links.append(sshlink)
-        pass
+    def _get_console_info(self, resource):
+        #L8R: There are assumptions here about port numbers, URL fragments
+        address = resource.links[0].attributes['occi.networkinterface.address']
+        
+        ssh_console_present = False
+        vnc_console_present = False
+        for mixin in resource.mixins:
+            if mixin.term == "ssh_console" and mixin.scheme \
+                == "http://schemas.openstack.org/occi/infrastructure/compute#":
+                resource.attributes['org.openstack.compute.console.ssh'] = \
+                                                    'ssh://' + address + ':22'
+                ssh_console_present = True
+            elif mixin.term == "vnc_console" and mixin.scheme \
+                == "http://schemas.openstack.org/occi/infrastructure/compute#":
+                resource.attributes['org.openstack.compute.console.vnc'] = \
+                                                    'http://' + address + ':80'
+                vnc_console_present = True
+        
+        if not ssh_console_present:
+            resource.attributes['org.openstack.compute.console.ssh'] = \
+                                                    'ssh://' + address + ':22'
+            resource.mixins.append(extensions.SSH_CONSOLE)
+        
+        if not vnc_console_present:
+            resource.attributes['org.openstack.compute.console.vnc'] = \
+                                                    'http://' + address + ':22'
+            resource.mixins.append(extensions.VNC_CONSOLE)
     
-    #TODO: Note this is a direct lift from nova/api/openstack/compute/servers.py
+    # Note this is a direct lift from nova/api/openstack/compute/servers.py
+    # however as it is protected we cannot import it :-(
     def _handle_quota_error(self, error):
         """
         Reraise quota errors as api-specific http exceptions
@@ -408,11 +420,8 @@ class ComputeBackend(MyBackend):
         
         uid = entity.attributes['occi.core.id']
         
-        #if uid.find(entity.kind.location) > -1:
-        #    uid = uid.replace(entity.kind.location, '')
-  
         try:
-            instance = self.compute_api.routing_get(context, uid)
+            instance = self.compute_api.get(context, uid)
         except exception.NotFound:
             raise exc.HTTPNotFound()
         
@@ -483,6 +492,7 @@ class ComputeBackend(MyBackend):
         #Now we have the instance state, get its updated network info
         vm_net_info = self._get_adapter_info(instance, extras)
         self._attach_to_default_network(vm_net_info, entity, extras)
+        self._get_console_info(entity)
         
         return instance
 
@@ -495,7 +505,7 @@ class ComputeBackend(MyBackend):
         uid = entity.attributes['occi.core.id']
         
         try:
-            instance = self.compute_api.routing_get(context, uid)
+            instance = self.compute_api.get(context, uid)
         except exception.NotFound:
             raise exc.HTTPNotFound()
         
@@ -503,6 +513,7 @@ class ComputeBackend(MyBackend):
             self.compute_api.soft_delete(context, instance)
         else:
             self.compute_api.delete(context, instance)
+
 
     def update(self, old, new, extras):
         
@@ -531,72 +542,69 @@ class ComputeBackend(MyBackend):
 
         # for now we will only handle one mixin change per request
         
-        # TODO: move this code out of here and then move it to the 
-        #       relevant mixin backend 
-        
         #Find out what the mixin is.
         mixin = new.mixins[0]
         # check for scale up in new
-        if isinstance(mixin, ResourceTemplate):
-            LOG.info('Resize requested')
-            # Update: libvirt now supports resize see:
-            # http://wiki.openstack.org/HypervisorSupportMatrix
-            flavor = \
-                    instance_types.get_instance_type_by_name(mixin.term)
-            kwargs = {}
-            
-            try:
-                self.compute_api.resize(extras['nova_ctx'], instance, \
-                                    flavor_id=flavor['flavorid'], **kwargs)
-            except exception.FlavorNotFound:
-                msg = _("Unable to locate requested flavor.")
-                raise exc.HTTPBadRequest(explanation=msg)
-            except exception.CannotResizeToSameSize:
-                msg = _("Resize requires a change in size.")
-                raise exc.HTTPBadRequest(explanation=msg)
-            except exception.InstanceInvalidState:
-                exc.HTTPConflict()
-            old.attributes['occi.compute.state'] = 'inactive'
-            #now update the mixin info
-            for m in old.mixins:
-                if m.term == mixin.term and m.scheme == mixin.scheme:
-                    m = mixin
-                    LOG.debug('Resource template is changed: ' + m.scheme \
-                                                                + m.term)
+        if isinstance(mixin, extensions.ResourceTemplate):
+            self._os_resize_vm(old, extras, instance, mixin)
             
         # check for new os rebuild in new
         # supported by all hypervisors
-        elif isinstance(mixin, OsTemplate):
-            LOG.info('Rebuild requested')
-            image_href = mixin.os_id
-            # L8R: Use the admin_password extension
-            admin_password = utils.generate_password(FLAGS.password_length)
-            kwargs = {}
-            
-            try:
-                self.compute_api.rebuild(extras['nova_ctx'], instance, \
-                                     image_href, admin_password, **kwargs)
-            except exception.InstanceInvalidState:
-                exc.HTTPConflict()
-            except exception.InstanceNotFound:
-                msg = _("Instance could not be found")
-                raise exc.HTTPNotFound(explanation=msg)
-            except exception.ImageNotFound:
-                msg = _("Cannot find image for rebuild")
-                raise exc.HTTPBadRequest(explanation=msg)
-            
-            old.attributes['occi.compute.state'] = 'inactive'                
-            #now update the mixin info
-            for m in old.mixins:
-                if m.term == mixin.term and m.scheme == mixin.scheme:
-                    m = mixin
-                    LOG.debug('OS template is changed: ' + m.scheme + \
-                                                                    m.term)
+        elif isinstance(mixin, extensions.OsTemplate):
+            self._os_rebuild_vm(old, extras, instance, mixin)
         else:
             LOG.error('I\'ve no idea what this mixin is! ' + \
                                                 mixin.scheme + mixin.term)
             raise exc.HTTPBadRequest()
         
+    def _os_resize_vm(self, old, extras, instance, mixin):
+        LOG.info('Resize requested') 
+        # Update: libvirt now supports resize see:
+        # http://wiki.openstack.org/HypervisorSupportMatrix
+        flavor = instance_types.get_instance_type_by_name(mixin.term)
+        kwargs = {}
+        try:
+            self.compute_api.resize(extras['nova_ctx'], instance, \
+                                        flavor_id=flavor['flavorid'], **kwargs)
+        except exception.FlavorNotFound:
+            msg = _("Unable to locate requested flavor.")
+            raise exc.HTTPBadRequest(explanation=msg)
+        except exception.CannotResizeToSameSize:
+            msg = _("Resize requires a change in size.")
+            raise exc.HTTPBadRequest(explanation=msg)
+        except exception.InstanceInvalidState:
+            exc.HTTPConflict()
+        old.attributes['occi.compute.state'] = 'inactive'
+        #now update the mixin info
+        for m in old.mixins:
+            if m.term == mixin.term and m.scheme == mixin.scheme:
+                m = mixin
+                LOG.debug('Resource template is changed: ' + m.scheme + m.term)
+
+
+    def _os_rebuild_vm(self, old, extras, instance, mixin):
+        LOG.info('Rebuild requested')
+        image_href = mixin.os_id # L8R: Use the admin_password extension
+        admin_password = utils.generate_password(FLAGS.password_length)
+        kwargs = {}
+        try:
+            self.compute_api.rebuild(extras['nova_ctx'], instance, \
+                                        image_href, admin_password, **kwargs)
+        except exception.InstanceInvalidState:
+            exc.HTTPConflict()
+        except exception.InstanceNotFound:
+            msg = _("Instance could not be found")
+            raise exc.HTTPNotFound(explanation=msg)
+        except exception.ImageNotFound:
+            msg = _("Cannot find image for rebuild")
+            raise exc.HTTPBadRequest(explanation=msg)
+        old.attributes['occi.compute.state'] = 'inactive'
+        #now update the mixin info
+        for m in old.mixins:
+            if m.term == mixin.term and m.scheme == mixin.scheme:
+                m = mixin
+                LOG.debug('OS template is changed: ' + m.scheme + m.term)
+
 
     def action(self, entity, action, extras):
         # As there is no callback mechanism to update the state  
@@ -631,9 +639,12 @@ class ComputeBackend(MyBackend):
     def _start_vm(self, entity, instance, context):
         LOG.info('Starting virtual machine with id' + entity.identifier)
         entity.attributes['occi.compute.state'] = 'active'
-        #TODO: update these
-        entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
-                                                        infrastructure.RESTART]
+        entity.actions = [infrastructure.STOP,
+                          infrastructure.SUSPEND, \
+                          infrastructure.RESTART, \
+                          extensions.OS_REVERT_RESIZE, \
+                          extensions.OS_CONFIRM_RESIZE, \
+                          extensions.OS_CREATE_IMAGE]
         try:
             self.compute_api.start(context, instance)
         except Exception:
@@ -702,11 +713,10 @@ class ComputeBackend(MyBackend):
     def _os_chg_passwd_vm(self, entity, instance, context):
         # Use the password extension? 
     
-        #TODO: change in extension
-        if 'org.openstack.compute.password' not in entity.attributes:
+        if 'org.openstack.credentials.admin_pwd' not in entity.attributes:
             exc.HTTPBadRequest()
             
-        new_password = entity.attributes['org.openstack.compute.password']
+        new_password = entity.attributes['org.openstack.credentials.admin_pwd']
         
         entity.attributes['occi.compute.state'] = 'active'
         entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
@@ -750,8 +760,6 @@ class ComputeBackend(MyBackend):
         #     e.g. a POST against /-/
         LOG.info('Creating image from virtual machine with id' + \
                                                             entity.identifier)
-        raise exc.HTTPNotImplemented()
-    
         if 'org.openstack.snapshot.image_name' not in entity.attributes:
             exc.HTTPBadRequest()
             
@@ -759,10 +767,10 @@ class ComputeBackend(MyBackend):
         props = {}
 
         try:
-            image = self.compute_api.snapshot(context,
-                                              instance,
-                                              image_name,
-                                              extra_properties=props)
+            self.compute_api.snapshot(context,
+                                      instance,
+                                      image_name,
+                                      extra_properties=props)
 
         except exception.InstanceInvalidState:
             exc.HTTPConflict()

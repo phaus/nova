@@ -135,6 +135,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         networkinterface_backend = networklink.NetworkInterfaceBackend()
         admin_password_backend = extensions.AdminPasswordBackend()
         key_pair_backend = extensions.KeyPairBackend()
+        console_backend = extensions.ConsoleBackend()
 
         # register kinds with backends
         self.register_backend(infrastructure.COMPUTE, compute_backend)
@@ -171,6 +172,8 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         # OS-OCCI Mixin extensions
         self.register_backend(extensions.ADMIN_PWD_EXT, admin_password_backend)
         self.register_backend(extensions.KEY_PAIR_EXT, key_pair_backend)
+        self.register_backend(extensions.SSH_CONSOLE, console_backend)
+        self.register_backend(extensions.VNC_CONSOLE, console_backend)
         
         #This must be done as by default OpenStack has a default network
         # to which all new VM instances are attached.
