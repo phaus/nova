@@ -20,8 +20,7 @@ from nova import volume
 from nova import compute
 
 from occi.backend import KindBackend
-from occi.extensions.infrastructure import STORAGE
-from occi.extensions.infrastructure import COMPUTE
+from occi.extensions import infrastructure
 
 from webob import exc
 
@@ -58,10 +57,10 @@ class StorageLinkBackend(KindBackend):
   
     
     def _get_vol_to_attach(self, context, link):
-        if link.target.kind == STORAGE:
+        if link.target.kind == infrastructure.STORAGE:
             vol_to_attach = self.volume_api.get(context, \
                                         link.target.attributes['occi.core.id'])
-        elif link.source.kind == STORAGE:
+        elif link.source.kind == infrastructure.STORAGE:
             vol_to_attach = self.volume_api.get(context, \
                                         link.source.attributes['occi.core.id'])
         else:
@@ -72,11 +71,11 @@ class StorageLinkBackend(KindBackend):
     
     def _get_inst_to_attach(self, context, link):
         # it's instance_id not UUID
-        if link.target.kind == COMPUTE:
-            instance = self.compute_api.routing_get(context, \
+        if link.target.kind == infrastructure.COMPUTE:
+            instance = self.compute_api.get(context, \
                                         link.target.attributes['occi.core.id'])
-        elif link.source.kind == COMPUTE:
-            instance = self.compute_api.routing_get(context, \
+        elif link.source.kind == infrastructure.COMPUTE:
+            instance = self.compute_api.get(context, \
                                         link.source.attributes['occi.core.id'])
         else:
             raise exc.HTTPBadRequest()

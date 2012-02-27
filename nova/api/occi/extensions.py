@@ -76,7 +76,6 @@ ADMIN_PWD_EXT = core_model.Mixin(\
     'admin_pwd', attributes=ADMIN_PWD_ATTRIBUTES)
 
 # TODO: use empty backend - kind/mixin
-
 class ConsoleBackend(backend.MixinBackend):
     '''
     Console mixin backend handler
@@ -88,13 +87,6 @@ class TCPBackend(backend.MixinBackend):
     Trusted Compute Pool technology mixin backend handler
     '''
     pass
-#    def create(self, entity, extras):
-#        if not entity.kind == infrastructure.COMPUTE:
-#            raise AttributeError('This mixin cannot be applied to this kind.')
-#        entity.attributes['eu.fi-ware.compute.tcp'] = 'true'
-#
-#    def delete(self, entity, extras):
-#        entity.attributes.pop('eu.fi-ware.compute.tcp')
 
 class KeyPairBackend(backend.MixinBackend):
     '''

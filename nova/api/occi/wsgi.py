@@ -18,7 +18,7 @@ from nova import log
 from nova import wsgi
 from nova import flags
 from nova.openstack.common import cfg
-import nova.network.api
+from nova.network import api as net_api
 from nova.api.openstack import extensions as os_extensions
 from nova.api.occi import backends
 from nova.api.occi import extensions
@@ -205,8 +205,8 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
             authorize = os_extensions.extension_authorizer('compute', 'networks')
             authorize(ctx)
             
-            self.network_api = nova.network.api.API()
-            networks = self.network_api.get_all(ctx)
+            network_api = net_api.API()
+            networks = network_api.get_all(ctx)
             
             if networks > 0:
                 LOG.warn('There is more that one network.')

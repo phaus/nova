@@ -103,7 +103,6 @@ class StorageBackend(backends.MyBackend):
         if new_volume['status'] == 'available':
             resource.attributes['occi.storage.state'] = 'online'
         
-        # TODO: fix imports e.g. infra.OFFLINE
         resource.actions = [infrastructure.OFFLINE, infrastructure.BACKUP, \
                             infrastructure.SNAPSHOT, infrastructure.RESIZE]
 
@@ -132,7 +131,7 @@ class StorageBackend(backends.MyBackend):
 
     def delete(self, entity, extras):
         # call the management framework to delete this storage instance...
-        print('Removing storage device with id: ' + entity.identifier)
+        LOG.info('Removing storage device with id: ' + entity.identifier)
         
         volume_id = int(entity.attributes['occi.core.id'])
         
@@ -155,7 +154,7 @@ class StorageBackend(backends.MyBackend):
             
             # By default storage is ONLINE and can not be brought OFFLINE
             
-            LOG.warn('Online storage requested resource with id: ' + \
+            LOG.warn('Online storage action requested resource with id: ' + \
                                                             entity.identifier)
             raise exc.HTTPBadRequest()
             
@@ -165,14 +164,14 @@ class StorageBackend(backends.MyBackend):
             # self.volume_api.terminate_connection(context, volume, connector)
             
             # By default storage cannot be brought OFFLINE
-            LOG.warn('Offline storage requested resource with id: ' + \
+            LOG.warn('Offline storage action requested resource with id: ' + \
                                                             entity.identifier)
             raise exc.HTTPBadRequest()
             
         elif action == infrastructure.BACKUP: #CDMI?!
             # L8R: Same as a snapshot? unclear - bad request for now.
             # BACKUP: create a complete copy of the volume.
-            print('Backing up...storage resource with id: '
+            LOG.warn('Backup action ...storage resource with id: '
                   + entity.identifier)
             raise exc.HTTPBadRequest()
             #self._snapshot_storage(entity, extras)
@@ -187,7 +186,7 @@ class StorageBackend(backends.MyBackend):
             # RESIZE: increase, decrease size of volume. Not supported directly
             #         by the API
             
-            LOG.warn('Resize storage requested resource with id: ' + \
+            LOG.warn('Resize storage actio requested resource with id: ' + \
                                                             entity.identifier)
             raise exc.HTTPNotImplemented()
     
@@ -212,7 +211,7 @@ class StorageBackend(backends.MyBackend):
         # L8R: this is the same code taken from computeresource.
         # update attributes.
         if len(new.attributes) > 0:
-            LOG.info('Updating mutable attributes of instance')
+            LOG.info('Updating mutable attributes of volume instance')
             # support only title and summary changes now.
             if ('occi.core.title' in new.attributes) \
                                     or ('occi.core.title' in new.attributes):
