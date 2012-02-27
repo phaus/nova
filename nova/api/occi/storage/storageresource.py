@@ -18,9 +18,8 @@ import random
 from nova import exception
 from nova import log as logging 
 from nova import volume
-from nova.api.occi.backends import MyBackend
-from occi.extensions.infrastructure import ONLINE, BACKUP, SNAPSHOT, RESIZE, \
-    OFFLINE
+from nova.api.occi import backends
+from occi.extensions import infrastructure
 from webob import exc
 
 
@@ -36,7 +35,7 @@ LOG = logging.getLogger('nova.api.occi.backends.storage')
 #NOTE: for this to operate the nova-vol service must be running
 # TODO: remove MyBackend
 # pop/delete attributes on DELETE
-class StorageBackend(MyBackend):
+class StorageBackend(backends.MyBackend):
     '''
     Backend to handle storage resources.
     '''
@@ -105,20 +104,19 @@ class StorageBackend(MyBackend):
             resource.attributes['occi.storage.state'] = 'online'
         
         # TODO: fix imports e.g. infra.OFFLINE
-        resource.actions = [OFFLINE, BACKUP, SNAPSHOT, RESIZE]
+        resource.actions = [infrastructure.OFFLINE, infrastructure.BACKUP, \
+                            infrastructure.SNAPSHOT, infrastructure.RESIZE]
 
 
     def retrieve(self, entity, extras):
+        
         v_id = int(entity.attributes['occi.core.id'])
         
-        # handle the case where the volume id is not an integer and is a uuid
-        if v_id.is_integer():
-            volume_id = v_id
-        else:
-            volume_id = entity.attributes['occi.core.id']
+        # L8R: handle the case where the volume id is not an integer 
+        #       and is a uuid
         
         try:
-            vol = self.volume_api.get(extras['nova_ctx'], volume_id)
+            vol = self.volume_api.get(extras['nova_ctx'], v_id)
         except exception.NotFound:
             raise exc.HTTPNotFound()
 
@@ -128,7 +126,8 @@ class StorageBackend(MyBackend):
         #       available, creating, deleting, in-use, error, error_deleting
         if vol['status'] == 'available' or vol['status'] == 'in-use':
             entity.attributes['occi.storage.state'] = 'online'
-            entity.actions = [OFFLINE, BACKUP, SNAPSHOT, RESIZE]
+            entity.actions = [infrastructure.OFFLINE, infrastructure.BACKUP, \
+                              infrastructure.SNAPSHOT, infrastructure.RESIZE]
             
 
     def delete(self, entity, extras):
@@ -148,7 +147,7 @@ class StorageBackend(MyBackend):
         if action not in entity.actions:
             raise AttributeError("This action is currently no applicable.")
         
-        elif action == ONLINE:
+        elif action == infrastructure.ONLINE:
             # ONLINE, ready for service, default state of a created volume.
             # could this cover the attach functionality in storage link?
             # The following is not an approach to use:
@@ -160,7 +159,7 @@ class StorageBackend(MyBackend):
                                                             entity.identifier)
             raise exc.HTTPBadRequest()
             
-        elif action == OFFLINE:
+        elif action == infrastructure.OFFLINE:
             # OFFLINE, disconnected? disconnection supported in API otherwise
             # not. The following is not an approach to use:
             # self.volume_api.terminate_connection(context, volume, connector)
@@ -170,20 +169,20 @@ class StorageBackend(MyBackend):
                                                             entity.identifier)
             raise exc.HTTPBadRequest()
             
-        elif action == BACKUP: #CDMI?!
-            # FIXME: Same as a snapshot?
+        elif action == infrastructure.BACKUP: #CDMI?!
+            # L8R: Same as a snapshot? unclear - bad request for now.
             # BACKUP: create a complete copy of the volume.
             print('Backing up...storage resource with id: '
                   + entity.identifier)
             raise exc.HTTPBadRequest()
             #self._snapshot_storage(entity, extras)
             
-        elif action == SNAPSHOT: #CDMI?!
+        elif action == infrastructure.SNAPSHOT: #CDMI?!
             # SNAPSHOT: create a time-stamped copy of the volume? Supported in 
             # OS volume API
             self._snapshot_storage(entity, extras)
 
-        elif action == RESIZE:
+        elif action == infrastructure.RESIZE:
             # L8R: not supported by API. Patch to OS?
             # RESIZE: increase, decrease size of volume. Not supported directly
             #         by the API
@@ -197,7 +196,7 @@ class StorageBackend(MyBackend):
         LOG.info('Snapshoting...storage resource with id: ' + \
                                                             entity.identifier)
         volume_id = int(entity.attributes['occi.core.id'])
-        volume = self.volume_api.get(extras['nova_ctx'], volume_id)
+        vol = self.volume_api.get(extras['nova_ctx'], volume_id)
         if backup:
             name = 'backup name'
             description = 'backup description'
@@ -206,11 +205,11 @@ class StorageBackend(MyBackend):
             name = 'snapshot name'
             description = 'snapshot description'
         self.volume_api.create_snapshot(extras['nova_ctx'],
-                                        volume, name, description)        
+                                        vol, name, description)        
 
 
     def update(self, old, new, extras):
-        # FIXME: this is the same code taken from computeresource.
+        # L8R: this is the same code taken from computeresource.
         # update attributes.
         if len(new.attributes) > 0:
             LOG.info('Updating mutable attributes of instance')
