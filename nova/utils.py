@@ -24,8 +24,8 @@ import datetime
 import functools
 import hashlib
 import inspect
+import itertools
 import json
-import lockfile
 import os
 import pyclbr
 import random
@@ -44,6 +44,8 @@ from eventlet import event
 from eventlet import greenthread
 from eventlet import semaphore
 from eventlet.green import subprocess
+import iso8601
+import lockfile
 import netaddr
 
 from nova import exception
@@ -53,7 +55,7 @@ from nova.openstack.common import cfg
 
 
 LOG = logging.getLogger(__name__)
-ISO_TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+ISO_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S"
 PERFECT_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%f"
 FLAGS = flags.FLAGS
 
@@ -534,13 +536,27 @@ def parse_strtime(timestr, fmt=PERFECT_TIME_FORMAT):
 
 
 def isotime(at=None):
-    """Returns iso formatted utcnow."""
-    return strtime(at, ISO_TIME_FORMAT)
+    """Stringify time in ISO 8601 format"""
+    if not at:
+        at = datetime.datetime.utcnow()
+    str = at.strftime(ISO_TIME_FORMAT)
+    tz = at.tzinfo.tzname(None) if at.tzinfo else 'UTC'
+    str += ('Z' if tz == 'UTC' else tz)
+    return str
 
 
 def parse_isotime(timestr):
     """Turn an iso formatted time back into a datetime."""
-    return parse_strtime(timestr, ISO_TIME_FORMAT)
+    try:
+        return iso8601.parse_date(timestr)
+    except (iso8601.ParseError, TypeError) as e:
+        raise ValueError(e.message)
+
+
+def normalize_time(timestamp):
+    """Normalize time in arbitrary timezone to UTC"""
+    offset = timestamp.utcoffset()
+    return timestamp.replace(tzinfo=None) - offset if offset else timestamp
 
 
 def parse_mailmap(mailmap='.mailmap'):
@@ -654,11 +670,8 @@ class LoopingCall(object):
 def xhtml_escape(value):
     """Escapes a string so it is valid within XML or XHTML.
 
-    Code is directly from the utf8 function in
-    http://github.com/facebook/tornado/blob/master/tornado/escape.py
-
     """
-    return saxutils.escape(value, {'"': '&quot;'})
+    return saxutils.escape(value, {'"': '&quot;', "'": '&apos;'})
 
 
 def utf8(value):
@@ -696,6 +709,11 @@ def to_primitive(value, convert_instances=False, level=0):
     for test in nasty:
         if test(value):
             return unicode(value)
+
+    # value of itertools.count doesn't get caught by inspects
+    # above and results in infinite loop when list(value) is called.
+    if type(value) == itertools.count:
+        return unicode(value)
 
     # FIXME(vish): Workaround for LP bug 852095. Without this workaround,
     #              tests that raise an exception in a mocked method that
@@ -837,6 +855,89 @@ def synchronized(name, external=False):
             return retval
         return inner
     return wrap
+
+
+def cleanup_file_locks():
+    """clean up stale locks left behind by process failures
+
+    The lockfile module, used by @synchronized, can leave stale lockfiles
+    behind after process failure. These locks can cause process hangs
+    at startup, when a process deadlocks on a lock which will never
+    be unlocked.
+
+    Intended to be called at service startup.
+
+    """
+
+    # NOTE(mikeyp) this routine incorporates some internal knowledge
+    #              from the lockfile module, and this logic really
+    #              should be part of that module.
+    #
+    # cleanup logic:
+    # 1) look for the lockfile modules's 'sentinel' files, of the form
+    #    hostname.[thread-.*]-pid, extract the pid.
+    #    if pid doesn't match a running process, delete the file since
+    #    it's from a dead process.
+    # 2) check for the actual lockfiles. if lockfile exists with linkcount
+    #    of 1, it's bogus, so delete it. A link count >= 2 indicates that
+    #    there are probably sentinels still linked to it from active
+    #    processes.  This check isn't perfect, but there is no way to
+    #    reliably tell which sentinels refer to which lock in the
+    #    lockfile implementation.
+
+    if  FLAGS.disable_process_locking:
+        return
+
+    hostname = socket.gethostname()
+    sentinel_re = hostname + r'\..*-(\d+$)'
+    lockfile_re = r'nova-.*\.lock'
+    files = os.listdir(FLAGS.lock_path)
+
+    # cleanup sentinels
+    for filename in files:
+        match = re.match(sentinel_re, filename)
+        if match is None:
+            continue
+        pid = match.group(1)
+        LOG.debug(_('Found sentinel %(filename)s for pid %(pid)s' %
+                    {'filename': filename, 'pid': pid}))
+        if not os.path.exists(os.path.join('/proc', pid)):
+            delete_if_exists(os.path.join(FLAGS.lock_path, filename))
+            LOG.debug(_('Cleaned sentinel %(filename)s for pid %(pid)s' %
+                        {'filename': filename, 'pid': pid}))
+
+    # cleanup lock files
+    for filename in files:
+        match = re.match(lockfile_re, filename)
+        if match is None:
+            continue
+        try:
+            stat_info = os.stat(os.path.join(FLAGS.lock_path, filename))
+        except OSError as (errno, strerror):
+            if errno == 2:  # doesn't exist
+                continue
+            else:
+                raise
+        msg = _('Found lockfile %(file)s with link count %(count)d' %
+                {'file': filename, 'count': stat_info.st_nlink})
+        LOG.debug(msg)
+        if stat_info.st_nlink == 1:
+            delete_if_exists(os.path.join(FLAGS.lock_path, filename))
+            msg = _('Cleaned lockfile %(file)s with link count %(count)d' %
+                    {'file': filename, 'count': stat_info.st_nlink})
+            LOG.debug(msg)
+
+
+def delete_if_exists(pathname):
+    """delete a file, but ignore file not found error"""
+
+    try:
+        os.unlink(pathname)
+    except OSError as (errno, strerror):
+        if errno == 2:  # doesn't exist
+            return
+        else:
+            raise
 
 
 def get_from_path(items, path):
@@ -1118,8 +1219,10 @@ def save_and_reraise_exception():
     try:
         yield
     except Exception:
-        LOG.exception(_('Original exception being dropped'),
-                      exc_info=(type_, value, traceback))
+        # NOTE(jkoelker): Using LOG.error here since it accepts exc_info
+        #                 as a kwargs.
+        LOG.error(_('Original exception being dropped'),
+                  exc_info=(type_, value, traceback))
         raise
     raise type_, value, traceback
 

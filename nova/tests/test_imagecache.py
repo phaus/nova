@@ -17,7 +17,9 @@
 #    under the License.
 
 
+import cStringIO
 import hashlib
+import logging
 import os
 import shutil
 import tempfile
@@ -27,7 +29,9 @@ from nova import test
 
 from nova import db
 from nova import flags
-from nova import log as logging
+from nova import log
+from nova import image
+from nova import utils
 from nova.virt.libvirt import imagecache
 from nova.virt.libvirt import utils as virtutils
 
@@ -35,10 +39,17 @@ from nova.virt.libvirt import utils as virtutils
 flags.DECLARE('instances_path', 'nova.compute.manager')
 FLAGS = flags.FLAGS
 
-LOG = logging.getLogger(__name__)
+LOG = log.getLogger(__name__)
 
 
 class ImageCacheManagerTestCase(test.TestCase):
+
+    def setUp(self):
+        super(ImageCacheManagerTestCase, self).setUp()
+        self.stock_instance_names = {'instance-00000001': '123',
+                                     'instance-00000002': '456',
+                                     'instance-00000003': '789',
+                                     'banana-42-hamster': '444'}
 
     def test_read_stored_checksum_missing(self):
         self.stubs.Set(os.path, 'exists', lambda x: False)
@@ -113,13 +124,16 @@ class ImageCacheManagerTestCase(test.TestCase):
         self.stubs.Set(db, 'instance_get_all',
                        lambda x: [{'image_ref': 'image-1',
                                    'host': FLAGS.host,
-                                   'name': 'inst-1'},
+                                   'name': 'inst-1',
+                                   'uuid': '123'},
                                   {'image_ref': 'image-2',
                                    'host': FLAGS.host,
-                                   'name': 'inst-2'},
+                                   'name': 'inst-2',
+                                   'uuid': '456'},
                                   {'image_ref': 'image-2',
                                    'host': 'remotehost',
-                                   'name': 'inst-3'}])
+                                   'name': 'inst-3',
+                                   'uuid': '789'}])
 
         image_cache_manager = imagecache.ImageCacheManager()
 
@@ -150,6 +164,7 @@ class ImageCacheManagerTestCase(test.TestCase):
 
         image_cache_manager = imagecache.ImageCacheManager()
         image_cache_manager.unexplained_images = [found]
+        image_cache_manager.instance_names = self.stock_instance_names
 
         inuse_images = image_cache_manager._list_backing_images()
 
@@ -172,6 +187,27 @@ class ImageCacheManagerTestCase(test.TestCase):
 
         image_cache_manager = imagecache.ImageCacheManager()
         image_cache_manager.unexplained_images = [found]
+        image_cache_manager.instance_names = self.stock_instance_names
+
+        inuse_images = image_cache_manager._list_backing_images()
+
+        self.assertEquals(inuse_images, [found])
+        self.assertEquals(len(image_cache_manager.unexplained_images), 0)
+
+    def test_list_backing_images_instancename(self):
+        self.stubs.Set(os, 'listdir',
+                       lambda x: ['_base', 'banana-42-hamster'])
+        self.stubs.Set(os.path, 'exists',
+                       lambda x: x.find('banana-42-hamster') != -1)
+        self.stubs.Set(virtutils, 'get_disk_backing_file',
+                       lambda x: 'e97222e91fc4241f49a7f520d1dcf446751129b3_sm')
+
+        found = os.path.join(FLAGS.instances_path, '_base',
+                             'e97222e91fc4241f49a7f520d1dcf446751129b3_sm')
+
+        image_cache_manager = imagecache.ImageCacheManager()
+        image_cache_manager.unexplained_images = [found]
+        image_cache_manager.instance_names = self.stock_instance_names
 
         inuse_images = image_cache_manager._list_backing_images()
 
@@ -245,10 +281,21 @@ class ImageCacheManagerTestCase(test.TestCase):
                                 (base_file2, True, False),
                                 (base_file3, False, True)])
 
+    def _intercept_log_messages(self):
+        mylog = log.getLogger()
+        stream = cStringIO.StringIO()
+        handler = logging.StreamHandler(stream)
+        handler.setFormatter(log.LegacyNovaFormatter())
+        mylog.logger.addHandler(handler)
+        return mylog, handler, stream
+
     def test_verify_checksum(self):
         testdata = ('OpenStack Software delivers a massively scalable cloud '
                     'operating system.')
         img = {'container_format': 'ami', 'id': '42'}
+
+        self.flags(checksum_base_images=True)
+        mylog, handler, stream = self._intercept_log_messages()
 
         try:
             dirname = tempfile.mkdtemp()
@@ -277,6 +324,8 @@ class ImageCacheManagerTestCase(test.TestCase):
             image_cache_manager = imagecache.ImageCacheManager()
             res = image_cache_manager._verify_checksum(img, fname)
             self.assertFalse(res)
+            self.assertNotEqual(stream.getvalue().find('image verification '
+                                                       'failed'), -1)
 
             # Checksum file missing
             os.remove('%s.sha1' % fname)
@@ -284,21 +333,36 @@ class ImageCacheManagerTestCase(test.TestCase):
             res = image_cache_manager._verify_checksum(img, fname)
             self.assertEquals(res, None)
 
+            # Checksum requests for a file with no checksum now have the
+            # side effect of creating the checksum
+            self.assertTrue(os.path.exists('%s.sha1' % fname))
+
         finally:
             shutil.rmtree(dirname)
+            mylog.logger.removeHandler(handler)
+
+    def _make_base_file(checksum=True):
+        """Make a base file for testing."""
+
+        dirname = tempfile.mkdtemp()
+        fname = os.path.join(dirname, 'aaa')
+
+        base_file = open(fname, 'w')
+        base_file.write('data')
+        base_file.close()
+        base_file = open(fname, 'r')
+
+        if checksum:
+            checksum_file = open('%s.sha1' % fname, 'w')
+            checksum_file.write(utils.hash_file(base_file))
+            checksum_file.close()
+
+        base_file.close()
+        return dirname, fname
 
     def test_remove_base_file(self):
+        dirname, fname = self._make_base_file()
         try:
-            dirname = tempfile.mkdtemp()
-            fname = os.path.join(dirname, 'aaa')
-
-            f = open(fname, 'w')
-            f.write('data')
-            f.close()
-
-            f = open('%s.sha1' % fname, 'w')
-            f.close()
-
             image_cache_manager = imagecache.ImageCacheManager()
             image_cache_manager._remove_base_file(fname)
 
@@ -307,7 +371,7 @@ class ImageCacheManagerTestCase(test.TestCase):
             self.assertTrue(os.path.exists('%s.sha1' % fname))
 
             # Old files get cleaned up though
-            os.utime(fname, (-1, time.time() - 100000))
+            os.utime(fname, (-1, time.time() - 3601))
             image_cache_manager._remove_base_file(fname)
 
             self.assertFalse(os.path.exists(fname))
@@ -315,3 +379,362 @@ class ImageCacheManagerTestCase(test.TestCase):
 
         finally:
             shutil.rmtree(dirname)
+
+    def test_remove_base_file_original(self):
+        dirname, fname = self._make_base_file()
+        try:
+            image_cache_manager = imagecache.ImageCacheManager()
+            image_cache_manager.originals = [fname]
+            image_cache_manager._remove_base_file(fname)
+
+            # Files are initially too new to delete
+            self.assertTrue(os.path.exists(fname))
+            self.assertTrue(os.path.exists('%s.sha1' % fname))
+
+            # This file should stay longer than a resized image
+            os.utime(fname, (-1, time.time() - 3601))
+            image_cache_manager._remove_base_file(fname)
+
+            self.assertTrue(os.path.exists(fname))
+            self.assertTrue(os.path.exists('%s.sha1' % fname))
+
+            # Originals don't stay forever though
+            os.utime(fname, (-1, time.time() - 3600 * 25))
+            image_cache_manager._remove_base_file(fname)
+
+            self.assertFalse(os.path.exists(fname))
+            self.assertFalse(os.path.exists('%s.sha1' % fname))
+
+        finally:
+            shutil.rmtree(dirname)
+
+    def test_remove_base_file_dne(self):
+        # This test is solely to execute the "does not exist" code path. We
+        # don't expect the method being tested to do anything in this case.
+        dirname = tempfile.mkdtemp()
+        try:
+            fname = os.path.join(dirname, 'aaa')
+            image_cache_manager = imagecache.ImageCacheManager()
+            image_cache_manager._remove_base_file(fname)
+
+        finally:
+            shutil.rmtree(dirname)
+
+    def test_remove_base_file_oserror(self):
+        dirname = tempfile.mkdtemp()
+        fname = os.path.join(dirname, 'aaa')
+        mylog, handler, stream = self._intercept_log_messages()
+
+        try:
+            os.mkdir(fname)
+            os.utime(fname, (-1, time.time() - 3601))
+
+            # This will raise an OSError because of file permissions
+            image_cache_manager = imagecache.ImageCacheManager()
+            image_cache_manager._remove_base_file(fname)
+
+            self.assertTrue(os.path.exists(fname))
+            self.assertNotEqual(stream.getvalue().find('Failed to remove'),
+                                -1)
+
+        finally:
+            shutil.rmtree(dirname)
+            mylog.logger.removeHandler(handler)
+
+    def test_handle_base_image_unused(self):
+        img = {'container_format': 'ami',
+               'id': '123',
+               'uuid': '1234-4567-2378'}
+
+        dirname, fname = self._make_base_file()
+        os.utime(fname, (-1, time.time() - 3601))
+
+        try:
+            image_cache_manager = imagecache.ImageCacheManager()
+            image_cache_manager.unexplained_images = [fname]
+            image_cache_manager._handle_base_image(img, fname)
+
+            self.assertEquals(image_cache_manager.unexplained_images, [])
+            self.assertEquals(image_cache_manager.removable_base_files,
+                              [fname])
+            self.assertEquals(image_cache_manager.corrupt_base_files, [])
+
+        finally:
+            shutil.rmtree(dirname)
+
+    def test_handle_base_image_used(self):
+        img = {'container_format': 'ami',
+               'id': '123',
+               'uuid': '1234-4567-2378'}
+
+        dirname, fname = self._make_base_file()
+        os.utime(fname, (-1, time.time() - 3601))
+
+        try:
+            image_cache_manager = imagecache.ImageCacheManager()
+            image_cache_manager.unexplained_images = [fname]
+            image_cache_manager.used_images = {'123': (1, 0, ['banana-42'])}
+            image_cache_manager._handle_base_image(img, fname)
+
+            self.assertEquals(image_cache_manager.unexplained_images, [])
+            self.assertEquals(image_cache_manager.removable_base_files, [])
+            self.assertEquals(image_cache_manager.corrupt_base_files, [])
+
+        finally:
+            shutil.rmtree(dirname)
+
+    def test_handle_base_image_used_remotely(self):
+        img = {'container_format': 'ami',
+               'id': '123',
+               'uuid': '1234-4567-2378'}
+
+        dirname, fname = self._make_base_file()
+        os.utime(fname, (-1, time.time() - 3601))
+
+        try:
+            image_cache_manager = imagecache.ImageCacheManager()
+            image_cache_manager.used_images = {'123': (0, 1, ['banana-42'])}
+            image_cache_manager._handle_base_image(img, None)
+
+            self.assertEquals(image_cache_manager.unexplained_images, [])
+            self.assertEquals(image_cache_manager.removable_base_files, [])
+            self.assertEquals(image_cache_manager.corrupt_base_files, [])
+
+        finally:
+            shutil.rmtree(dirname)
+
+    def test_handle_base_image_absent(self):
+        """Ensure we warn for use of a missing base image."""
+
+        img = {'container_format': 'ami',
+               'id': '123',
+               'uuid': '1234-4567-2378'}
+
+        mylog, handler, stream = self._intercept_log_messages()
+
+        try:
+            image_cache_manager = imagecache.ImageCacheManager()
+            image_cache_manager.used_images = {'123': (1, 0, ['banana-42'])}
+            image_cache_manager._handle_base_image(img, None)
+
+            self.assertEquals(image_cache_manager.unexplained_images, [])
+            self.assertEquals(image_cache_manager.removable_base_files, [])
+            self.assertEquals(image_cache_manager.corrupt_base_files, [])
+            self.assertNotEqual(stream.getvalue().find('an absent base file'),
+                                -1)
+
+        finally:
+            mylog.logger.removeHandler(handler)
+
+    def test_handle_base_image_used_missing(self):
+        img = {'container_format': 'ami',
+               'id': '123',
+               'uuid': '1234-4567-2378'}
+
+        dirname = tempfile.mkdtemp()
+        fname = os.path.join(dirname, 'aaa')
+
+        try:
+            image_cache_manager = imagecache.ImageCacheManager()
+            image_cache_manager.unexplained_images = [fname]
+            image_cache_manager.used_images = {'123': (1, 0, ['banana-42'])}
+            image_cache_manager._handle_base_image(img, fname)
+
+            self.assertEquals(image_cache_manager.unexplained_images, [])
+            self.assertEquals(image_cache_manager.removable_base_files, [])
+            self.assertEquals(image_cache_manager.corrupt_base_files, [])
+
+        finally:
+            shutil.rmtree(dirname)
+
+    def test_handle_base_image_checksum_fails(self):
+        img = {'container_format': 'ami',
+               'id': '123',
+               'uuid': '1234-4567-2378'}
+
+        dirname, fname = self._make_base_file()
+
+        try:
+            f = open(fname, 'w')
+            f.write('banana')
+            f.close()
+
+            image_cache_manager = imagecache.ImageCacheManager()
+            image_cache_manager.unexplained_images = [fname]
+            image_cache_manager.used_images = {'123': (1, 0, ['banana-42'])}
+            image_cache_manager._handle_base_image(img, fname)
+
+            self.assertEquals(image_cache_manager.unexplained_images, [])
+            self.assertEquals(image_cache_manager.removable_base_files, [])
+            self.assertEquals(image_cache_manager.corrupt_base_files,
+                              [fname])
+
+        finally:
+            shutil.rmtree(dirname)
+
+    def test_verify_base_images(self):
+        self.flags(instances_path='/instance_path')
+        self.flags(remove_unused_base_images=True)
+
+        base_file_list = ['00000001',
+                          'ephemeral_0_20_None',
+                          'e97222e91fc4241f49a7f520d1dcf446751129b3_sm',
+                          'e09c675c2d1cfac32dae3c2d83689c8c94bc693b_sm',
+                          '92cfceb39d57d914ed8b14d0e37643de0797ae56',
+                          '17d1b00b81642842e514494a78e804e9a511637c',
+                          ('17d1b00b81642842e514494a78e804e9a511637c_'
+                           '5368709120'),
+                          ('17d1b00b81642842e514494a78e804e9a511637c_'
+                           '10737418240'),
+                          '00000004']
+
+        def fq_path(path):
+            return os.path.join('/instance_path/_base/', path)
+
+        # Fake base directory existance
+        orig_exists = os.path.exists
+
+        def exists(path):
+            # The python coverage tool got angry with my overly broad mocks
+            if not path.startswith('/instance_path'):
+                return orig_exists(path)
+
+            if path in ['/instance_path',
+                        '/instance_path/_base',
+                        '/instance_path/instance-1/disk',
+                        '/instance_path/instance-2/disk',
+                        '/instance_path/instance-3/disk',
+                        ('/instance_path/_base/'
+                         '92cfceb39d57d914ed8b14d0e37643de0797ae56.sha1')]:
+                return True
+
+            for p in base_file_list:
+                if path == fq_path(p):
+                    return True
+                if path == fq_path(p) + '.sha1':
+                    return False
+
+            if path in [('/instance_path/_base/'
+                         '92cfceb39d57d914ed8b14d0e37643de0797ae56_sm')]:
+                return False
+
+            self.fail('Unexpected path existance check: %s' % path)
+
+        self.stubs.Set(os.path, 'exists', lambda x: exists(x))
+
+        # Fake up some instances in the instances directory
+        orig_listdir = os.listdir
+
+        def listdir(path):
+            # The python coverage tool got angry with my overly broad mocks
+            if not path.startswith('/instance_path'):
+                return orig_list(path)
+
+            if path == '/instance_path':
+                return ['instance-1', 'instance-2', 'instance-3', '_base']
+
+            if path == '/instance_path/_base':
+                return base_file_list
+
+            self.fail('Unexpected directory listed: %s' % path)
+
+        self.stubs.Set(os, 'listdir', lambda x: listdir(x))
+
+        # Fake isfile for these faked images in _base
+        orig_isfile = os.path.isfile
+
+        def isfile(path):
+            # The python coverage tool got angry with my overly broad mocks
+            if not path.startswith('/instance_path'):
+                return orig_isfile(path)
+
+            for p in base_file_list:
+                if path == fq_path(p):
+                    return True
+
+            self.fail('Unexpected isfile call: %s' % path)
+
+        self.stubs.Set(os.path, 'isfile', lambda x: isfile(x))
+
+        # Fake the database call which lists running instances
+        self.stubs.Set(db, 'instance_get_all',
+                       lambda x: [{'image_ref': 'image-1',
+                                   'host': FLAGS.host,
+                                   'name': 'instance-1',
+                                   'uuid': '123'},
+                                  {'image_ref': 'image-2',
+                                   'host': FLAGS.host,
+                                   'name': 'instance-2',
+                                   'uuid': '456'}])
+
+        image_cache_manager = imagecache.ImageCacheManager()
+
+        # Fake the image service call which lists all registered images
+        class FakeImageService(object):
+            def detail(self, _context):
+                return [{'container_format': 'ami', 'id': '42'},
+                        {'container_format': 'amk', 'id': '43'}]
+
+        self.stubs.Set(image, 'get_default_image_service',
+                       lambda: FakeImageService())
+
+        # Fake the utils call which finds the backing image
+        def get_disk_backing_file(path):
+            if path in ['/instance_path/instance-1/disk',
+                        '/instance_path/instance-2/disk']:
+                return fq_path('17d1b00b81642842e514494a78e804e9a511637c_'
+                               '5368709120')
+            self.fail('Unexpected backing file lookup: %s' % path)
+
+        self.stubs.Set(virtutils, 'get_disk_backing_file',
+                       lambda x: get_disk_backing_file(x))
+
+        # Fake out verifying checksums, as that is tested elsewhere
+        self.stubs.Set(image_cache_manager, '_verify_checksum',
+                       lambda x, y:
+                           y == '92cfceb39d57d914ed8b14d0e37643de0797ae56')
+
+        # Fake getmtime as well
+        orig_getmtime = os.path.getmtime
+
+        def getmtime(path):
+            if not path.startswith('/instance_path'):
+                return orig_getmtime(path)
+
+            return 1000000
+
+        self.stubs.Set(os.path, 'getmtime', lambda x: getmtime(x))
+
+        # Make sure we don't accidentally remove a real file
+        orig_remove = os.remove
+
+        def remove(path):
+            if not path.startswith('/instance_path'):
+                return orig_remove(path)
+
+            # Don't try to remove fake files
+            return
+
+        self.stubs.Set(os, 'remove', lambda x: remove(x))
+
+        # And finally we can make the call we're actually testing...
+        # The argument here should be a context, but it is mocked out
+        image_cache_manager.verify_base_images(None)
+
+        # Verify
+        active = [fq_path('17d1b00b81642842e514494a78e804e9a511637c_'
+                          '5368709120')]
+        self.assertEquals(image_cache_manager.active_base_files, active)
+
+        for rem in [fq_path('e97222e91fc4241f49a7f520d1dcf446751129b3_sm'),
+                    fq_path('e09c675c2d1cfac32dae3c2d83689c8c94bc693b_sm'),
+                    fq_path('92cfceb39d57d914ed8b14d0e37643de0797ae56'),
+                    fq_path('17d1b00b81642842e514494a78e804e9a511637c'),
+                    fq_path('17d1b00b81642842e514494a78e804e9a511637c_'
+                            '10737418240')]:
+            self.assertTrue(rem in image_cache_manager.removable_base_files)
+
+    def test_verify_base_images_no_base(self):
+        self.flags(instances_path='/tmp/no/such/dir/name/please')
+        image_cache_manager = imagecache.ImageCacheManager()
+        image_cache_manager.verify_base_images(None)

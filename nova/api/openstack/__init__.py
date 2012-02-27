@@ -41,6 +41,8 @@ class FaultWrapper(base_wsgi.Middleware):
             return req.get_response(self.application)
         except Exception as ex:
             LOG.exception(_("Caught error: %s"), unicode(ex))
+            msg_dict = dict(url=req.url, status=500)
+            LOG.info(_("%(url)s returned with HTTP %(status)d") % msg_dict)
             exc = webob.exc.HTTPInternalServerError()
             # NOTE(johannes): We leave the explanation empty here on
             # purpose. It could possibly have sensitive information
@@ -66,7 +68,7 @@ class ProjectMapper(APIMapper):
             p_collection = parent_resource['collection_name']
             p_member = parent_resource['member_name']
             kwargs['path_prefix'] = '{project_id}/%s/:%s_id' % (p_collection,
-                                                               p_member)
+                                                                p_member)
         routes.Mapper.resource(self, member_name,
                                      collection_name,
                                      **kwargs)

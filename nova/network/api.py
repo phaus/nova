@@ -38,7 +38,7 @@ class API(base.Base):
                         FLAGS.network_topic,
                         {'method': 'get_all_networks'})
 
-    def get(self, context, fixed_range, network_uuid):
+    def get(self, context, network_uuid):
         return rpc.call(context,
                         FLAGS.network_topic,
                         {'method': 'get_network',
@@ -62,6 +62,12 @@ class API(base.Base):
                         FLAGS.network_topic,
                         {'method': 'get_fixed_ip',
                          'args': {'id': id}})
+
+    def get_fixed_ip_by_address(self, context, address):
+        return rpc.call(context,
+                        FLAGS.network_topic,
+                        {'method': 'get_fixed_ip_by_address',
+                         'args': {'address': address}})
 
     def get_floating_ip(self, context, id):
         return rpc.call(context,
@@ -202,7 +208,8 @@ class API(base.Base):
         args = {'instance_id': instance['id'],
                 'instance_uuid': instance['uuid'],
                 'rxtx_factor': instance['instance_type']['rxtx_factor'],
-                'host': instance['host']}
+                'host': instance['host'],
+                'project_id': instance['project_id']}
         try:
             nw_info = rpc.call(context, FLAGS.network_topic,
                                {'method': 'get_instance_nw_info',

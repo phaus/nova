@@ -55,6 +55,9 @@ imagecache_opts = [
                default=(24 * 3600),
                help='Unused unresized base images younger than this will not '
                     'be removed'),
+    cfg.BoolOpt('checksum_base_images',
+                default=False,
+                help='Write a checksum for files in _base to disk'),
     ]
 
 flags.DECLARE('instances_path', 'nova.compute.manager')
@@ -77,10 +80,39 @@ def read_stored_checksum(base_file):
     return stored_checksum
 
 
+def write_stored_checksum(target):
+    """Write a checksum to disk for a file in _base."""
+
+    checksum_filename = '%s.sha1' % target
+    if os.path.exists(target) and not os.path.exists(checksum_filename):
+        # NOTE(mikal): Create the checksum file first to exclude possible
+        # overlap in checksum operations. An empty checksum file is ignored if
+        # encountered during verification.
+        sum_file = open(checksum_filename, 'w')
+        img_file = open(target, 'r')
+        checksum = utils.hash_file(img_file)
+        img_file.close()
+
+        sum_file.write(checksum)
+        sum_file.close()
+
+
 class ImageCacheManager(object):
     def __init__(self):
-        self.unexplained_images = []
+        self._reset_state()
+
+    def _reset_state(self):
+        """Reset state variables used for each pass."""
+
+        self.used_images = {}
+        self.image_popularity = {}
+        self.instance_names = {}
+
+        self.active_base_files = []
+        self.corrupt_base_files = []
         self.originals = []
+        self.removable_base_files = []
+        self.unexplained_images = []
 
     def _store_image(self, base_dir, ent, original=False):
         """Store a base image for later examination."""
@@ -112,9 +144,12 @@ class ImageCacheManager(object):
         """List running instances (on all compute nodes)."""
         self.used_images = {}
         self.image_popularity = {}
+        self.instance_names = {}
 
         instances = db.instance_get_all(context)
         for instance in instances:
+            self.instance_names[instance['name']] = instance['uuid']
+
             image_ref_str = str(instance['image_ref'])
             local, remote, insts = self.used_images.get(image_ref_str,
                                                         (0, 0, []))
@@ -132,9 +167,11 @@ class ImageCacheManager(object):
         """List the backing images currently in use."""
         inuse_images = []
         for ent in os.listdir(FLAGS.instances_path):
-            if ent.startswith('instance-'):
+            if ent in self.instance_names:
+                LOG.debug(_('%s is a valid instance name'), ent)
                 disk_path = os.path.join(FLAGS.instances_path, ent, 'disk')
                 if os.path.exists(disk_path):
+                    LOG.debug(_('%s has a disk file'), ent)
                     backing_file = virtutils.get_disk_backing_file(disk_path)
                     LOG.debug(_('Instance %(instance)s is backed by '
                                 '%(backing)s'),
@@ -190,13 +227,13 @@ class ImageCacheManager(object):
         action occurs. This is something sysadmins should monitor for and
         handle manually when it occurs.
         """
-        f = open(base_file, 'r')
-        current_checksum = utils.hash_file(f)
-        f.close()
 
         stored_checksum = read_stored_checksum(base_file)
-
         if stored_checksum:
+            f = open(base_file, 'r')
+            current_checksum = utils.hash_file(f)
+            f.close()
+
             if current_checksum != stored_checksum:
                 LOG.error(_('%(container_format)s-%(id)s '
                             '(%(base_file)s): '
@@ -215,6 +252,13 @@ class ImageCacheManager(object):
                       {'container_format': img['container_format'],
                        'id': img['id'],
                        'base_file': base_file})
+
+            # NOTE(mikal): If the checksum file is missing, then we should
+            # create one. We don't create checksums when we download images
+            # from glance because that would delay VM startup.
+            if FLAGS.checksum_base_images:
+                write_stored_checksum(base_file)
+
             return None
 
     def _remove_base_file(self, base_file):
@@ -222,6 +266,11 @@ class ImageCacheManager(object):
 
         Returns nothing.
         """
+        if not os.path.exists(base_file):
+            LOG.debug(_('Cannot remove %(base_file)s, it does not exist'),
+                      base_file)
+            return
+
         mtime = os.path.getmtime(base_file)
         age = time.time() - mtime
 
@@ -248,18 +297,21 @@ class ImageCacheManager(object):
     def _handle_base_image(self, img, base_file):
         """Handle the checks for a single base image."""
 
-        # TODO(mikal): Write a unit test for this method
         image_bad = False
         image_in_use = False
 
-        LOG.debug(_('%(container_format)s-%(id)s (%(base_file)s): checking'),
-                  {'container_format': img['container_format'],
-                   'id': img['id'],
-                   'base_file': base_file})
+        LOG.info(_('%(container_format)s-%(id)s (%(base_file)s): checking'),
+                 {'container_format': img['container_format'],
+                  'id': img['id'],
+                  'base_file': base_file})
 
         if base_file in self.unexplained_images:
             self.unexplained_images.remove(base_file)
-        self._verify_checksum(img, base_file)
+
+        if (base_file and os.path.exists(base_file)
+            and os.path.isfile(base_file)):
+            # _verify_checksum returns True if the checksum is ok.
+            image_bad = not self._verify_checksum(img, base_file)
 
         instances = []
         if str(img['id']) in self.used_images:
@@ -290,8 +342,7 @@ class ImageCacheManager(object):
 
             else:
                 LOG.debug(_('%(container_format)s-%(id)s (%(base_file)s): '
-                            'in: on other nodes (%(remote)d on other '
-                            'nodes)'),
+                            'in use on (%(remote)d on other nodes)'),
                           {'container_format': img['container_format'],
                            'id': img['id'],
                            'base_file': base_file,
@@ -320,21 +371,16 @@ class ImageCacheManager(object):
         # TODO(mikal): Write a unit test for this method
         # TODO(mikal): Handle "generated" images
 
-        # The new scheme for base images is as follows -- an image is streamed
-        # from the image service to _base (filename is the sha1 hash of the
-        # image id). If CoW is enabled, that file is then resized to be the
-        # correct size for the instance (filename is the same as the original,
-        # but with an underscore and the resized size in bytes). This second
-        # file is then CoW'd to the instance disk. If CoW is disabled, the
-        # resize occurs as part of the copy from the cache to the instance
-        # directory. Files ending in _sm are no longer created, but may remain
-        # from previous versions.
-
-        self.unexplained_images = []
-        self.active_base_files = []
-        self.corrupt_base_files = []
-        self.removable_base_files = []
-        self.originals = []
+        # NOTE(mikal): The new scheme for base images is as follows -- an
+        # image is streamed from the image service to _base (filename is the
+        # sha1 hash of the image id). If CoW is enabled, that file is then
+        # resized to be the correct size for the instance (filename is the
+        # same as the original, but with an underscore and the resized size
+        # in bytes). This second file is then CoW'd to the instance disk. If
+        # CoW is disabled, the resize occurs as part of the copy from the
+        # cache to the instance directory. Files ending in _sm are no longer
+        # created, but may remain from previous versions.
+        self._reset_state()
 
         base_dir = os.path.join(FLAGS.instances_path, '_base')
         if not os.path.exists(base_dir):
@@ -355,7 +401,7 @@ class ImageCacheManager(object):
 
             fingerprint = hashlib.sha1(str(img['id'])).hexdigest()
             for result in self._find_base_file(base_dir, fingerprint):
-                base_file, image_small, image_resized = res
+                base_file, image_small, image_resized = result
                 self._handle_base_image(img, base_file)
 
                 if not image_small and not image_resized:

@@ -88,8 +88,8 @@ class NotifierTestCase(test.TestCase):
     def test_rabbit_priority_queue(self):
         self.stubs.Set(nova.flags.FLAGS, 'notification_driver',
                 'nova.notifier.rabbit_notifier')
-        self.stubs.Set(nova.flags.FLAGS, 'notification_topic',
-                'testnotify')
+        self.stubs.Set(nova.flags.FLAGS, 'notification_topics',
+                       ['testnotify', ])
 
         self.test_topic = None
 
@@ -105,7 +105,7 @@ class NotifierTestCase(test.TestCase):
             'nova.notifier.rabbit_notifier')
         self.stubs.Set(nova.flags.FLAGS, 'publish_errors', True)
         LOG = log.getLogger('nova')
-        LOG.setup_from_flags()
+        log.setup()
         msgs = []
 
         def mock_notify(context, topic, data):

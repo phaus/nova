@@ -307,7 +307,7 @@ class EC2KeystoneAuth(wsgi.Middleware):
         try:
             token_id = result['access']['token']['id']
             user_id = result['access']['user']['id']
-            project_id = result['access']['token']['tenant']
+            project_id = result['access']['token']['tenant']['id']
             roles = [role['name'] for role
                      in result['access']['user']['roles']]
         except (AttributeError, KeyError), e:
@@ -626,10 +626,20 @@ class Executor(wsgi.Application):
             LOG.debug(_('InvalidRequest raised: %s'), unicode(ex),
                      context=context)
             return ec2_error(req, request_id, type(ex).__name__, unicode(ex))
+        except exception.InvalidInstanceIDMalformed as ex:
+            LOG.debug(_('ValidatorError raised: %s'), unicode(ex),
+                     context=context)
+            #EC2 Compatibility
+            return self._error(req, context, "InvalidInstanceID.Malformed",
+                unicode(ex))
         except Exception as ex:
-            extra = {'environment': req.environ}
-            LOG.exception(_('Unexpected error raised: %s'), unicode(ex),
-                          extra=extra, context=context)
+            env = req.environ.copy()
+            for k in env.keys():
+                if not isinstance(env[k], basestring):
+                    env.pop(k)
+
+            LOG.exception(_('Unexpected error raised: %s'), unicode(ex))
+            LOG.error(_('Environment: %s') % utils.dumps(env))
             return ec2_error(req, request_id, 'UnknownError',
                              _('An unknown error has occurred. '
                                'Please try your request again.'))

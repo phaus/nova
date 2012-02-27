@@ -26,6 +26,7 @@ try:
     import json
 except ImportError:
     import simplejson as json
+# NOTE: XenServer 6 and below use python 2.4 so md5 is needed and not hashlib
 import md5
 import os
 import os.path
@@ -93,6 +94,10 @@ def _download_tarball(request, staging_path):
         raise RetryException(error)
     except urllib2.URLError, error:
         raise RetryException(error)
+    except httplib.HTTPException, error:
+        # httplib.HTTPException and derivatives (BadStatusLine in particular)
+        # don't have a useful __repr__ or __str__
+        raise RetryException('%s: %s' % (error.__class__.__name__, error))
 
     tar_cmd = "tar -zx --directory=%(staging_path)s" % locals()
     tar_proc = _make_subprocess(tar_cmd, stderr=True, stdin=True)

@@ -10,14 +10,16 @@ build-stamp
 nova.egg-info
 .nova-venv
 .venv
+.tox
 *.sqlite
 *.log
-<<<<<<< HEAD
 po/*.pot.project
-.pydevproject
-=======
 .project
 .pydevproject
 .settings
 po/*.pot
->>>>>>> tmetsch-upstream/master
+*.mo
+tools/conf/nova.conf*
+cover/*
+dist/*
+.coverage

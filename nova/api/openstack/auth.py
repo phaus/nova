@@ -24,7 +24,7 @@ import webob.exc
 
 from nova.api.openstack import common
 from nova.api.openstack import wsgi
-from nova import auth
+from nova.auth import manager
 from nova import context
 from nova import exception
 from nova import flags
@@ -78,7 +78,7 @@ class AuthMiddleware(base_wsgi.Middleware):
         if not db_driver:
             db_driver = FLAGS.db_driver
         self.db = utils.import_object(db_driver)
-        self.auth = auth.manager.AuthManager()
+        self.auth = manager.AuthManager()
         super(AuthMiddleware, self).__init__(application)
 
     @webob.dec.wsgify(RequestClass=wsgi.Request)
@@ -173,15 +173,19 @@ class AuthMiddleware(base_wsgi.Middleware):
         if user and token:
             res = webob.Response()
             res.headers['X-Auth-Token'] = token['token_hash']
-            res.headers['X-Server-Management-Url'] = \
-                token['server_management_url']
+            _x_server_url = 'X-Server-Management-Url'
+            _server_url = 'server_management_url'
+            res.headers[_x_server_url] = token[_server_url]
 
             if token['storage_url']:
-                res.headers['X-Storage-Url'] = token['storage_url']
+                _x_storage_url = 'X-Storage-Url'
+                _storage_url = 'storage_url'
+                res.headers[_x_storage_url] = token[_storage_url]
 
             if token['cdn_management_url']:
-                res.headers['X-CDN-Management-Url'] = \
-                    token['cdn_management_url']
+                _x_cdn_url = 'X-CDN-Management-Url'
+                _cdn_url = 'cdn_management_url'
+                res.headers[_x_cdn_url] = token[_cdn_url]
 
             res.content_type = 'text/plain'
             res.status = '204'

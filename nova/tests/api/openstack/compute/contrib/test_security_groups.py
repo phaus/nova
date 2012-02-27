@@ -1,6 +1,7 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
 # Copyright 2011 OpenStack LLC
+# Copyright 2012 Justin Santa Barbara
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -110,6 +111,8 @@ class TestSecurityGroups(test.TestCase):
         super(TestSecurityGroups, self).setUp()
 
         self.controller = security_groups.SecurityGroupController()
+        self.server_controller = (
+            security_groups.ServerSecurityGroupController())
         self.manager = security_groups.SecurityGroupActionController()
 
     def tearDown(self):
@@ -240,6 +243,36 @@ class TestSecurityGroups(test.TestCase):
 
         self.assertEquals(res_dict, expected)
 
+    def test_get_security_group_by_instance(self):
+        groups = []
+        for i, name in enumerate(['default', 'test']):
+            sg = security_group_template(id=i + 1,
+                                         name=name,
+                                         description=name + '-desc',
+                                         rules=[])
+            groups.append(sg)
+        expected = {'security_groups': groups}
+
+        def return_instance(context, server_id):
+            self.assertEquals(server_id, FAKE_UUID)
+            return return_server_by_uuid(context, server_id)
+
+        self.stubs.Set(nova.db, 'instance_get_by_uuid',
+                       return_instance)
+
+        def return_security_groups(context, instance_id):
+            self.assertEquals(instance_id, 1)
+            return [security_group_db(sg) for sg in groups]
+
+        self.stubs.Set(nova.db, 'security_group_get_by_instance',
+                       return_security_groups)
+
+        req = fakes.HTTPRequest.blank('/v2/%s/servers/%s/os-security-groups' %
+                                      ('fake', FAKE_UUID))
+        res_dict = self.server_controller.index(req, FAKE_UUID)
+
+        self.assertEquals(res_dict, expected)
+
     def test_get_security_group_by_id(self):
         sg = security_group_template(id=2, rules=[])
 
@@ -297,6 +330,25 @@ class TestSecurityGroups(test.TestCase):
         req = fakes.HTTPRequest.blank('/v2/fake/os-security-groups/11111111')
         self.assertRaises(webob.exc.HTTPNotFound, self.controller.delete,
                           req, '11111111')
+
+    def test_delete_security_group_in_use(self):
+        sg = security_group_template(id=1, rules=[])
+
+        def security_group_in_use(context, id):
+            return True
+
+        def return_security_group(context, group_id):
+            self.assertEquals(sg['id'], group_id)
+            return security_group_db(sg)
+
+        self.stubs.Set(nova.db, 'security_group_in_use',
+                       security_group_in_use)
+        self.stubs.Set(nova.db, 'security_group_get',
+                       return_security_group)
+
+        req = fakes.HTTPRequest.blank('/v2/fake/os-security-groups/1')
+        self.assertRaises(webob.exc.HTTPBadRequest, self.controller.delete,
+                          req, '1')
 
     def test_associate_by_non_existing_security_group_name(self):
         body = dict(addSecurityGroup=dict(name='non-existing'))

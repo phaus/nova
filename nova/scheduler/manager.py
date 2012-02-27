@@ -29,8 +29,8 @@ from nova import exception
 from nova import flags
 from nova import log as logging
 from nova import manager
+from nova.notifier import api as notifier
 from nova.openstack.common import cfg
-from nova import rpc
 from nova import utils
 
 
@@ -57,18 +57,9 @@ class SchedulerManager(manager.Manager):
         """Converts all method calls to use the schedule method"""
         return functools.partial(self._schedule, key)
 
-    @manager.periodic_task
-    def _poll_child_zones(self, context):
-        """Poll child zones periodically to get status."""
-        self.driver.poll_child_zones(context)
-
     def get_host_list(self, context):
         """Get a list of hosts from the HostManager."""
         return self.driver.get_host_list()
-
-    def get_zone_list(self, context):
-        """Get a list of zones from the ZoneManager."""
-        return self.driver.get_zone_list()
 
     def get_service_capabilities(self, context):
         """Get the normalized set of capabilities for this zone."""
@@ -81,10 +72,6 @@ class SchedulerManager(manager.Manager):
             capabilities = {}
         self.driver.update_service_capabilities(service_name, host,
                 capabilities)
-
-    def select(self, context, *args, **kwargs):
-        """Select a list of hosts best matching the provided specs."""
-        return self.driver.select(context, *args, **kwargs)
 
     def _schedule(self, method, context, topic, *args, **kwargs):
         """Tries to call schedule_* method on the driver to retrieve host.
@@ -131,6 +118,15 @@ class SchedulerManager(manager.Manager):
                     "ERROR state.") % locals())
             db.instance_update(context, instance_uuid,
                     {'vm_state': vm_states.ERROR})
+
+        payload = dict(request_spec=request_spec,
+                       instance_properties=properties,
+                       instance_id=instance_uuid,
+                       state=vm_states.ERROR,
+                       method=method,
+                       reason=ex)
+        notifier.notify(notifier.publisher_id("scheduler"),
+                        'scheduler.run_instance', notifier.ERROR, payload)
 
     # NOTE (masumotok) : This method should be moved to nova.api.ec2.admin.
     #                    Based on bexar design summit discussion,

@@ -108,7 +108,7 @@ class ComputeDriver(object):
         # TODO(Vek): Need to pass context in for access to auth_token
         raise NotImplementedError()
 
-    def get_info(self, instance_name):
+    def get_info(self, instance):
         """Get the current status of an instance, by name (not ID!)
 
         Returns a dict containing:
@@ -121,6 +121,19 @@ class ComputeDriver(object):
         """
         # TODO(Vek): Need to pass context in for access to auth_token
         raise NotImplementedError()
+
+    def get_num_instances(self):
+        """Return the total number of virtual machines.
+
+        Return the number of virtual machines that the hypervisor knows
+        about.
+
+        :note This implementation works for all drivers, but it is
+              not particularly efficient. Maintainers of the virt drivers are
+              encouraged to override this method with something more
+              efficient.
+        """
+        return len(self.list_instances())
 
     def instance_exists(self, instance_id):
         """Checks existence of an instance on the host.
@@ -531,6 +544,11 @@ class ComputeDriver(object):
         """Reboots, shuts down or powers up the host."""
         raise NotImplementedError()
 
+    def host_maintenance_mode(self, host, mode):
+        """Start/Stop host maintenance window. On start, it triggers
+        guest VMs evacuation."""
+        raise NotImplementedError()
+
     def set_host_enabled(self, host, enabled):
         """Sets the specified host's ability to accept new instances."""
         # TODO(Vek): Need to pass context in for access to auth_token
@@ -641,6 +659,13 @@ class ComputeDriver(object):
         related to other calls into the driver. The prime example is to clean
         the cache and remove images which are no longer of interest.
         """
+
+    def add_to_aggregate(self, context, aggregate, host, **kwargs):
+        """Add a compute host to an aggregate."""
+        raise NotImplementedError()
+
+    def remove_from_aggregate(self, context, aggregate, host, **kwargs):
+        """Remove a compute host from an aggregate."""
         raise NotImplementedError()
 
     def get_volume_connector(self, instance):

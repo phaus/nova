@@ -34,6 +34,8 @@ function process_option {
     -s|--no-site-packages) no_site_packages=1;;
     -r|--recreate-db) recreate_db=1;;
     -n|--no-recreate-db) recreate_db=0;;
+    -m|--patch-migrate) patch_migrate=1;;
+    -w|--no-patch-migrate) patch_migrate=0;;
     -f|--force) force=1;;
     -p|--pep8) just_pep8=1;;
     -P|--no-pep8) no_pep8=1;;
@@ -59,6 +61,7 @@ no_pep8=0
 just_hacking=0
 coverage=0
 recreate_db=1
+patch_migrate=1
 
 for arg in "$@"; do
   process_option $arg
@@ -92,17 +95,21 @@ function run_tests {
   return $RESULT
 }
 
+# Files of interest
+# NOTE(lzyeval): Avoid selecting nova-api-paste.ini and nova.conf in nova/bin
+#                when running on devstack.
+# NOTE(lzyeval): Avoid selecting *.pyc files to reduce pep8 check-up time
+#                when running on devstack.
+xen_api_path="plugins/xenserver/xenapi/etc/xapi.d/plugins"
+xen_net_path="plugins/xenserver/networking/etc/xensource/scripts"
+srcfiles=`find nova -type f -name "*.py"`
+srcfiles+=" `find bin -type f ! -name "nova.conf*" ! -name "*api-paste.ini*"`"
+srcfiles+=" `find tools -type f -name "*.py"`"
+srcfiles+=" `find ${xen_api_path} ${xen_net_path} -type f ! -name "*.patch" ! -name "*.pyc"`"
+srcfiles+=" setup.py"
+
 function run_pep8 {
   echo "Running pep8 ..."
-  # Opt-out files from pep8
-  ignore_scripts="*.patch:*.sh:*nova-debug:*clean-vlans"
-  ignore_files="*eventlet-patch:*pip-requires"
-  GLOBIGNORE="$ignore_scripts:$ignore_files"
-  srcfiles=`find bin -type f ! -name "nova.conf*" ! -name "api-paste.ini*"`
-  srcfiles+=" `find tools/*`"
-  srcfiles+=" nova setup.py"
-  srcfiles+=" plugins/xenserver/networking/etc/xensource/scripts/*"
-  srcfiles+=" plugins/xenserver/xenapi/etc/xapi.d/plugins/*"
   # Just run PEP8 in current environment
   #
   # NOTE(sirp): W602 (deprecated 3-arg raise) is being ignored for the
@@ -119,19 +126,12 @@ function run_pep8 {
   #     other than what the PEP8 tool claims. It is deprecated in Python 3, so,
   #     perhaps the mistake was thinking that the deprecation applied to Python 2
   #     as well.
-  pep8_opts="--ignore=E202,W602 --repeat"
+  pep8_opts="--ignore=W602 --repeat"
   ${wrapper} pep8 ${pep8_opts} ${srcfiles}
 }
 
 function run_hacking {
   echo "Running hacking compliance testing..."
-  # Opt-out files from pep8
-  ignore_scripts="*.sh:*nova-debug:*clean-vlans:*.swp"
-  ignore_files="*eventlet-patch:*pip-requires"
-  GLOBIGNORE="$ignore_scripts:$ignore_files"
-  srcfiles=`find bin -type f ! -name "nova.conf*"`
-  srcfiles+=" `find tools/*`"
-  srcfiles+=" nova setup.py plugins/xenserver/xenapi/etc/xapi.d/plugins/glance"
   hacking_opts="--ignore=E202,W602 --repeat"
   ${wrapper} python tools/hacking.py ${hacking_opts} ${srcfiles}
 }

@@ -25,7 +25,6 @@ import json
 import os
 import pickle
 import random
-import sys
 import time
 import uuid
 
@@ -182,7 +181,9 @@ class VMOps(object):
             raise Exception(_('Attempted to power on non-existent instance'
             ' bad instance id %s') % instance.id)
         LOG.debug(_("Starting instance %s"), instance.name)
-        self._session.call_xenapi('VM.start', vm_ref, False, False)
+        self._session.call_xenapi('VM.start_on', vm_ref,
+                                  self._session.get_xenapi_host(),
+                                  False, False)
 
     def _create_disks(self, context, instance, image_meta):
         disk_image_type = VMHelper.determine_disk_image_type(image_meta)
@@ -245,7 +246,7 @@ class VMOps(object):
 
         except (self.XenAPI.Failure, OSError, IOError) as spawn_error:
             LOG.exception(_("instance %s: Failed to spawn"),
-                          instance.uuid, exc_info=sys.exc_info())
+                          instance.uuid)
             LOG.debug(_('Instance %s failed to spawn - performing clean-up'),
                       instance.id)
             self._handle_spawn_error(vdis, spawn_error)
@@ -320,9 +321,9 @@ class VMOps(object):
         except (self.XenAPI.Failure, OSError, IOError) as vm_create_error:
             # Collect VDI/file resources to clean up;
             # These resources will be removed by _handle_spawn_error.
-            LOG.exception(_("instance %s: Failed to spawn - " +
+            LOG.exception(_("instance %s: Failed to spawn - "
                             "Unable to create VM"),
-                          instance.id, exc_info=sys.exc_info())
+                          instance.uuid)
             last_arg = None
             resources = []
 
@@ -476,7 +477,6 @@ class VMOps(object):
         """Spawn a new instance."""
         LOG.debug(_('Starting VM %s...'), vm_ref)
         self._start(instance, vm_ref)
-        instance_name = instance.name
         instance_uuid = instance.uuid
         LOG.info(_('Spawning VM %(instance_uuid)s created %(vm_ref)s.')
                  % locals())
@@ -498,7 +498,7 @@ class VMOps(object):
         LOG.debug(_('Instance %s: waiting for running'), instance_uuid)
         expiration = time.time() + FLAGS.xenapi_running_timeout
         while time.time() < expiration:
-            state = self.get_info(instance_name)['state']
+            state = self.get_info(instance)['state']
             if state == power_state.RUNNING:
                 break
 
@@ -1020,7 +1020,7 @@ class VMOps(object):
     def _shutdown(self, instance, vm_ref, hard=True):
         """Shutdown an instance."""
         instance_uuid = instance.uuid
-        state = self.get_info(instance['name'])['state']
+        state = self.get_info(instance)['state']
         if state == power_state.SHUTDOWN:
             LOG.warn(_("VM %(instance_uuid)s already halted,"
                     "skipping shutdown...") % locals())
@@ -1392,7 +1392,7 @@ class VMOps(object):
 
     def get_info(self, instance):
         """Return data about VM instance."""
-        vm_ref = self._get_vm_opaque_ref(instance)
+        vm_ref = self._get_vm_opaque_ref(instance['name'])
         vm_rec = self._session.call_xenapi("VM.get_record", vm_ref)
         return VMHelper.compile_info(vm_rec)
 
@@ -1410,8 +1410,7 @@ class VMOps(object):
                                                start_time,
                                                stop_time)
         except exception.CouldNotFetchMetrics:
-            LOG.exception(_("Could not get bandwidth info."),
-                          exc_info=sys.exc_info())
+            LOG.exception(_("Could not get bandwidth info."))
             return {}
         bw = {}
         for uuid, data in metrics.iteritems():
@@ -1449,43 +1448,6 @@ class VMOps(object):
         # NOTE: XS5.6sp2+ use http over port 80 for xenapi com
         return {'host': FLAGS.vncserver_proxyclient_address, 'port': 80,
                 'internal_access_path': path}
-
-    def host_power_action(self, host, action):
-        """Reboots or shuts down the host."""
-        args = {"action": json.dumps(action)}
-        methods = {"reboot": "host_reboot", "shutdown": "host_shutdown"}
-        json_resp = self._call_xenhost(methods[action], args)
-        resp = json.loads(json_resp)
-        return resp["power_action"]
-
-    def set_host_enabled(self, host, enabled):
-        """Sets the specified host's ability to accept new instances."""
-        args = {"enabled": json.dumps(enabled)}
-        xenapi_resp = self._call_xenhost("set_host_enabled", args)
-        try:
-            resp = json.loads(xenapi_resp)
-        except TypeError as e:
-            # Already logged; return the message
-            return xenapi_resp.details[-1]
-        return resp["status"]
-
-    def _call_xenhost(self, method, arg_dict):
-        """There will be several methods that will need this general
-        handling for interacting with the xenhost plugin, so this abstracts
-        out that behavior.
-        """
-        # Create a task ID as something that won't match any instance ID
-        task_id = random.randint(-80000, -70000)
-        try:
-            task = self._session.async_call_plugin("xenhost", method,
-                    args=arg_dict)
-                    #args={"params": arg_dict})
-            ret = self._session.wait_for_task(task, str(task_id))
-        except self.XenAPI.Failure as e:
-            ret = e
-            LOG.error(_("The call to %(method)s returned an error: %(e)s.")
-                    % locals())
-        return ret
 
     def inject_network_info(self, instance, network_info, vm_ref=None):
         """

@@ -21,13 +21,11 @@
 
 import os
 import random
-import shutil
 
 from nova import exception
 from nova import flags
 from nova.openstack.common import cfg
 from nova import utils
-from nova.virt.disk import api as disk
 from nova.virt import images
 
 
@@ -120,17 +118,22 @@ def copy_image(src, dest):
     execute('cp', src, dest)
 
 
-def mkfs(fs, path):
+def mkfs(fs, path, label=None):
     """Format a file or block device
 
     :param fs: Filesystem type (examples include 'swap', 'ext3', 'ext4'
                'btrfs', etc.)
     :param path: Path to file or block device to format
+    :param label: Volume label to use
     """
     if fs == 'swap':
         execute('mkswap', path)
     else:
-        execute('mkfs', '-t', fs, path)
+        args = ['mkfs', '-t', fs]
+        if label:
+            args.extend(['-n', label])
+        args.append(path)
+        execute(*args)
 
 
 def ensure_tree(path):
@@ -258,4 +261,4 @@ def get_fs_info(path):
 
 def fetch_image(context, target, image_id, user_id, project_id):
     """Grab image"""
-    images.fetch(context, image_id, target, user_id, project_id)
+    images.fetch_to_raw(context, image_id, target, user_id, project_id)

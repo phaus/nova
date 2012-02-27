@@ -49,7 +49,6 @@ import datetime
 import functools
 import itertools
 import math
-import random
 import re
 import socket
 
@@ -197,7 +196,8 @@ class RPCAllocateFixedIP(object):
             if host is None:
                 host = rpc.call(context, FLAGS.network_topic,
                                 {'method': 'set_network_host',
-                                 'args': {'network_ref': network}})
+                                 'args': {'network_ref':
+                                 utils.to_primitive(network)}})
             if host != self.host:
                 # need to call allocate_fixed_ip to correct network host
                 topic = self.db.queue_get_for(context,
@@ -320,11 +320,17 @@ class FloatingIP(object):
         rpc.called by network_api
         """
         instance_id = kwargs.get('instance_id')
+
+        # NOTE(francois.charlier): in some cases the instance might be
+        # deleted before the IPs are released, so we need to get deleted
+        # instances too
+        read_deleted_context = context.elevated(read_deleted='yes')
         LOG.debug(_("floating IP deallocation for instance |%s|"), instance_id,
-                                                               context=context)
+                                                  context=read_deleted_context)
 
         try:
-            fixed_ips = self.db.fixed_ip_get_by_instance(context, instance_id)
+            fixed_ips = self.db.fixed_ip_get_by_instance(read_deleted_context,
+                                                         instance_id)
         except exception.FixedIpNotFoundForInstance:
             fixed_ips = []
         # add to kwargs so we can pass to super to save a db lookup there
@@ -336,11 +342,11 @@ class FloatingIP(object):
             # disassociate floating ips related to fixed_ip
             for floating_ip in floating_ips:
                 address = floating_ip['address']
-                self.disassociate_floating_ip(context, address,
+                self.disassociate_floating_ip(read_deleted_context, address,
                                               affect_auto_assigned=True)
                 # deallocate if auto_assigned
                 if floating_ip['auto_assigned']:
-                    self.deallocate_floating_ip(context, address,
+                    self.deallocate_floating_ip(read_deleted_context, address,
                                                 affect_auto_assigned=True)
 
         # call the next inherited class's deallocate_for_instance()
@@ -684,6 +690,7 @@ class NetworkManager(manager.SchedulerDependentManager):
         self.floating_dns_manager = temp
         self.network_api = network_api.API()
         self.compute_api = compute_api.API()
+        self.sgh = utils.import_object(FLAGS.security_group_handler)
 
         # NOTE(tr3buchet: unless manager subclassing NetworkManager has
         #                 already imported ipam, import nova ipam here
@@ -755,12 +762,16 @@ class NetworkManager(manager.SchedulerDependentManager):
 
     def _do_trigger_security_group_members_refresh_for_instance(self,
                                                                 instance_id):
-        admin_context = context.get_admin_context()
+        # NOTE(francois.charlier): the instance may have been deleted already
+        # thus enabling `read_deleted`
+        admin_context = context.get_admin_context(read_deleted='yes')
         instance_ref = self.db.instance_get(admin_context, instance_id)
         groups = instance_ref['security_groups']
         group_ids = [group['id'] for group in groups]
         self.compute_api.trigger_security_group_members_refresh(admin_context,
-                                                                    group_ids)
+                                                                group_ids)
+        self.sgh.trigger_security_group_members_refresh(admin_context,
+                                                        group_ids)
 
     def get_floating_ips_by_fixed_address(self, context, fixed_address):
         # NOTE(jkoelker) This is just a stub function. Managers supporting
@@ -857,11 +868,14 @@ class NetworkManager(manager.SchedulerDependentManager):
         requested_networks = kwargs.get('requested_networks')
         vpn = kwargs['vpn']
         admin_context = context.elevated()
-        LOG.debug(_("network allocations for instance %s"), instance_id,
+        LOG.debug(_("network allocations for instance |%s|"), instance_id,
                                                             context=context)
         networks = self._get_networks_for_instance(admin_context,
                                         instance_id, project_id,
                                         requested_networks=requested_networks)
+        msg = _('networks retrieved for instance |%(instance_id)s|: '
+                '|%(networks)s|')
+        LOG.debug(msg, locals(), context=context)
         self._allocate_mac_addresses(context, instance_id, networks)
         self._allocate_fixed_ips(admin_context, instance_id,
                                  host, networks, vpn=vpn,
@@ -876,25 +890,32 @@ class NetworkManager(manager.SchedulerDependentManager):
         rpc.called by network_api
         kwargs can contain fixed_ips to circumvent another db lookup
         """
+        # NOTE(francois.charlier): in some cases the instance might be
+        # deleted before the IPs are released, so we need to get deleted
+        # instances too
+        read_deleted_context = context.elevated(read_deleted='yes')
+
         instance_id = kwargs.pop('instance_id')
         try:
             fixed_ips = (kwargs.get('fixed_ips') or
-                         self.db.fixed_ip_get_by_instance(context,
+                         self.db.fixed_ip_get_by_instance(read_deleted_context,
                                                           instance_id))
         except exception.FixedIpNotFoundForInstance:
             fixed_ips = []
         LOG.debug(_("network deallocation for instance |%s|"), instance_id,
-                                                               context=context)
+                                                  context=read_deleted_context)
         # deallocate fixed ips
         for fixed_ip in fixed_ips:
-            self.deallocate_fixed_ip(context, fixed_ip['address'], **kwargs)
+            self.deallocate_fixed_ip(read_deleted_context, fixed_ip['address'],
+                                     **kwargs)
 
         # deallocate vifs (mac addresses)
-        self.db.virtual_interface_delete_by_instance(context, instance_id)
+        self.db.virtual_interface_delete_by_instance(read_deleted_context,
+                                                     instance_id)
 
     @wrap_check_policy
     def get_instance_nw_info(self, context, instance_id, instance_uuid,
-                             rxtx_factor, host):
+                                            rxtx_factor, host, **kwargs):
         """Creates network info list for instance.
 
         called by allocate_for_instance and network_api
@@ -1217,7 +1238,8 @@ class NetworkManager(manager.SchedulerDependentManager):
 
     def create_networks(self, context, label, cidr, multi_host, num_networks,
                         network_size, cidr_v6, gateway, gateway_v6, bridge,
-                        bridge_interface, dns1=None, dns2=None, **kwargs):
+                        bridge_interface, dns1=None, dns2=None,
+                        fixed_cidr=None, **kwargs):
         """Create networks based on parameters."""
         # NOTE(jkoelker): these are dummy values to make sure iter works
         # TODO(tr3buchet): disallow carving up networks
@@ -1347,7 +1369,7 @@ class NetworkManager(manager.SchedulerDependentManager):
                 networks.append(network)
 
             if network and cidr and subnet_v4:
-                self._create_fixed_ips(context, network['id'])
+                self._create_fixed_ips(context, network['id'], fixed_cidr)
         return networks
 
     @wrap_check_policy
@@ -1375,18 +1397,19 @@ class NetworkManager(manager.SchedulerDependentManager):
         """Number of reserved ips at the top of the range."""
         return 1  # broadcast
 
-    def _create_fixed_ips(self, context, network_id):
+    def _create_fixed_ips(self, context, network_id, fixed_cidr=None):
         """Create all fixed ips for network."""
         network = self._get_network_by_id(context, network_id)
         # NOTE(vish): Should these be properties of the network as opposed
         #             to properties of the manager class?
         bottom_reserved = self._bottom_reserved_ips
         top_reserved = self._top_reserved_ips
-        project_net = netaddr.IPNetwork(network['cidr'])
-        num_ips = len(project_net)
+        if not fixed_cidr:
+            fixed_cidr = netaddr.IPNetwork(network['cidr'])
+        num_ips = len(fixed_cidr)
         ips = []
         for index in range(num_ips):
-            address = str(project_net[index])
+            address = str(fixed_cidr[index])
             if index < bottom_reserved or num_ips - index <= top_reserved:
                 reserved = True
             else:
@@ -1471,6 +1494,11 @@ class NetworkManager(manager.SchedulerDependentManager):
     def get_fixed_ip(self, context, id):
         """Return a fixed ip"""
         fixed = self.db.fixed_ip_get(context, id)
+        return dict(fixed.iteritems())
+
+    @wrap_check_policy
+    def get_fixed_ip_by_address(self, context, address):
+        fixed = self.db.fixed_ip_get_by_address(context, address)
         return dict(fixed.iteritems())
 
     def get_vif_by_mac_address(self, context, mac_address):

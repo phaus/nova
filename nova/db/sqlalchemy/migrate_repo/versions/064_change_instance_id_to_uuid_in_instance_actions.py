@@ -15,26 +15,22 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import sqlalchemy
-from sqlalchemy import select, Column, ForeignKey, Integer, String
+from sqlalchemy import select, Column, ForeignKey, Integer
+from sqlalchemy import MetaData, String, Table
 from migrate import ForeignKeyConstraint
 
 from nova import log as logging
 
 
 LOG = logging.getLogger(__name__)
-meta = sqlalchemy.MetaData()
-
-
-def _get_table(name):
-    return sqlalchemy.Table(name, meta, autoload=True)
 
 
 def upgrade(migrate_engine):
+    meta = MetaData()
     meta.bind = migrate_engine
     dialect = migrate_engine.url.get_dialect().name
-    instance_actions = _get_table('instance_actions')
-    instances = _get_table('instances')
+    instance_actions = Table('instance_actions', meta, autoload=True)
+    instances = Table('instances', meta, autoload=True)
     uuid_column = Column('instance_uuid', String(36))
     uuid_column.create(instance_actions)
 
@@ -56,7 +52,7 @@ def upgrade(migrate_engine):
                 ForeignKeyConstraint(columns=[instance_actions.c.instance_id],
                                      refcolumns=[instances.c.id],
                                      name=fkey_name).drop()
-            except:
+            except Exception:
                 LOG.error(_("foreign key constraint couldn't be removed"))
                 raise
 
@@ -64,9 +60,10 @@ def upgrade(migrate_engine):
 
 
 def downgrade(migrate_engine):
+    meta = MetaData()
     meta.bind = migrate_engine
-    instance_actions = _get_table('instance_actions')
-    instances = _get_table('instances')
+    instance_actions = Table('instance_actions', meta, autoload=True)
+    instances = Table('instances', meta, autoload=True)
     id_column = Column('instance_id', Integer, ForeignKey('instances.id'))
     id_column.create(instance_actions)
 

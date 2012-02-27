@@ -506,11 +506,12 @@ def compute_node_create(context, values, session=None):
 
 
 @require_admin_context
-def compute_node_update(context, compute_id, values):
+def compute_node_update(context, compute_id, values, auto_adjust):
     """Creates a new ComputeNode and populates the capacity fields
     with the most recent data."""
     session = get_session()
-    _adjust_compute_node_values_for_utilization(context, values, session)
+    if auto_adjust:
+        _adjust_compute_node_values_for_utilization(context, values, session)
     with session.begin(subtransactions=True):
         compute_ref = compute_node_get(context, compute_id, session=session)
         compute_ref.update(values)
@@ -1354,11 +1355,12 @@ def instance_create(context, values):
     context - request context object
     values - dict containing column values.
     """
+    values = values.copy()
     values['metadata'] = _metadata_refs(values.get('metadata'),
                                         models.InstanceMetadata)
     instance_ref = models.Instance()
-    instance_ref['uuid'] = str(utils.gen_uuid())
-
+    if not values.get('uuid'):
+        values['uuid'] = str(utils.gen_uuid())
     instance_ref.update(values)
 
     session = get_session()
@@ -1388,7 +1390,13 @@ def instance_data_get_for_project(context, project_id):
 def instance_destroy(context, instance_id):
     session = get_session()
     with session.begin():
-        instance_ref = instance_get(context, instance_id, session=session)
+        if utils.is_uuid_like(instance_id):
+            instance_ref = instance_get_by_uuid(context, instance_id,
+                    session=session)
+            instance_id = instance_ref['id']
+        else:
+            instance_ref = instance_get(context, instance_id,
+                    session=session)
         session.query(models.Instance).\
                 filter_by(id=instance_id).\
                 update({'deleted': True,
@@ -1412,6 +1420,7 @@ def instance_destroy(context, instance_id):
 
         instance_info_cache_delete(context, instance_ref['uuid'],
                                    session=session)
+    return instance_ref
 
 
 @require_context
@@ -1520,7 +1529,7 @@ def instance_get_all_by_filters(context, filters):
     filters = filters.copy()
 
     if 'changes-since' in filters:
-        changes_since = filters['changes-since']
+        changes_since = utils.normalize_time(filters['changes-since'])
         query_prefix = query_prefix.\
                             filter(models.Instance.updated_at > changes_since)
 
@@ -1602,7 +1611,9 @@ def instance_get_active_by_window_joined(context, begin, end=None,
     session = get_session()
     query = session.query(models.Instance)
 
-    query = query.options(joinedload('security_groups')).\
+    query = query.options(joinedload('info_cache')).\
+                  options(joinedload('security_groups')).\
+                  options(joinedload('metadata')).\
                   options(joinedload('instance_type')).\
                   filter(or_(models.Instance.terminated_at == None,
                              models.Instance.terminated_at > begin))
@@ -1984,9 +1995,16 @@ def network_count_reserved_ips(context, network_id):
 
 @require_admin_context
 def network_create_safe(context, values):
+    if values.get('vlan'):
+        if model_query(context, models.Network, read_deleted="no")\
+                      .filter_by(vlan=values['vlan'])\
+                      .first():
+            raise exception.DuplicateVlan(vlan=values['vlan'])
+
     network_ref = models.Network()
     network_ref['uuid'] = str(utils.gen_uuid())
     network_ref.update(values)
+
     try:
         network_ref.save()
         return network_ref
@@ -2817,6 +2835,41 @@ def security_group_exists(context, project_id, group_name):
 
 
 @require_context
+def security_group_in_use(context, group_id):
+    session = get_session()
+    with session.begin():
+        # Are there any other groups that haven't been deleted
+        # that include this group in their rules?
+        rules = session.query(models.SecurityGroupIngressRule).\
+                filter_by(group_id=group_id).\
+                filter_by(deleted=False).\
+                all()
+        for r in rules:
+            num_groups = session.query(models.SecurityGroup).\
+                        filter_by(deleted=False).\
+                        filter_by(id=r.parent_group_id).\
+                        count()
+            if num_groups:
+                return True
+
+        # Are there any instances that haven't been deleted
+        # that include this group?
+        inst_assoc = session.query(models.SecurityGroupInstanceAssociation).\
+                filter_by(security_group_id=group_id).\
+                filter_by(deleted=False).\
+                all()
+        for ia in inst_assoc:
+            num_instances = session.query(models.Instance).\
+                        filter_by(deleted=False).\
+                        filter_by(id=ia.instance_id).\
+                        count()
+            if num_instances:
+                return True
+
+    return False
+
+
+@require_context
 def security_group_create(context, values):
     security_group_ref = models.SecurityGroup()
     # FIXME(devcamcar): Unless I do this, rules fails with lazy load exception
@@ -3534,7 +3587,7 @@ def zone_get(context, zone_id):
 
 @require_admin_context
 def zone_get_all(context):
-    return model_query(context, models.Zone, read_deleted="yes").all()
+    return model_query(context, models.Zone, read_deleted="no").all()
 
 
 ####################
@@ -3695,7 +3748,7 @@ def bw_usage_get_all_by_filters(context, filters):
     filters = filters.copy()
 
     # Filters for exact matches that we can do along with the SQL query.
-    exact_match_filter_names = ["instance_id", "network_label",
+    exact_match_filter_names = ["instance_id", "mac",
             "start_period", "last_refreshed", "bw_in", "bw_out"]
 
     # Filter the query
@@ -3717,7 +3770,7 @@ def bw_usage_update(context,
 
     with session.begin():
         bwusage = model_query(context, models.BandwidthUsage,
-                              read_deleted="yes").\
+                              session=session, read_deleted="yes").\
                       filter_by(instance_id=instance_id).\
                       filter_by(start_period=start_period).\
                       filter_by(mac=mac).\
@@ -4254,12 +4307,24 @@ def _aggregate_get_query(context, model_class, id_field, id,
 
 @require_admin_context
 def aggregate_create(context, values, metadata=None):
-    try:
+    session = get_session()
+    aggregate = _aggregate_get_query(context,
+                                     models.Aggregate,
+                                     models.Aggregate.name,
+                                     values['name'],
+                                     session=session,
+                                     read_deleted='yes').first()
+    if not aggregate:
         aggregate = models.Aggregate()
+        values.setdefault('operational_state', aggregate_states.CREATED)
         aggregate.update(values)
-        aggregate.operational_state = aggregate_states.CREATED
-        aggregate.save()
-    except exception.DBError:
+        aggregate.save(session=session)
+    elif aggregate.deleted:
+        aggregate.update({'deleted': False,
+                          'deleted_at': None,
+                          'availability_zone': values['availability_zone']})
+        aggregate.save(session=session)
+    else:
         raise exception.AggregateNameExists(aggregate_name=values['name'])
     if metadata:
         aggregate_metadata_add(context, aggregate.id, metadata)
@@ -4277,6 +4342,20 @@ def aggregate_get(context, aggregate_id, read_deleted='no'):
         raise exception.AggregateNotFound(aggregate_id=aggregate_id)
 
     return aggregate
+
+
+@require_admin_context
+def aggregate_get_by_host(context, host, read_deleted='no'):
+    aggregate_host = _aggregate_get_query(context,
+                                          models.AggregateHost,
+                                          models.AggregateHost.host,
+                                          host,
+                                          read_deleted='no').first()
+
+    if not aggregate_host:
+        raise exception.AggregateHostNotFound(host=host)
+
+    return aggregate_get(context, aggregate_host.aggregate_id, read_deleted)
 
 
 @require_admin_context
@@ -4392,8 +4471,7 @@ def aggregate_metadata_add(context, aggregate_id, metadata, set_delete=False):
             meta_ref = aggregate_metadata_get_item(context, aggregate_id,
                                                   meta_key, session)
             if meta_ref.deleted:
-                item.update({'deleted': False, 'deleted_at': None,
-                             'updated_at': literal_column('updated_at')})
+                item.update({'deleted': False, 'deleted_at': None})
         except exception.AggregateMetadataNotFound:
             meta_ref = models.AggregateMetadata()
             item.update({"key": meta_key, "aggregate_id": aggregate_id})
@@ -4452,9 +4530,7 @@ def aggregate_host_add(context, aggregate_id, host):
         except exception.DBError:
             raise exception.AggregateHostConflict(host=host)
     elif host_ref.deleted:
-        host_ref.update({'deleted': False,
-                         'deleted_at': None,
-                         'updated_at': literal_column('updated_at')})
+        host_ref.update({'deleted': False, 'deleted_at': None})
         host_ref.save(session=session)
     else:
         raise exception.AggregateHostExists(host=host,

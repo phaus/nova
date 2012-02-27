@@ -79,8 +79,8 @@ class Request(webob.Request):
             if not content_type:
                 content_type = self.accept.best_match(SUPPORTED_CONTENT_TYPES)
 
-            self.environ['nova.best_content_type'] = content_type or \
-                'application/json'
+            self.environ['nova.best_content_type'] = (content_type or
+                                                      'application/json')
 
         return self.environ['nova.best_content_type']
 
@@ -199,6 +199,17 @@ class XMLDeserializer(TextDeserializer):
             if child.nodeType == child.TEXT_NODE:
                 return child.nodeValue
         return ""
+
+    def find_attribute_or_element(self, parent, name):
+        """Get an attribute value; fallback to an element if not found"""
+        if parent.hasAttribute(name):
+            return parent.getAttribute(name)
+
+        node = self.find_first_child_named(parent, name)
+        if node:
+            return self.extract_text(node)
+
+        return None
 
     def default(self, datastring):
         return {'body': self._from_xml(datastring)}

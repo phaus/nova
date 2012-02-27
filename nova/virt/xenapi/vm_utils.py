@@ -25,10 +25,10 @@ import json
 import os
 import pickle
 import re
-import sys
 import tempfile
 import time
 import urllib
+import urlparse
 import uuid
 from decimal import Decimal, InvalidOperation
 from xml.dom import minidom
@@ -69,6 +69,12 @@ xenapi_vm_utils_opts = [
                     'other-config:my_favorite_sr=true. On the other hand, to '
                     'fall back on the Default SR, as displayed by XenCenter, '
                     'set this flag to: default-sr:true'),
+    cfg.BoolOpt('xenapi_sparse_copy',
+                default=True,
+                help='Whether to use sparse_copy for copying data on a '
+                     'resize down (False will use standard dd). This speeds '
+                     'up resizes down considerably since large runs of zeros '
+                     'won\'t have to be rsynced')
     ]
 
 FLAGS = flags.FLAGS
@@ -169,8 +175,8 @@ class VMHelper(HelperBase):
             'memory_target': mem,
             'name_description': '',
             'name_label': instance.name,
-            'other_config': {'allowvssprovider': False},
-            'other_config': {},
+            'other_config': {'allowvssprovider': str(False),
+                             'nova_uuid': str(instance.uuid), },
             'PCI_bus': '',
             'platform': {'acpi': 'true', 'apic': 'true', 'pae': 'true',
                          'viridian': 'true', 'timeoffset': '0'},
@@ -856,7 +862,7 @@ class VMHelper(HelperBase):
         except (cls.XenAPI.Failure, IOError, OSError) as e:
             # We look for XenAPI and OS failures.
             LOG.exception(_("instance %s: Failed to fetch glance image"),
-                          instance_id, exc_info=sys.exc_info())
+                          instance_id)
             e.args = e.args + ([dict(vdi_type=ImageType.
                                               to_string(image_type),
                                     vdi_uuid=vdi_uuid,
@@ -946,7 +952,8 @@ class VMHelper(HelperBase):
     @classmethod
     def list_vms(cls, session):
         for vm_ref, vm_rec in cls.get_all_refs_and_recs(session, 'VM'):
-            if vm_rec["is_a_template"] or vm_rec["is_control_domain"]:
+            if (vm_rec["resident_on"] != session.get_xenapi_host() or
+                vm_rec["is_a_template"] or vm_rec["is_control_domain"]):
                 continue
             else:
                 yield vm_ref, vm_rec
@@ -1036,14 +1043,9 @@ class VMHelper(HelperBase):
     def compile_diagnostics(cls, session, record):
         """Compile VM diagnostics data"""
         try:
-            host = session.get_xenapi_host()
-            host_ip = session.call_xenapi("host.get_record", host)["address"]
-        except (cls.XenAPI.Failure, KeyError) as e:
-            return {"Unable to retrieve diagnostics": e}
-
-        try:
             diags = {}
-            xml = get_rrd(host_ip, record["uuid"])
+            vm_uuid = record["uuid"]
+            xml = get_rrd(get_rrd_server(), vm_uuid)
             if xml:
                 rrd = minidom.parseString(xml)
                 for i, node in enumerate(rrd.firstChild.childNodes):
@@ -1055,7 +1057,8 @@ class VMHelper(HelperBase):
                             _ref_zero = ref[0].firstChild.data
                             diags[_ref_zero] = ref[6].firstChild.data
             return diags
-        except cls.XenAPI.Failure as e:
+        except expat.ExpatError as e:
+            LOG.exception(_('Unable to parse rrd of %(vm_uuid)s') % locals())
             return {"Unable to retrieve diagnostics": e}
 
     @classmethod
@@ -1063,13 +1066,8 @@ class VMHelper(HelperBase):
         """Compile bandwidth usage, cpu, and disk metrics for all VMs on
            this host"""
         start_time = int(start_time)
-        try:
-            host = session.get_xenapi_host()
-            host_ip = session.call_xenapi("host.get_record", host)["address"]
-        except (cls.XenAPI.Failure, KeyError) as e:
-            raise exception.CouldNotFetchMetrics()
 
-        xml = get_rrd_updates(host_ip, start_time)
+        xml = get_rrd_updates(get_rrd_server(), start_time)
         if xml:
             doc = minidom.parseString(xml)
             return parse_rrd_update(doc, start_time, stop_time)
@@ -1178,29 +1176,41 @@ class VMHelper(HelperBase):
         return None
 
 
-def get_rrd(host, vm_uuid):
+def get_rrd_server():
+    """Return server's scheme and address to use for retrieving RRD XMLs."""
+    xs_url = urlparse.urlparse(FLAGS.xenapi_connection_url)
+    return [xs_url.scheme, xs_url.netloc]
+
+
+def get_rrd(server, vm_uuid):
     """Return the VM RRD XML as a string"""
     try:
-        xml = urllib.urlopen("http://%s:%s@%s/vm_rrd?uuid=%s" % (
+        xml = urllib.urlopen("%s://%s:%s@%s/vm_rrd?uuid=%s" % (
+            server[0],
             FLAGS.xenapi_connection_username,
             FLAGS.xenapi_connection_password,
-            host,
+            server[1],
             vm_uuid))
         return xml.read()
     except IOError:
+        LOG.exception(_('Unable to obtain RRD XML for VM %(vm_uuid)s with '
+                        'server details: %(server)s.') % locals())
         return None
 
 
-def get_rrd_updates(host, start_time):
+def get_rrd_updates(server, start_time):
     """Return the RRD updates XML as a string"""
     try:
-        xml = urllib.urlopen("http://%s:%s@%s/rrd_updates?start=%s" % (
+        xml = urllib.urlopen("%s://%s:%s@%s/rrd_updates?start=%s" % (
+            server[0],
             FLAGS.xenapi_connection_username,
             FLAGS.xenapi_connection_password,
-            host,
+            server[1],
             start_time))
         return xml.read()
     except IOError:
+        LOG.exception(_('Unable to obtain RRD XML updates with '
+                        'server details: %(server)s.') % locals())
         return None
 
 
@@ -1599,7 +1609,10 @@ def _resize_part_and_fs(dev, start, old_sectors, new_sectors):
     partition_path = utils.make_dev_path(dev, partition=1)
 
     # Replay journal if FS wasn't cleanly unmounted
-    utils.execute('e2fsck', '-f', '-y', partition_path, run_as_root=True)
+    # Exit Code 1 = File system errors corrected
+    #           2 = File system errors corrected, system needs a reboot
+    utils.execute('e2fsck', '-f', '-y', partition_path, run_as_root=True,
+                  check_exit_code=[0, 1, 2])
 
     # Remove ext3 journal (making it ext2)
     utils.execute('tune2fs', '-O ^has_journal', partition_path,
@@ -1626,6 +1639,45 @@ def _resize_part_and_fs(dev, start, old_sectors, new_sectors):
     utils.execute('tune2fs', '-j', partition_path, run_as_root=True)
 
 
+def _sparse_copy(src_path, dst_path, virtual_size, block_size=4096):
+    """Copy data, skipping long runs of zeros to create a sparse file."""
+    start_time = time.time()
+    EMPTY_BLOCK = '\0' * block_size
+    bytes_read = 0
+    skipped_bytes = 0
+    left = virtual_size
+
+    LOG.debug(_("Starting sparse_copy src=%(src_path)s dst=%(dst_path)s "
+                "virtual_size=%(virtual_size)d block_size=%(block_size)d"),
+                locals())
+
+    with open(src_path, "r") as src:
+        with open(dst_path, "w") as dst:
+            data = src.read(min(block_size, left))
+            while data:
+                if data == EMPTY_BLOCK:
+                    dst.seek(block_size, os.SEEK_CUR)
+                    left -= block_size
+                    bytes_read += block_size
+                    skipped_bytes += block_size
+                else:
+                    dst.write(data)
+                    data_len = len(data)
+                    left -= data_len
+                    bytes_read += data_len
+
+                if left <= 0:
+                    break
+
+                data = src.read(min(block_size, left))
+
+    duration = time.time() - start_time
+    compression_pct = float(skipped_bytes) / bytes_read * 100
+
+    LOG.debug(_("Finished sparse_copy in %(duration).2f secs, "
+                "%(compression_pct).2f%% reduction in size"), locals())
+
+
 def _copy_partition(session, src_ref, dst_ref, partition, virtual_size):
     # Part of disk taken up by MBR
     virtual_size -= MBR_SIZE_BYTES
@@ -1638,12 +1690,15 @@ def _copy_partition(session, src_ref, dst_ref, partition, virtual_size):
 
             _write_partition(virtual_size, dst)
 
-            num_blocks = virtual_size / SECTOR_SIZE
-            utils.execute('dd',
-                          'if=%s' % src_path,
-                          'of=%s' % dst_path,
-                          'count=%d' % num_blocks,
-                          run_as_root=True)
+            if FLAGS.xenapi_sparse_copy:
+                _sparse_copy(src_path, dst_path, virtual_size)
+            else:
+                num_blocks = virtual_size / SECTOR_SIZE
+                utils.execute('dd',
+                              'if=%s' % src_path,
+                              'of=%s' % dst_path,
+                              'count=%d' % num_blocks,
+                              run_as_root=True)
 
 
 def _mount_filesystem(dev_path, dir):
@@ -1700,8 +1755,11 @@ def _mounted_processing(device, key, net, metadata):
                 if not _find_guest_agent(tmpdir, FLAGS.xenapi_agent_path):
                     LOG.info(_('Manipulating interface files '
                             'directly'))
-                    disk.inject_data_into_fs(tmpdir, key, net, metadata,
-                        utils.execute)
+                    # for xenapi, we don't 'inject' admin_password here,
+                    # it's handled at instance startup time
+                    disk.inject_data_into_fs(tmpdir,
+                                             key, net, None, metadata,
+                                             utils.execute)
             finally:
                 utils.execute('umount', dev_path, run_as_root=True)
         else:
