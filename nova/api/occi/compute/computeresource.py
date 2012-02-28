@@ -312,8 +312,12 @@ class ComputeBackend(backends.MyBackend):
             sj = json.loads(sj)
         vm_net_info['vm_iface'] = \
                         sj[0]['network']['meta']['bridge_interface']
-        vm_net_info['address'] = \
+        #OS-specific if a VM is stopped it has no IP address
+        if len(sj[0]['network']['subnets'][0]['ips']) > 0:
+            vm_net_info['address'] = \
                         sj[0]['network']['subnets'][0]['ips'][0]['address']
+        else:
+            vm_net_info['address'] = ''
         vm_net_info['gateway'] = \
                         sj[0]['network']['subnets'][0]['gateway']['address']
         
@@ -610,10 +614,11 @@ class ComputeBackend(backends.MyBackend):
         # of computes known by occi, a call to get the latest representation 
         # must be made.
         # openstack also allows pause and unpause
+        
         instance = self.retrieve(entity, extras)
 
         context = extras['nova_ctx']
-
+        
         if action not in entity.actions:
             raise AttributeError("This action is not currently applicable.")
         elif action == infrastructure.START:
@@ -635,15 +640,14 @@ class ComputeBackend(backends.MyBackend):
         else:
             raise exc.HTTPBadRequest()
         
-
     def _start_vm(self, entity, instance, context):
         LOG.info('Starting virtual machine with id' + entity.identifier)
         
         try:
             if entity.attributes['occi.compute.state'] == 'suspended':
-                self.compute_api.resume(context, instance)
+                self.compute_api.unpause(context, instance)
             else:
-                self.compute_api.start(context, instance)
+                self.compute_api.resume(context, instance)
         except Exception:
             LOG.error('Error in starting VM')
             raise exc.HTTPServerError()
@@ -663,7 +667,10 @@ class ComputeBackend(backends.MyBackend):
             LOG.info('OS only allows one type of stop. \
                             What is specified in the request will be ignored.')
         try:
-            self.compute_api.stop(context, instance)
+            # FIXME: There are issues with the stop and start methods of OS
+            #        For now we'll use suspend
+            # self.compute_api.stop(context, instance)
+            self.compute_api.suspend(context, instance)
         except Exception:
             LOG.error('Error in stopping VM')
             raise exc.HTTPServerError()
@@ -697,12 +704,13 @@ class ComputeBackend(backends.MyBackend):
 
 
     def _suspend_vm(self, entity, instance, context):
-        LOG.info('Suspending virtual machine with id' + entity.identifier)
+        LOG.info('Stopping (suspending) virtual machine with id' + \
+                                                            entity.identifier)
         if entity.attributes.has_key('method'):
             LOG.info('OS only allows one type of suspend. \
                             What is specified in the request will be ignored.')
         try:
-            self.compute_api.suspend(context, instance)
+            self.compute_api.pause(context, instance)
         except Exception:
             LOG.error('Error in stopping VM')
             raise exc.HTTPServerError()
@@ -720,10 +728,7 @@ class ComputeBackend(backends.MyBackend):
         new_password = entity.attributes['org.openstack.credentials.admin_pwd']
         self.compute_api.set_admin_password(context, instance, new_password)
         
-        entity.attributes['occi.compute.state'] = 'active'
-        #TODO: update actions
-        entity.actions = [infrastructure.STOP, infrastructure.SUSPEND, \
-                                                        infrastructure.RESTART]
+        # No need to update attributes - state remains the same.
 
 
     def _os_revert_resize_vm(self, entity, instance, context):
