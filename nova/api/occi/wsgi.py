@@ -109,9 +109,10 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         #  Just use the openstack header! Ya ha ha ha!
         
         #L8R this might be pushed into the context middleware
-        nova_ctx.project_id = environ.get('HTTP_X_AUTH_PROJECT_ID', None)
+#        nova_ctx.project_id = environ.get('HTTP_X_AUTH_PROJECT_ID', None)
+        nova_ctx.project_id = environ.get('HTTP_X_AUTH_TENANT_ID', None)
         if nova_ctx.project_id == None:
-            LOG.error('No project ID header was supplied in the request')
+            LOG.error('No project/tenant ID header was supplied in the request')
         
         # register openstack images
         self._register_os_mixins(backends.OsMixinBackend(), nova_ctx)
@@ -281,7 +282,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         return attrs
        
 
-    def _register_os_mixins(self, os_mixin_backend, context):
+    def _register_os_mixins(self, os_mixin_backend, ctx):
         '''
         Register the os mixins from information retrieved frrom glance.
         '''
@@ -289,7 +290,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         os_schema = 'http://schemas.ogf.org/occi/infrastructure#os_tpl'
 
         image_service = image.get_default_image_service()
-        images = image_service.detail(context)
+        images = image_service.detail(ctx)
 
         # L8R: now the API allows users to supply RAM and Kernel images
         filter_kernel_and_ram_images = \
