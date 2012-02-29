@@ -119,7 +119,8 @@ class StorageBackend(backends.MyBackend):
         except exception.NotFound:
             raise exc.HTTPNotFound()
 
-        entity.attributes['occi.storage.size'] = float(vol['size'])
+        #FIXME: this should not need to be stringified!
+        entity.attributes['occi.storage.size'] = str(float(vol['size']))
         
         # OS volume states:
         #       available, creating, deleting, in-use, error, error_deleting
