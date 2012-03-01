@@ -642,11 +642,6 @@ def instance_get_floating_address(context, instance_id):
     return IMPL.instance_get_floating_address(context, instance_id)
 
 
-def instance_get_project_vpn(context, project_id):
-    """Get a vpn instance by project or return None."""
-    return IMPL.instance_get_project_vpn(context, project_id)
-
-
 def instance_get_all_hung_in_rebooting(context, reboot_window):
     """Get all instances stuck in a rebooting state."""
     return IMPL.instance_get_all_hung_in_rebooting(context, reboot_window)
@@ -871,11 +866,6 @@ def network_get_all_by_host(context, host):
 def network_get_index(context, network_id):
     """Get non-conflicting index for network."""
     return IMPL.network_get_index(context, network_id)
-
-
-def network_get_vpn_ip(context, network_id):
-    """Get non-conflicting index for network."""
-    return IMPL.network_get_vpn_ip(context, network_id)
 
 
 def network_set_cidr(context, network_id, cidr):
@@ -1458,29 +1448,29 @@ def instance_type_destroy(context, name):
 ####################
 
 
-def zone_create(context, values):
-    """Create a new child Zone entry."""
-    return IMPL.zone_create(context, values)
+def cell_create(context, values):
+    """Create a new child Cell entry."""
+    return IMPL.cell_create(context, values)
 
 
-def zone_update(context, zone_id, values):
-    """Update a child Zone entry."""
-    return IMPL.zone_update(context, zone_id, values)
+def cell_update(context, cell_id, values):
+    """Update a child Cell entry."""
+    return IMPL.cell_update(context, cell_id, values)
 
 
-def zone_delete(context, zone_id):
-    """Delete a child Zone."""
-    return IMPL.zone_delete(context, zone_id)
+def cell_delete(context, cell_id):
+    """Delete a child Cell."""
+    return IMPL.cell_delete(context, cell_id)
 
 
-def zone_get(context, zone_id):
-    """Get a specific child Zone."""
-    return IMPL.zone_get(context, zone_id)
+def cell_get(context, cell_id):
+    """Get a specific child Cell."""
+    return IMPL.cell_get(context, cell_id)
 
 
-def zone_get_all(context):
-    """Get all child Zones."""
-    return IMPL.zone_get_all(context)
+def cell_get_all(context):
+    """Get all child Cells."""
+    return IMPL.cell_get_all(context)
 
 
 ####################
@@ -1533,9 +1523,9 @@ def agent_build_update(context, agent_build_id, values):
 ####################
 
 
-def bw_usage_get_by_instance(context, instance_id, start_period):
+def bw_usage_get_by_macs(context, macs, start_period):
     """Return bw usages for an instance in a given audit period."""
-    return IMPL.bw_usage_get_by_instance(context, instance_id, start_period)
+    return IMPL.bw_usage_get_by_macs(context, macs, start_period)
 
 
 def bw_usage_get_all_by_filters(context, filters):
@@ -1544,14 +1534,12 @@ def bw_usage_get_all_by_filters(context, filters):
 
 
 def bw_usage_update(context,
-                    instance_id,
                     mac,
                     start_period,
                     bw_in, bw_out):
     """Update cached bw usage for an instance and network
        Creates new record if needed."""
     return IMPL.bw_usage_update(context,
-                                instance_id,
                                 mac,
                                 start_period,
                                 bw_in, bw_out)

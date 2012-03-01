@@ -18,10 +18,11 @@
 import inspect
 from xml.dom import minidom
 from xml.parsers import expat
+import math
+import time
 
 from lxml import etree
 import webob
-from webob import exc
 
 from nova import exception
 from nova import log as logging
@@ -574,7 +575,9 @@ class ResourceExceptionHandler(object):
             msg = unicode(ex_value)
             raise Fault(webob.exc.HTTPForbidden(explanation=msg))
         elif isinstance(ex_value, TypeError):
-            LOG.exception(ex_value)
+            exc_info = (ex_type, ex_value, ex_traceback)
+            LOG.error(_('Exception handling resource: %s') % ex_value,
+                    exc_info=exc_info)
             raise Fault(webob.exc.HTTPBadRequest())
         elif isinstance(ex_value, Fault):
             LOG.info(_("Fault thrown: %s"), unicode(ex_value))
@@ -1074,7 +1077,8 @@ class OverLimitFault(webob.exc.HTTPException):
         """
         Initialize new `OverLimitFault` with relevant information.
         """
-        self.wrapped_exc = webob.exc.HTTPRequestEntityTooLarge()
+        hdrs = OverLimitFault._retry_after(retry_time)
+        self.wrapped_exc = webob.exc.HTTPRequestEntityTooLarge(headers=hdrs)
         self.content = {
             "overLimitFault": {
                 "code": self.wrapped_exc.status_int,
@@ -1082,6 +1086,13 @@ class OverLimitFault(webob.exc.HTTPException):
                 "details": details,
             },
         }
+
+    @staticmethod
+    def _retry_after(retry_time):
+        delay = int(math.ceil(retry_time - time.time()))
+        retry_after = delay if delay > 0 else 0
+        headers = {'Retry-After': '%d' % retry_after}
+        return headers
 
     @webob.dec.wsgify(RequestClass=Request)
     def __call__(self, request):

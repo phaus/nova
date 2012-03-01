@@ -24,9 +24,7 @@ Nova authentication management
 """
 
 import os
-import shutil
 import string  # pylint: disable=W0402
-import tempfile
 import uuid
 import zipfile
 
@@ -330,7 +328,7 @@ class AuthManager(object):
             LOG.debug(_('user.secret: %s'), user.secret)
             LOG.debug(_('expected_signature: %s'), expected_signature)
             LOG.debug(_('signature: %s'), signature)
-            if signature != expected_signature:
+            if not utils.strcmp_const_time(signature, expected_signature):
                 LOG.audit(_("Invalid signature for user %s"), user.name)
                 raise exception.InvalidSignature(signature=signature,
                                                  user=user)
@@ -342,7 +340,7 @@ class AuthManager(object):
             LOG.debug(_('user.secret: %s'), user.secret)
             LOG.debug(_('expected_signature: %s'), expected_signature)
             LOG.debug(_('signature: %s'), signature)
-            if signature != expected_signature:
+            if not utils.strcmp_const_time(signature, expected_signature):
                 (addr_str, port_str) = utils.parse_server_string(server_string)
                 # If the given server_string contains port num, try without it.
                 if port_str != '':
@@ -351,7 +349,7 @@ class AuthManager(object):
                                                        addr_str, path)
                     LOG.debug(_('host_only_signature: %s'),
                               host_only_signature)
-                    if signature == host_only_signature:
+                    if utils.strcmp_const_time(signature, host_only_signature):
                         return (user, project)
                 LOG.audit(_("Invalid signature for user %s"), user.name)
                 raise exception.InvalidSignature(signature=signature,
@@ -767,45 +765,44 @@ class AuthManager(object):
         pid = Project.safe_id(project)
         private_key, signed_cert = crypto.generate_x509_cert(user.id, pid)
 
-        tmpdir = tempfile.mkdtemp()
-        zf = os.path.join(tmpdir, "temp.zip")
-        zippy = zipfile.ZipFile(zf, 'w')
-        if use_dmz and FLAGS.region_list:
-            regions = {}
-            for item in FLAGS.region_list:
-                region, _sep, region_host = item.partition("=")
-                regions[region] = region_host
-        else:
-            regions = {'nova': FLAGS.ec2_host}
-        for region, host in regions.iteritems():
-            rc = self.__generate_rc(user,
-                                    pid,
-                                    use_dmz,
-                                    host)
-            zippy.writestr(FLAGS.credential_rc_file % region, rc)
+        with utils.tempdir() as tmpdir:
+            zf = os.path.join(tmpdir, "temp.zip")
+            zippy = zipfile.ZipFile(zf, 'w')
+            if use_dmz and FLAGS.region_list:
+                regions = {}
+                for item in FLAGS.region_list:
+                    region, _sep, region_host = item.partition("=")
+                    regions[region] = region_host
+            else:
+                regions = {'nova': FLAGS.ec2_host}
+            for region, host in regions.iteritems():
+                rc = self.__generate_rc(user,
+                                        pid,
+                                        use_dmz,
+                                        host)
+                zippy.writestr(FLAGS.credential_rc_file % region, rc)
 
-        zippy.writestr(FLAGS.credential_key_file, private_key)
-        zippy.writestr(FLAGS.credential_cert_file, signed_cert)
+            zippy.writestr(FLAGS.credential_key_file, private_key)
+            zippy.writestr(FLAGS.credential_cert_file, signed_cert)
 
-        (vpn_ip, vpn_port) = self.get_project_vpn_data(project)
-        if vpn_ip:
-            configfile = open(FLAGS.vpn_client_template, "r")
-            s = string.Template(configfile.read())
-            configfile.close()
-            config = s.substitute(keyfile=FLAGS.credential_key_file,
-                                  certfile=FLAGS.credential_cert_file,
-                                  ip=vpn_ip,
-                                  port=vpn_port)
-            zippy.writestr(FLAGS.credential_vpn_file, config)
-        else:
-            LOG.warn(_("No vpn data for project %s"), pid)
+            (vpn_ip, vpn_port) = self.get_project_vpn_data(project)
+            if vpn_ip:
+                configfile = open(FLAGS.vpn_client_template, "r")
+                s = string.Template(configfile.read())
+                configfile.close()
+                config = s.substitute(keyfile=FLAGS.credential_key_file,
+                                      certfile=FLAGS.credential_cert_file,
+                                      ip=vpn_ip,
+                                      port=vpn_port)
+                zippy.writestr(FLAGS.credential_vpn_file, config)
+            else:
+                LOG.warn(_("No vpn data for project %s"), pid)
 
-        zippy.writestr(FLAGS.ca_file, crypto.fetch_ca(pid))
-        zippy.close()
-        with open(zf, 'rb') as f:
-            read_buffer = f.read()
+            zippy.writestr(FLAGS.ca_file, crypto.fetch_ca(pid))
+            zippy.close()
+            with open(zf, 'rb') as f:
+                read_buffer = f.read()
 
-        shutil.rmtree(tmpdir)
         return read_buffer
 
     def get_environment_rc(self, user, project=None, use_dmz=True):

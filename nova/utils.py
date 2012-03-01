@@ -31,9 +31,11 @@ import pyclbr
 import random
 import re
 import shlex
+import shutil
 import socket
 import struct
 import sys
+import tempfile
 import time
 import types
 import uuid
@@ -162,6 +164,8 @@ def fetchfile(url, target):
 def execute(*cmd, **kwargs):
     """
     Helper method to execute command with optional retry.
+    If you add a run_as_root=True command, don't forget to add the
+    corresponding filter to nova.rootwrap !
 
     :cmd                Passed to subprocess.Popen.
     :process_input      Send to opened process.
@@ -901,10 +905,13 @@ def cleanup_file_locks():
         pid = match.group(1)
         LOG.debug(_('Found sentinel %(filename)s for pid %(pid)s' %
                     {'filename': filename, 'pid': pid}))
-        if not os.path.exists(os.path.join('/proc', pid)):
+        try:
+            os.kill(int(pid), 0)
+        except OSError, e:
+            # PID wasn't found
             delete_if_exists(os.path.join(FLAGS.lock_path, filename))
             LOG.debug(_('Cleaned sentinel %(filename)s for pid %(pid)s' %
-                        {'filename': filename, 'pid': pid}))
+                    {'filename': filename, 'pid': pid}))
 
     # cleanup lock files
     for filename in files:
@@ -1523,3 +1530,55 @@ def read_file_as_root(file_path):
         return out
     except exception.ProcessExecutionError:
         raise exception.FileNotFound(file_path=file_path)
+
+
+@contextlib.contextmanager
+def temporary_chown(path, owner_uid=None):
+    """Temporarily chown a path.
+
+    :params owner_uid: UID of temporary owner (defaults to current user)
+    """
+    if owner_uid is None:
+        owner_uid = os.getuid()
+
+    orig_uid = os.stat(path).st_uid
+
+    if orig_uid != owner_uid:
+        execute('chown', owner_uid, path, run_as_root=True)
+    try:
+        yield
+    finally:
+        if orig_uid != owner_uid:
+            execute('chown', orig_uid, path, run_as_root=True)
+
+
+@contextlib.contextmanager
+def tempdir(**kwargs):
+    tmpdir = tempfile.mkdtemp(**kwargs)
+    try:
+        yield tmpdir
+    finally:
+        try:
+            shutil.rmtree(tmpdir)
+        except OSError, e:
+            LOG.debug(_('Could not remove tmpdir: %s'), str(e))
+
+
+def strcmp_const_time(s1, s2):
+    """Constant-time string comparison.
+
+    :params s1: the first string
+    :params s2: the second string
+
+    :return: True if the strings are equal.
+
+    This function takes two strings and compares them.  It is intended to be
+    used when doing a comparison for authentication purposes to help guard
+    against timing attacks.
+    """
+    if len(s1) != len(s2):
+        return False
+    result = 0
+    for (a, b) in zip(s1, s2):
+        result |= ord(a) ^ ord(b)
+    return result == 0

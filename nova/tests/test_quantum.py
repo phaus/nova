@@ -15,6 +15,8 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import mox
+
 from nova import context
 from nova import db
 from nova.db.sqlalchemy import models
@@ -265,11 +267,39 @@ class QuantumDeallocationTestCase(QuantumNovaTestCase):
         self.net_man.deallocate_port('interface_id', 'net_id', 'q_tenant_id',
                                      'instance_id')
 
+    def test_deallocate_port_logs_error(self):
+        quantum = self.mox.CreateMock(
+            quantum_connection.QuantumClientConnection)
+        quantum.get_port_by_attachment('q_tenant_id', 'net_id',
+                            'interface_id').AndRaise(Exception)
+        self.net_man.q_conn = quantum
+
+        self.mox.StubOutWithMock(quantum_manager.LOG, 'exception')
+        quantum_manager.LOG.exception(mox.Regex(r'port deallocation failed'))
+
+        self.mox.ReplayAll()
+
+        self.net_man.deallocate_port('interface_id', 'net_id', 'q_tenant_id',
+                                     'instance_id')
+
     def test_deallocate_ip_address(self):
         ipam = self.mox.CreateMock(melange_ipam_lib.QuantumMelangeIPAMLib)
         ipam.get_tenant_id_by_net_id('context', 'net_id', {'uuid': 1},
                                      'project_id').AndReturn('ipam_tenant_id')
         self.net_man.ipam = ipam
+        self.mox.ReplayAll()
+        self.net_man.deallocate_ip_address('context', 'net_id', 'project_id',
+                {'uuid': 1}, 'instance_id')
+
+    def test_deallocate_ip_address(self):
+        ipam = self.mox.CreateMock(melange_ipam_lib.QuantumMelangeIPAMLib)
+        ipam.get_tenant_id_by_net_id('context', 'net_id', {'uuid': 1},
+                                     'project_id').AndRaise(Exception())
+        self.net_man.ipam = ipam
+
+        self.mox.StubOutWithMock(quantum_manager.LOG, 'exception')
+        quantum_manager.LOG.exception(mox.Regex(r'ipam deallocation failed'))
+
         self.mox.ReplayAll()
         self.net_man.deallocate_ip_address('context', 'net_id', 'project_id',
                 {'uuid': 1}, 'instance_id')
@@ -445,6 +475,23 @@ class QuantumManagerTestCase(QuantumNovaTestCase):
         net = db.network_get_by_uuid(ctx.elevated(), net_id)
         self.assertTrue(net is not None)
         self.assertEquals(net['uuid'], net_id)
+
+    def test_create_net_external_uuid_and_host_is_set(self):
+        """Make sure network['host'] is set when creating a network via the
+           network manager"""
+        project_id = "foo_project"
+        ctx = context.RequestContext('user1', project_id)
+        net_id = self.net_man.q_conn.create_network(project_id, 'net2')
+        self.net_man.create_networks(
+            ctx, label='achtungbaby2', cidr="9.9.8.0/24", multi_host=False,
+            num_networks=1, network_size=256, cidr_v6=None,
+            gateway="9.9.8.1", gateway_v6=None, bridge=None,
+            bridge_interface=None, dns1="8.8.8.8", project_id=project_id,
+            priority=8, uuid=net_id)
+        net = db.network_get_by_uuid(ctx.elevated(), net_id)
+        self.assertTrue(net is not None)
+        self.assertEquals(net['uuid'], net_id)
+        self.assertTrue(net['host'] != None)
 
 
 class QuantumNovaMACGenerationTestCase(QuantumNovaTestCase):

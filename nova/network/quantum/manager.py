@@ -101,9 +101,20 @@ class QuantumManager(manager.FloatingIP, manager.FlatManager):
                 LOG.debug("Initializing NAT: %s (cidr: %s, gw: %s)" % (
                     net['label'], net['cidr'], net['gateway']))
                 cidrs.append(net['cidr'])
+            self._update_network_host(context.get_admin_context(),
+                                      net['uuid'])
         # .. and for each network
         for c in cidrs:
             self.l3driver.initialize_network(c)
+
+    def _update_network_host(self, context, net_uuid):
+        """Set the host column in the networks table: note that this won't
+           work with multi-host but QuantumManager doesn't support that
+           anyways.  The floating IPs mixin required network['host'] to be
+           set."""
+        entry = db.network_get_by_uuid(context.elevated(), net_uuid)
+        entry['host'] = self.host
+        db.network_update(context.elevated(), entry['id'], entry)
 
     def _get_nova_id(self, instance=None):
         # When creating the network we need to pass in an identifier for
@@ -202,9 +213,11 @@ class QuantumManager(manager.FloatingIP, manager.FlatManager):
         ipam_tenant_id = kwargs.get("project_id", None)
         priority = kwargs.get("priority", 0)
         # NOTE(tr3buchet): this call creates a nova network in the nova db
-        self.ipam.create_subnet(context, label, ipam_tenant_id, quantum_net_id,
-            priority, cidr, gateway, gateway_v6,
-            cidr_v6, dns1, dns2)
+        self.ipam.create_subnet(context, label, ipam_tenant_id,
+                                quantum_net_id, priority, cidr,
+                                gateway, gateway_v6, cidr_v6, dns1, dns2)
+
+        self._update_network_host(context, quantum_net_id)
 
         # Initialize forwarding
         self.l3driver.initialize_network(cidr)
@@ -504,6 +517,7 @@ class QuantumManager(manager.FloatingIP, manager.FlatManager):
                            'uuid': network['uuid'],
                            'bridge': '',  # Quantum ignores this field
                            'label': network['label'],
+                           'injected': FLAGS.flat_injected,
                            'project_id': net_tenant_id}
                 networks[vif['uuid']] = network
 
@@ -544,6 +558,7 @@ class QuantumManager(manager.FloatingIP, manager.FlatManager):
             db.virtual_interface_delete(admin_context, vif['id'])
 
     def deallocate_port(self, interface_id, net_id, q_tenant_id, instance_id):
+        port_id = None
         try:
             port_id = self.q_conn.get_port_by_attachment(q_tenant_id,
                                                          net_id, interface_id)
@@ -560,10 +575,8 @@ class QuantumManager(manager.FloatingIP, manager.FlatManager):
                                                    net_id, port_id)
         except Exception:
             # except anything so the rest of deallocate can succeed
-
-            msg = _('port deallocation failed for instance: '
-                    '|%(instance_id)s|, port_id: |%(port_id)s|')
-            LOG.critical(msg % locals())
+            LOG.exception(_('port deallocation failed for instance: '
+                    '|%(instance_id)s|, port_id: |%(port_id)s|') % locals())
 
     def deallocate_ip_address(self, context, net_id,
                               project_id, vif_ref, instance_id):
@@ -581,8 +594,8 @@ class QuantumManager(manager.FloatingIP, manager.FlatManager):
             # except anything so the rest of deallocate can succeed
             vif_uuid = vif_ref['uuid']
             msg = _('ipam deallocation failed for instance: '
-                    '|%(instance_id)s|, vif_uuid: |%(vif_uuid)s|')
-            LOG.critical(msg % locals())
+                    '|%(instance_id)s|, vif_uuid: |%(vif_uuid)s|') % locals()
+            LOG.exception(msg)
         return ipam_tenant_id
 
     # TODO(bgh): At some point we should consider merging enable_dhcp() and
