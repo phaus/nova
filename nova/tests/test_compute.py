@@ -120,8 +120,6 @@ class BaseTestCase(test.TestCase):
         self.context = context.RequestContext(self.user_id,
                                               self.project_id)
         test_notifier.NOTIFICATIONS = []
-        self.mox = mox.Mox()
-        self.total_waits = 0
 
         def fake_show(meh, context, id):
             return {'id': 1, 'min_disk': None, 'min_ram': None,
@@ -132,7 +130,6 @@ class BaseTestCase(test.TestCase):
         self.stubs.Set(rpc, 'cast', rpc_cast_wrapper)
 
     def tearDown(self):
-        self.mox.UnsetStubs()
         instances = db.instance_get_all(self.context.elevated())
         for instance in instances:
             db.instance_destroy(self.context.elevated(), instance['id'])
@@ -889,7 +886,7 @@ class ComputeTestCase(BaseTestCase):
         test_notifier.NOTIFICATIONS = []
         self.compute.terminate_instance(self.context, inst_ref['uuid'])
 
-        self.assertEquals(len(test_notifier.NOTIFICATIONS), 3)
+        self.assertEquals(len(test_notifier.NOTIFICATIONS), 5)
         msg = test_notifier.NOTIFICATIONS[0]
         self.assertEquals(msg['priority'], 'INFO')
         self.assertEquals(msg['event_type'], 'compute.instance.exists')
@@ -898,6 +895,11 @@ class ComputeTestCase(BaseTestCase):
         self.assertEquals(msg['priority'], 'INFO')
         self.assertEquals(msg['event_type'], 'compute.instance.delete.start')
         msg1 = test_notifier.NOTIFICATIONS[2]
+        self.assertEquals(msg1['event_type'],
+                                            'compute.instance.shutdown.start')
+        msg1 = test_notifier.NOTIFICATIONS[3]
+        self.assertEquals(msg1['event_type'], 'compute.instance.shutdown.end')
+        msg1 = test_notifier.NOTIFICATIONS[4]
         self.assertEquals(msg1['event_type'], 'compute.instance.delete.end')
         payload = msg['payload']
         self.assertEquals(payload['tenant_id'], self.project_id)
@@ -2577,7 +2579,6 @@ class ComputeAPITestCase(BaseTestCase):
 
     def test_get(self):
         """Test get instance"""
-        self.maxDiff = None
         c = context.get_admin_context()
         exp_instance = self._create_fake_instance()
         expected = dict(exp_instance.iteritems())
@@ -2593,7 +2594,6 @@ class ComputeAPITestCase(BaseTestCase):
 
     def test_get_with_integer_id(self):
         """Test get instance with an integer id"""
-        self.maxDiff = None
         c = context.get_admin_context()
         exp_instance = self._create_fake_instance()
         expected = dict(exp_instance.iteritems())
@@ -3297,9 +3297,6 @@ class ComputeAPIAggrTestCase(test.TestCase):
         self.stubs.Set(rpc, 'call', fake_rpc_method)
         self.stubs.Set(rpc, 'cast', fake_rpc_method)
 
-    def tearDown(self):
-        super(ComputeAPIAggrTestCase, self).tearDown()
-
     def test_create_invalid_availability_zone(self):
         """Ensure InvalidAggregateAction is raised with wrong avail_zone."""
         self.assertRaises(exception.InvalidAggregateAction,
@@ -3515,9 +3512,6 @@ class ComputeAggrTestCase(BaseTestCase):
                   'availability_zone': 'test_zone', }
         self.aggr = db.aggregate_create(self.context, values)
 
-    def tearDown(self):
-        super(ComputeAggrTestCase, self).tearDown()
-
     def test_add_aggregate_host(self):
         def fake_driver_add_to_aggregate(context, aggregate, host):
             fake_driver_add_to_aggregate.called = True
@@ -3596,8 +3590,6 @@ class ComputePolicyTestCase(BaseTestCase):
         nova.policy.enforce(self.context, 'compute:reboot', {})
         self.mox.ReplayAll()
         nova.compute.api.check_policy(self.context, 'reboot', {})
-        self.mox.UnsetStubs()
-        self.mox.VerifyAll()
 
     def test_wrapped_method(self):
         instance = self._create_fake_instance()
