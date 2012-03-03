@@ -35,7 +35,8 @@ from nova.api.occi import backends
 
 from occi.exceptions import HTTPError
 from occi.extensions import infrastructure
-from occi.core_model import Link
+from occi import core_model
+
 
 FLAGS = flags.FLAGS
 
@@ -93,7 +94,7 @@ class ComputeBackend(backends.MyBackend):
         injected_files = []
         min_count = max_count = 1
         requested_networks = None
-        #L8R: would be good to specify security groups via OCCI
+        #TODO: would be good to specify security groups via OCCI
         sg_names = []
         sg_names.append('default')
         sg_names = list(set(sg_names))
@@ -241,7 +242,7 @@ class ComputeBackend(backends.MyBackend):
         vm_net_info = self._get_adapter_info(instances[0], extras, True)
         self._attach_to_default_network(vm_net_info, resource, extras)
         
-        self._get_console_info(resource)
+        self._get_console_info(resource, extras)
         
         #set valid actions
         resource.actions = [infrastructure.STOP,
@@ -350,7 +351,7 @@ class ComputeBackend(backends.MyBackend):
 
         # Create the link to the default network
         identifier = str(uuid.uuid4())
-        link = Link(identifier, infrastructure.NETWORKINTERFACE, \
+        link = core_model.Link(identifier, infrastructure.NETWORKINTERFACE, \
                     [infrastructure.IPNETWORKINTERFACE], source, target)
         link.attributes['occi.core.id'] = identifier 
         link.attributes['occi.networkinterface.interface'] = vm_net_info['vm_iface']
@@ -366,33 +367,73 @@ class ComputeBackend(backends.MyBackend):
         
         registry.add_resource(identifier, link)
     
-    def _get_console_info(self, resource):
+    def _get_console_info(self, resource, extras):
         #L8R: There are assumptions here about port numbers, URL fragments
         address = resource.links[0].attributes['occi.networkinterface.address']
         
         ssh_console_present = False
         vnc_console_present = False
-        for mixin in resource.mixins:
-            if mixin.term == "ssh_console" and mixin.scheme \
-                == "http://schemas.openstack.org/occi/infrastructure/compute#":
-                resource.attributes['org.openstack.compute.console.ssh'] = \
+
+        for link in resource.links:
+            if link.target.kind.term == "ssh_console" and \
+                link.target.kind.scheme == "http://schemas.openstack.org/occi/infrastructure/compute#":
+                link.target.attributes['org.openstack.compute.console.ssh'] = \
                                                     'ssh://' + address + ':22'
                 ssh_console_present = True
-            elif mixin.term == "vnc_console" and mixin.scheme \
-                == "http://schemas.openstack.org/occi/infrastructure/compute#":
-                resource.attributes['org.openstack.compute.console.vnc'] = \
+            elif link.target.kind.term == "vnc_console" and \
+                link.target.kind.scheme == "http://schemas.openstack.org/occi/infrastructure/compute#":
+                link.target.attributes['org.openstack.compute.console.vnc'] = \
                                                     'http://' + address + ':80'
                 vnc_console_present = True
         
         if not ssh_console_present:
-            resource.attributes['org.openstack.compute.console.ssh'] = \
+            
+            registry = extras['registry']
+                        
+            identifier = str(uuid.uuid4())
+            ssh_console = core_model.Resource(
+                identifier, extensions.SSH_CONSOLE, [],
+                links=None, summary='',
+                title='')
+            ssh_console.attributes['occi.core.id'] = identifier
+            ssh_console.attributes['org.openstack.compute.console.ssh'] = \
                                                     'ssh://' + address + ':22'
-            resource.mixins.append(extensions.SSH_CONSOLE)
+            registry.add_resource(identifier, ssh_console)
+            
+            identifier = str(uuid.uuid4())
+            ssh_console_link = core_model.Link(
+                                    identifier,
+                                    extensions.CONSOLE_LINK, \
+                                    [], resource, ssh_console)
+            ssh_console_link.attributes['occi.core.id'] = identifier
+            registry.add_resource(identifier, ssh_console_link)
+            
+            resource.links.append(ssh_console_link)
+
         
         if not vnc_console_present:
-            resource.attributes['org.openstack.compute.console.vnc'] = \
-                                                    'http://' + address + ':22'
-            resource.mixins.append(extensions.VNC_CONSOLE)
+            
+            registry = extras['registry']
+                        
+            identifier = str(uuid.uuid4())
+            vnc_console = core_model.Resource(
+                identifier, extensions.VNC_CONSOLE, [],
+                links=None, summary='',
+                title='')
+            vnc_console.attributes['occi.core.id'] = identifier
+            vnc_console.attributes['org.openstack.compute.console.vnc'] = \
+                                                    'http://' + address + ':80'
+            registry.add_resource(identifier, vnc_console)
+            
+            identifier = str(uuid.uuid4())
+            vnc_console_link = core_model.Link(
+                                    identifier,
+                                    extensions.CONSOLE_LINK, \
+                                    [], resource, vnc_console)
+            vnc_console_link.attributes['occi.core.id'] = identifier
+            registry.add_resource(identifier, vnc_console_link)
+            
+            resource.links.append(vnc_console_link)
     
     # Note this is a direct lift from nova/api/openstack/compute/servers.py
     # however as it is protected we cannot import it :-(
@@ -417,6 +458,7 @@ class ComputeBackend(backends.MyBackend):
         expl = code_mappings.get(error.kwargs['code'], error.message)
         raise exc.HTTPRequestEntityTooLarge(explanation=expl,
                                             headers={'Retry-After': 0})
+
 
     def retrieve(self, entity, extras):
         context = extras['nova_ctx']
@@ -495,9 +537,10 @@ class ComputeBackend(backends.MyBackend):
         #Now we have the instance state, get its updated network info
         vm_net_info = self._get_adapter_info(instance, extras)
         self._attach_to_default_network(vm_net_info, entity, extras)
-        self._get_console_info(entity)
+        self._get_console_info(entity, extras)
         
         return instance
+
 
     def delete(self, entity, extras):
         # call the management framework to delete this compute instance...
@@ -559,6 +602,7 @@ class ComputeBackend(backends.MyBackend):
             LOG.error('I\'ve no idea what this mixin is! ' + \
                                                 mixin.scheme + mixin.term)
             raise exc.HTTPBadRequest()
+ 
         
     def _os_resize_vm(self, old, extras, instance, mixin):
         LOG.info('Resize requested') 
@@ -639,6 +683,7 @@ class ComputeBackend(backends.MyBackend):
             self._os_create_image(entity, instance, context)
         else:
             raise exc.HTTPBadRequest()
+   
         
     def _start_vm(self, entity, instance, context):
         LOG.info('Starting virtual machine with id' + entity.identifier)
@@ -659,6 +704,7 @@ class ComputeBackend(backends.MyBackend):
                           extensions.OS_CONFIRM_RESIZE, \
                           extensions.OS_CREATE_IMAGE]
 
+
     def _stop_vm(self, entity, instance, context):
         # OCCI -> graceful, acpioff, poweroff
         # OS -> unclear
@@ -667,8 +713,8 @@ class ComputeBackend(backends.MyBackend):
             LOG.info('OS only allows one type of stop. \
                             What is specified in the request will be ignored.')
         try:
-            # FIXME: There are issues with the stop and start methods of OS
-            #        For now we'll use suspend
+            # L8R: There are issues with the stop and start methods of OS
+            #      For now we'll use suspend.
             # self.compute_api.stop(context, instance)
             self.compute_api.suspend(context, instance)
         except Exception:
@@ -676,6 +722,7 @@ class ComputeBackend(backends.MyBackend):
             raise exc.HTTPServerError()
         entity.attributes['occi.compute.state'] = 'inactive'
         entity.actions = [infrastructure.START]
+
 
     def _restart_vm(self, entity, instance, context):
         LOG.info('Restarting virtual machine with id' + entity.identifier)

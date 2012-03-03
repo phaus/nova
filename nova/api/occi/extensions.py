@@ -44,17 +44,54 @@ OS_CREATE_IMAGE = core_model.Action(
                  'create_image', 'Creates a new image for the given server.',
                  {'image_name': ''})
 
+# Console Link Extension
+CONSOLE_LINK = core_model.Kind(
+                        'http://schemas.ogf.org/infrastructure/compute#',
+                        'console',
+                        [core_model.Link.kind],
+                        None,
+                        'This is a link to the VMs console',
+                        None,
+                        '/compute/consolelink/')
+
 # SSH Console Kind Extension
 SSH_CONSOLE_ATTRIBUTES = {'org.openstack.compute.console.ssh': '', }
-SSH_CONSOLE = core_model.Mixin(\
-    'http://schemas.openstack.org/occi/infrastructure/compute#',
-    'ssh_console', attributes=SSH_CONSOLE_ATTRIBUTES)
+SSH_CONSOLE = core_model.Kind(
+                'http://schemas.openstack.org/occi/infrastructure/compute#',
+                'ssh_console',
+                None,
+                None,
+                'SSH console kind',
+                SSH_CONSOLE_ATTRIBUTES,
+                '/compute/console/ssh/')
 
+# TODO: Remove this once URI support is added to pyssf
 # VNC Console Kind Extension
 VNC_CONSOLE_ATTRIBUTES = {'org.openstack.compute.console.vnc': '', }
-VNC_CONSOLE = core_model.Mixin(\
-    'http://schemas.openstack.org/occi/infrastructure/compute#',
-    'vnc_console', attributes=VNC_CONSOLE_ATTRIBUTES)
+VNC_CONSOLE = core_model.Kind(
+                'http://schemas.openstack.org/occi/infrastructure/compute#',
+                'vnc_console',
+                None,
+                None,
+                'VNC console kind',
+                VNC_CONSOLE_ATTRIBUTES,
+                '/compute/console/vnc/')
+
+# Network security rule extension to specify firewall rules
+SEC_RULE_ATTRIBUTES = {
+                       'occi.network.security.protocol': '',
+                       'occi.network.security.to': '',
+                       'occi.network.security.from': '',
+                       'occi.network.security.range': '',
+                       }
+SEC_RULE = core_model.Kind(
+                'http://schemas.openstack.org/occi/infrastructure/network/security#',
+                'rule',
+                None,
+                None,
+                'Network security rule kind',
+                SEC_RULE_ATTRIBUTES,
+                '/network/security/rule/')
 
 # Trusted Compute Pool technology mixin definition
 TCP_ATTRIBUTES = {'eu.fi-ware.compute.tcp': '', }
@@ -76,7 +113,7 @@ ADMIN_PWD_EXT = core_model.Mixin(\
     'admin_pwd', attributes=ADMIN_PWD_ATTRIBUTES)
 
 # TODO: use empty backend - kind/mixin
-class ConsoleBackend(backend.MixinBackend):
+class ConsoleBackend(backend.KindBackend):
     '''
     Console mixin backend handler
     '''

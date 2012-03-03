@@ -17,6 +17,8 @@ from nova import image
 from nova import log
 from nova import wsgi
 from nova import flags
+from nova import db
+from nova.compute import API
 from nova.openstack.common import cfg
 from nova.network import api as net_api
 from nova.api.openstack import extensions as os_extensions
@@ -27,13 +29,16 @@ from nova.api.occi.network import networklink
 from nova.api.occi.network import networkresource
 from nova.api.occi.storage import storagelink
 from nova.api.occi.storage import storageresource
+from nova.api.occi.security import ruleresource
 from nova.compute import instance_types
 
 from occi import registry
+from occi import core_model
+from occi import backend
 from occi import wsgi as occi_wsgi
-from occi.core_model import Resource
 from occi.extensions import infrastructure
 
+        
 #Hi I'm a logger, use me! :-)
 LOG = log.getLogger('nova.api.occi.wsgi')
 
@@ -76,6 +81,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         super(OCCIApplication, self).__init__(
                                 registry=OpenStackOCCIRegistry())
 
+        self.compute_api = API()
         # setup the occi service...
         self._setup_occi_service()
 
@@ -96,18 +102,6 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         '''
         nova_ctx = environ['nova.context']
         
-        # query for correct project_id based on auth token?
-        # There are multiple options here:
-        #  1. extract project_id from URL e.g.:
-        #     create compute: POST /compute/1/
-        #  2. supply project_id as a URL parameter e.g.:
-        #     create compute: POST /compute/query?project_id=1
-        #  3. Use a mixin
-        #  4. Use a HTTP header e.g.:
-        #     X-Project-Id: 1
-        #  Or....
-        #  Just use the openstack header! Ya ha ha ha!
-        
         #L8R this might be pushed into the context middleware
 #        nova_ctx.project_id = environ.get('HTTP_X_AUTH_PROJECT_ID', None)
         nova_ctx.project_id = environ.get('HTTP_X_AUTH_TENANT_ID', None)
@@ -118,6 +112,8 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         self._register_os_mixins(backends.OsMixinBackend(), nova_ctx)
         # register openstack instance types (flavours)
         self._register_resource_mixins(backends.ResourceMixinBackend())
+        # register the openstack security groups (firewall rules) as Mixins
+        self._register_security_mixins(nova_ctx)
         
         return self._call_occi(environ, response, nova_ctx=nova_ctx, registry=self.registry)
 
@@ -137,6 +133,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         admin_password_backend = extensions.AdminPasswordBackend()
         key_pair_backend = extensions.KeyPairBackend()
         console_backend = extensions.ConsoleBackend()
+        sec_rule_backend = ruleresource.SecurityRuleBackend()
 
         # register kinds with backends
         self.register_backend(infrastructure.COMPUTE, compute_backend)
@@ -164,6 +161,12 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         self.register_backend(infrastructure.NETWORKINTERFACE,
                                           networkinterface_backend)
         
+        self.register_backend(extensions.CONSOLE_LINK,
+                                          backend.KindBackend())
+        
+        self.register_backend(extensions.SEC_RULE,
+                                          sec_rule_backend)
+        
         # OS-OCCI Action extensions 
         self.register_backend(extensions.OS_CHG_PWD, compute_backend)
         self.register_backend(extensions.OS_REVERT_RESIZE, compute_backend)
@@ -182,7 +185,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         self._register_default_network()
 
     def _register_default_network(self, name='DEFAULT_NETWORK'):
-        default_network = Resource(name, infrastructure.NETWORK, \
+        default_network = core_model.Resource(name, infrastructure.NETWORK, \
                             [infrastructure.IPNETWORK], [],
                             'This is the network all VMs are attached to.',
                             'Default Network')
@@ -281,7 +284,6 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                  }
         return attrs
        
-
     def _register_os_mixins(self, os_mixin_backend, ctx):
         '''
         Register the os mixins from information retrieved frrom glance.
@@ -317,6 +319,27 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                                                     + str(os_template))
             self.register_backend(os_template, os_mixin_backend)
 
+    def _register_security_mixins(self, ctx):
+        # get a listing of all security groups for the user
+        # map a security group to a mixin
+        # when a security mixin is supplied with the provision request
+        # that's the security group to use with the VM
+        
+        self.compute_api.ensure_default_security_group(ctx)
+        groups = db.security_group_get_by_project(ctx, ctx.project_id)
+        
+        for group in groups:
+            #TODO: ensure group.name is compliant with term ABNF
+            sec_mix = core_model.Mixin(
+                term=group.name,
+                scheme='http://schemas.ogf.org/occi/infrastructure/security#',
+                related=[],
+                attributes=None,
+                title=group.name,
+                #TODO: review this location name
+                location='/' + group.name + '/')
+            
+            self.register_backend(sec_mix, backend.MixinBackend())
 
     def _register_occi_extensions(self):
         '''
