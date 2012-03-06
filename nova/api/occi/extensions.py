@@ -87,7 +87,7 @@ SEC_RULE_ATTRIBUTES = {
 SEC_RULE = core_model.Kind(
                 'http://schemas.openstack.org/occi/infrastructure/network/security#',
                 'rule',
-                None,
+                [core_model.Resource.kind],
                 None,
                 'Network security rule kind',
                 SEC_RULE_ATTRIBUTES,
@@ -157,3 +157,11 @@ class ResourceTemplate(core_model.Mixin):
     '''
 
     pass
+
+class SecurityGroupMixin(core_model.Mixin):
+    def __init__(self, scheme, term, sec_grp_id, related=None, actions=None, title='',
+                 attributes=None, location=None):
+        super(SecurityGroupMixin, self).__init__(scheme, term, related,
+                                                 actions, title,
+                                                 attributes, location)
+        self.sec_grp_id = sec_grp_id 

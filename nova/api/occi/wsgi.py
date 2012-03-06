@@ -325,14 +325,18 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         # when a security mixin is supplied with the provision request
         # that's the security group to use with the VM
         
+        #FIXME: this is temporary
+        ctx.is_admin = True
         self.compute_api.ensure_default_security_group(ctx)
         groups = db.security_group_get_by_project(ctx, ctx.project_id)
         
         for group in groups:
             #TODO: ensure group.name is compliant with term ABNF
-            sec_mix = core_model.Mixin(
+            sec_grp_id = group.id
+            sec_mix = extensions.SecurityGroupMixin(
                 term=group.name,
-                scheme='http://schemas.ogf.org/occi/infrastructure/security#',
+                scheme='http://schemas.ogf.org/occi/infrastructure/security/group#',
+                sec_grp_id=sec_grp_id,
                 related=[],
                 attributes=None,
                 title=group.name,

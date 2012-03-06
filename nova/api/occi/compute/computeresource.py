@@ -1,5 +1,4 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
 #    a copy of the License at
@@ -87,19 +86,16 @@ class ComputeBackend(backends.MyBackend):
         #Auto-gen'ed 1st if OCCI extension supplied this will overwrite this
         password = utils.generate_password(FLAGS.password_length)
         
-        metadata = {}
         # L8R: see what the effect on VM network config is when these are set
         access_ip_v4 = None
         access_ip_v6 = None
+        #L8R: would be good to specify user_data via OCCI
+        user_data = None
+        metadata = {}
         injected_files = []
         min_count = max_count = 1
         requested_networks = None
-        #TODO: would be good to specify security groups via OCCI
         sg_names = []
-        sg_names.append('default')
-        sg_names = list(set(sg_names))
-        #L8R: would be good to specify user_data via OCCI
-        user_data = None
         availability_zone = None
         config_drive = None
         block_device_mapping = None
@@ -133,6 +129,9 @@ class ComputeBackend(backends.MyBackend):
                                 (extensions.ADMIN_PWD_EXT.scheme + extensions.ADMIN_PWD_EXT.term):
                     password = resource.attributes \
                                         ['org.openstack.credentials.admin_pwd']
+                elif mixin.scheme == \
+                    'http://schemas.ogf.org/occi/infrastructure/security/group#':
+                    sg_names.append(mixin.term)
 
             if rc < 1 and oc < 1:
                 LOG.error('No resource or OS template in the request.')
@@ -145,10 +144,14 @@ class ComputeBackend(backends.MyBackend):
                 msg = 'There is more than one OS template in the request'
                 LOG.error(msg)
                 raise AttributeError(msg=unicode(msg))
-            
+            #If no security group, ensure the default is applied
+            if len(sg_names) == 0:
+                sg_names.append('default')
+                
             flavor_name = r.term
             os_tpl_url = o.os_id
-        
+            sg_names = list(set(sg_names))
+            
         try:
             if flavor_name:
                 inst_type = \
@@ -164,7 +167,7 @@ class ComputeBackend(backends.MyBackend):
                 LOG.error(msg)
                 raise HTTPError(404, msg)
 
-            (instances, resv_id) = self.compute_api.create(
+            (instances, _) = self.compute_api.create(
                                     context=extras['nova_ctx'],
                                     instance_type=inst_type,
                                     image_href=os_tpl_url,
@@ -598,6 +601,9 @@ class ComputeBackend(backends.MyBackend):
         # supported by all hypervisors
         elif isinstance(mixin, extensions.OsTemplate):
             self._os_rebuild_vm(old, extras, instance, mixin)
+        elif isinstance(mixin, extensions.SecurityGroupMixin):
+            #TODO
+            LOG.info('Updating security rule group')
         else:
             LOG.error('I\'ve no idea what this mixin is! ' + \
                                                 mixin.scheme + mixin.term)

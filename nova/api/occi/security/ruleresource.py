@@ -12,8 +12,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from nova import log as logging
+import random
 
+from nova import log as logging
+from nova import db
 from occi import backend
 
 
@@ -27,14 +29,44 @@ class SecurityRuleBackend(backend.KindBackend):
         # the group to add the rule to must exist
         # in OCCI-speak this means the mixin must be supplied with the request
         
+        LOG.info('Creating a network security rule')
+        
+        sec_mixin_present = 0
+        
+        for mixin in entity.mixins:
+            if mixin.scheme == 'http://schemas.ogf.org/occi/infrastructure/security/group#':
+                sec_mixin_present = sec_mixin_present + 1
+                sec_mixin = mixin
+                break
+        if not sec_mixin_present:
+            raise Exception()
+        if sec_mixin_present > 1:
+            raise Exception()
+
+        #TODO: validation of values
+        sg_rule = {}
+        sg_rule['id'] = random.randrange(0, 99999999) 
+        entity.attributes['occi.core.id'] = str(sg_rule['id'])
+        sg_rule['parent_group_id'] = sec_mixin.sec_grp_id
+        sg_rule['protocol'] = (entity.attributes['occi.network.security.protocol']).lower()
+        sg_rule['from_port'] = entity.attributes['occi.network.security.to']
+        sg_rule['to_port'] = entity.attributes['occi.network.security.from']
+        cidr = entity.attributes['occi.network.security.range']
+        sg_rule['cidr'] = cidr if len(cidr) > 0 else '0.0.0.0/0'
+        sg_rule['group'] = {}
+        
 #        if self._security_group_rule_exists(security_group, values):
 #            msg = _('This rule already exists in group %s') % parent_group_id
 #            raise exc.HTTPBadRequest(explanation=msg)
-#        security_group_rule = db.security_group_rule_create(context, values)
 
-        LOG.info('Creating a network security rule')
+        db.security_group_rule_create(extras['nova_ctx'], sg_rule)
+
     
     def delete(self, entity, extras):
+        
+        LOG.info('Deleting a network security rule')
+        #db.security_group_rule_destroy(extras['nova_ctx'],
+        #                               entity.attributes['occi.core.id'])
         
 #        self.compute_api.ensure_default_security_group(context)
 #        try:
@@ -54,10 +86,10 @@ class SecurityRuleBackend(backend.KindBackend):
 #        msg = _("Revoke security group ingress %s")
 #        LOG.audit(msg, security_group['name'], context=context)
 #
-#        db.security_group_rule_destroy(context, rule['id'])
+        
 #        self.sgh.trigger_security_group_rule_destroy_refresh(
 #            context, [rule['id']])
 #        self.compute_api.trigger_security_group_rules_refresh(context,
 #                                    security_group_id=security_group['id'])
         
-        LOG.info('Deleting a network security rule')
+        
