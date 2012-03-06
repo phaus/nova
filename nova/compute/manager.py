@@ -389,20 +389,18 @@ class ComputeManager(manager.SchedulerDependentManager):
 
     def _shutdown_instance_even_if_deleted(self, context, instance_uuid):
         """Call terminate_instance even for already deleted instances"""
-        LOG.info(_("Going to force the deletion of the vm %(instance_uuid)s, "
-                   "even if it is deleted") % locals())
         try:
             try:
                 self.terminate_instance(context, instance_uuid)
             except exception.InstanceNotFound:
-                LOG.info(_("Instance %(instance_uuid)s did not exist in the "
-                         "DB, but I will shut it down anyway using a special "
-                         "context") % locals())
-                ctxt = nova.context.get_admin_context('yes')
+                LOG.info(_("Instance already deleted from database. "
+                           "Attempting forceful vm deletion"),
+                         instance=instance_uuid)
+                ctxt = nova.context.get_admin_context(read_deleted='yes')
                 self.terminate_instance(ctxt, instance_uuid)
         except Exception as ex:
-            LOG.info(_("exception terminating the instance "
-                     "%(instance_uuid)s") % locals())
+            LOG.exception(_("Exception encountered while terminating the "
+                            "instance"), instance=instance_uuid)
 
     def _run_instance(self, context, instance_uuid,
                       requested_networks=None,
@@ -989,17 +987,17 @@ class ComputeManager(manager.SchedulerDependentManager):
 
         images = fetch_images()
         num_images = len(images)
-        LOG.debug(_("Found %(num_images)d images (rotation: %(rotation)d)"
-                    % locals()))
+        LOG.debug(_("Found %(num_images)d images (rotation: %(rotation)d)")
+                  % locals())
         if num_images > rotation:
             # NOTE(sirp): this deletes all backups that exceed the rotation
             # limit
             excess = len(images) - rotation
-            LOG.debug(_("Rotating out %d backups" % excess))
+            LOG.debug(_("Rotating out %d backups") % excess)
             for i in xrange(excess):
                 image = images.pop()
                 image_id = image['id']
-                LOG.debug(_("Deleting image %s" % image_id))
+                LOG.debug(_("Deleting image %s") % image_id)
                 image_service.delete(context, image_id)
 
     @exception.wrap_exception(notifier=notifier, publisher_id=publisher_id())

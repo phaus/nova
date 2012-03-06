@@ -312,8 +312,7 @@ class VMOps(object):
                                      ramdisk_file=ramdisk_file)
 
             def undo_create_vm():
-                self._shutdown(instance, vm_ref)
-                self._destroy_vm(instance, vm_ref)
+                self._destroy(instance, vm_ref, network_info)
 
             undo_mgr.undo_with(undo_create_vm)
             return vm_ref
@@ -1270,8 +1269,8 @@ class VMOps(object):
         rescue_vm_ref = VMHelper.lookup(self._session,
                                         "%s-rescue" % instance.name)
         if rescue_vm_ref:
-            raise RuntimeError(_(
-                "Instance is already in Rescue Mode: %s" % instance.name))
+            raise RuntimeError(_("Instance is already in Rescue Mode: %s")
+                               % instance.name)
 
         vm_ref = VMHelper.lookup(self._session, instance.name)
         self._shutdown(instance, vm_ref)
