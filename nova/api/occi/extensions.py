@@ -13,9 +13,9 @@
 #    under the License.
 
 from nova import flags, log
-from occi import backend, core_model
+from occi import core_model
 
-#TODO: This all has to be abstracted and made easy to use and provide other
+#TODO: This module has to be abstracted and made easy to use and provide other
 #      extensions. E.g. scan all classes in extensions.py and load dynamically
 
 #Hi I'm a logger, use me! :-)
@@ -30,19 +30,23 @@ OS_CHG_PWD = core_model.Action(
                                     'it with the specified image (via Mixin).',
                  {'org.openstack.credentials.admin_pwd': ''})
 
+
 OS_REVERT_RESIZE = core_model.Action(
                 'http://schemas.openstack.org/instance/action#',
                  'revert_resize', 'Revert the resize and roll back to \
                                                      the original server')
 
+
 OS_CONFIRM_RESIZE = core_model.Action(
                 'http://schemas.openstack.org/instance/action#',
                  'confirm_resize', 'Use this to confirm the resize action')
+
 
 OS_CREATE_IMAGE = core_model.Action(
                 'http://schemas.openstack.org/instance/action#',
                  'create_image', 'Creates a new image for the given server.',
                  {'image_name': ''})
+
 
 # Console Link Extension
 CONSOLE_LINK = core_model.Kind(
@@ -54,6 +58,7 @@ CONSOLE_LINK = core_model.Kind(
                         None,
                         '/compute/consolelink/')
 
+
 # SSH Console Kind Extension
 SSH_CONSOLE_ATTRIBUTES = {'org.openstack.compute.console.ssh': '', }
 SSH_CONSOLE = core_model.Kind(
@@ -64,6 +69,7 @@ SSH_CONSOLE = core_model.Kind(
                 'SSH console kind',
                 SSH_CONSOLE_ATTRIBUTES,
                 '/compute/console/ssh/')
+
 
 # TODO: Remove this once URI support is added to pyssf
 # VNC Console Kind Extension
@@ -77,6 +83,7 @@ VNC_CONSOLE = core_model.Kind(
                 VNC_CONSOLE_ATTRIBUTES,
                 '/compute/console/vnc/')
 
+
 # Network security rule extension to specify firewall rules
 SEC_RULE_ATTRIBUTES = {
                        'occi.network.security.protocol': '',
@@ -85,19 +92,21 @@ SEC_RULE_ATTRIBUTES = {
                        'occi.network.security.range': '',
                        }
 SEC_RULE = core_model.Kind(
-                'http://schemas.openstack.org/occi/infrastructure/network/security#',
-                'rule',
-                [core_model.Resource.kind],
-                None,
-                'Network security rule kind',
-                SEC_RULE_ATTRIBUTES,
-                '/network/security/rule/')
+        'http://schemas.openstack.org/occi/infrastructure/network/security#',
+        'rule',
+        [core_model.Resource.kind],
+        None,
+        'Network security rule kind',
+        SEC_RULE_ATTRIBUTES,
+        '/network/security/rule/')
+
 
 # Trusted Compute Pool technology mixin definition
 TCP_ATTRIBUTES = {'eu.fi-ware.compute.tcp': '', }
 TCP = core_model.Mixin(\
     'http://schemas.fi-ware.eu/occi/infrastructure/compute#',
     'tcp', attributes=TCP_ATTRIBUTES)
+
 
 # Key pair extension
 KEY_PAIR_ATTRIBUTES = {'org.openstack.credentials.publickey.name': '',
@@ -106,36 +115,12 @@ KEY_PAIR_EXT = core_model.Mixin(\
     'http://schemas.openstack.org/instance/credentials#',
     'public_key', attributes=KEY_PAIR_ATTRIBUTES)
 
-# VM Administrative password extension 
+
+# VM Administrative password extension
 ADMIN_PWD_ATTRIBUTES = {'org.openstack.credentials.admin_pwd': '', }
 ADMIN_PWD_EXT = core_model.Mixin(\
     'http://schemas.openstack.org/instance/credentials#',
     'admin_pwd', attributes=ADMIN_PWD_ATTRIBUTES)
-
-# TODO: use empty backend - kind/mixin
-class ConsoleBackend(backend.KindBackend):
-    '''
-    Console mixin backend handler
-    '''
-    pass
-
-class TCPBackend(backend.MixinBackend):
-    '''
-    Trusted Compute Pool technology mixin backend handler
-    '''
-    pass
-
-class KeyPairBackend(backend.MixinBackend):
-    '''
-    Public SSH Keypair mixin backend handler
-    '''
-    pass
-
-class AdminPasswordBackend(backend.MixinBackend):
-    '''
-    Administrative password mixin backend handler
-    '''
-    pass
 
 
 class OsTemplate(core_model.Mixin):
@@ -158,10 +143,11 @@ class ResourceTemplate(core_model.Mixin):
 
     pass
 
+
 class SecurityGroupMixin(core_model.Mixin):
-    def __init__(self, scheme, term, sec_grp_id, related=None, actions=None, title='',
-                 attributes=None, location=None):
+    def __init__(self, scheme, term, sec_grp_id, related=None, actions=None,
+                 title='', attributes=None, location=None):
         super(SecurityGroupMixin, self).__init__(scheme, term, related,
                                                  actions, title,
                                                  attributes, location)
-        self.sec_grp_id = sec_grp_id 
+        self.sec_grp_id = sec_grp_id

@@ -24,8 +24,7 @@
 
 
 from nova import flags, log as logging
-from nova.api.occi.backends import MyBackend
-from occi.backend import MixinBackend
+from occi import backend
 from occi.extensions.infrastructure import UP, DOWN, NETWORK
 
 #from quantum.client import cli_lib as cli
@@ -39,7 +38,8 @@ FLAGS = flags.FLAGS
 
 #TODO: clean the crud out!
 
-class NetworkBackend(MyBackend):
+
+class NetworkBackend(backend.KindBackend, backend.ActionBackend):
     '''
     Backend to handle network resources.
     '''
@@ -47,7 +47,7 @@ class NetworkBackend(MyBackend):
 #        self.tenant_id = 'admin'
 #        FORMAT = 'json'
 #        self.client = Client(tenant=self.tenant_id, format=FORMAT)
-        
+
     def create(self, entity, extras):
         # create a VNIC...
         entity.attributes['occi.network.vlan'] = '1'
@@ -55,17 +55,17 @@ class NetworkBackend(MyBackend):
         entity.attributes['occi.network.state'] = 'inactive'
         entity.actions = [UP]
         print('Creating a VNIC')
-        
+
         #here comes the pain/fun!
 #        params = {'network': {'name': 'a name'}}
 #        try:
 #            res = self.client.create_network(params)
 #        except Exception as ex:
 #            raise ex
-#        
+#
 #        LOG.debug("Operation 'create_network' executed.")
 #        entity.attributes['occi.core.id'] = res["network"]["id"]
-        
+
     def retrieve(self, entity, extras):
         # update a VNIC
         if entity.attributes['occi.network.state'] == 'active':
@@ -89,7 +89,8 @@ class NetworkBackend(MyBackend):
             # read attributes from action and do something with it :-)
             print('Stopping VNIC with id: ' + entity.identifier)
 
-class IpNetworkBackend(MixinBackend):
+
+class IpNetworkBackend(backend.MixinBackend):
     '''
     A mixin backend for the IPnetworking.
     '''
@@ -105,5 +106,3 @@ class IpNetworkBackend(MixinBackend):
         entity.attributes.pop('occi.network.allocation')
         entity.attributes.pop('occi.network.gateway')
         entity.attributes.pop('occi.network.address')
-
-

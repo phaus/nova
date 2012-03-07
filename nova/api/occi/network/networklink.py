@@ -15,14 +15,15 @@
 from webob import exc
 
 from nova import log as logging
-from occi.backend import KindBackend, MixinBackend
+from occi import backend
 #from occi.extensions.infrastructure import NETWORKINTERFACE
 
 # Retrieve functionality is already present via pyssf
 
 # With Quantum:
 #     TODO: implement create - note: this must handle either nova-network or
-#            quantum APIs - detect via flags and secondarily via import exceptions
+#            quantum APIs - detect via flags and secondarily via import
+#            exceptions
 #           implement delete
 #           implement update
 
@@ -32,7 +33,8 @@ from occi.backend import KindBackend, MixinBackend
 #Hi I'm a logger, use me! :-)
 LOG = logging.getLogger('nova.api.occi.backends.network.link')
 
-class NetworkInterfaceBackend(KindBackend):
+
+class NetworkInterfaceBackend(backend.KindBackend):
     '''
     A backend for the network links.
     '''
@@ -44,6 +46,20 @@ class NetworkInterfaceBackend(KindBackend):
         #link.attributes['occi.networkinterface.mac'] = 'aa:bb:cc:dd:ee:ff'
         #link.attributes['occi.networkinterface.interface'] = 'eth0'
 
+#        """Adds an IP on a given network to an instance."""
+#        context = req.environ['nova.context']
+#        authorize(context)
+#
+#        # Validate the input entity
+#        if 'networkId' not in body['addFixedIp']:
+#            msg = _("Missing 'networkId' argument for addFixedIp")
+#            raise exc.HTTPUnprocessableEntity(explanation=msg)
+#
+#        instance = self._get_instance(context, id)
+#        network_id = body['addFixedIp']['networkId']
+#        self.compute_api.add_fixed_ip(context, instance, network_id)
+#        return webob.Response(status_int=202)
+
     def update(self, old, new, extras):
         raise exc.HTTPBadRequest()
 
@@ -54,14 +70,15 @@ class NetworkInterfaceBackend(KindBackend):
 #        link.attributes.pop('occi.networkinterface.mac')
 #        link.attributes.pop('occi.networkinterface.interface')
 
-class IpNetworkInterfaceBackend(MixinBackend):
+
+class IpNetworkInterfaceBackend(backend.MixinBackend):
     '''
     A mixin backend for the IpNetworkingInterface.
     '''
 
     def create(self, link, extras):
         raise exc.HTTPBadRequest()
-    
+
 #        if not link.kind == NETWORKINTERFACE:
 #            raise AttributeError('This mixin cannot be applied to this kind.')
 #        link.attributes['occi.networkinterface.address'] = '10.0.0.65'

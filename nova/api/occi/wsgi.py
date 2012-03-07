@@ -38,7 +38,7 @@ from occi import backend
 from occi import wsgi as occi_wsgi
 from occi.extensions import infrastructure
 
-        
+
 #Hi I'm a logger, use me! :-)
 LOG = log.getLogger('nova.api.occi.wsgi')
 
@@ -46,13 +46,14 @@ LOG = log.getLogger('nova.api.occi.wsgi')
 OCCI_OPTS = [
              cfg.BoolOpt("show_default_net_config",
                 default=False,
-                help="Whether to show the default network configuration to clients"),
+                help="Show the default network configuration to clients"),
              cfg.BoolOpt("filter_kernel_and_ram_images",
                 default=True,
                 help="Whether to show the Kernel and RAM images to clients"),
              ]
 FLAGS = flags.FLAGS
 FLAGS.register_opts(OCCI_OPTS)
+
 
 class OpenStackOCCIRegistry(registry.NonePersistentRegistry):
     '''
@@ -101,21 +102,22 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         response -- The response.
         '''
         nova_ctx = environ['nova.context']
-        
+
         #L8R this might be pushed into the context middleware
 #        nova_ctx.project_id = environ.get('HTTP_X_AUTH_PROJECT_ID', None)
         nova_ctx.project_id = environ.get('HTTP_X_AUTH_TENANT_ID', None)
         if nova_ctx.project_id == None:
-            LOG.error('No project/tenant ID header was supplied in the request')
-        
+            LOG.error('No tenant ID header was supplied in the request')
+
         # register openstack images
-        self._register_os_mixins(backends.OsMixinBackend(), nova_ctx)
+        self._register_os_mixins(backends.MixinBackend(), nova_ctx)
         # register openstack instance types (flavours)
-        self._register_resource_mixins(backends.ResourceMixinBackend())
+        self._register_resource_mixins(backends.MixinBackend())
         # register the openstack security groups (firewall rules) as Mixins
         self._register_security_mixins(nova_ctx)
-        
-        return self._call_occi(environ, response, nova_ctx=nova_ctx, registry=self.registry)
+
+        return self._call_occi(environ, response, nova_ctx=nova_ctx,
+                                                        registry=self.registry)
 
     def _setup_occi_service(self):
         '''
@@ -130,10 +132,10 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         ipnetworking_backend = networklink.IpNetworkInterfaceBackend()
         storage_link_backend = storagelink.StorageLinkBackend()
         networkinterface_backend = networklink.NetworkInterfaceBackend()
-        admin_password_backend = extensions.AdminPasswordBackend()
-        key_pair_backend = extensions.KeyPairBackend()
-        console_backend = extensions.ConsoleBackend()
         sec_rule_backend = ruleresource.SecurityRuleBackend()
+
+        kind_backend = backend.KindBackend()
+        mixin_backend = backend.MixinBackend()
 
         # register kinds with backends
         self.register_backend(infrastructure.COMPUTE, compute_backend)
@@ -160,25 +162,26 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         self.register_backend(infrastructure.STORAGELINK, storage_link_backend)
         self.register_backend(infrastructure.NETWORKINTERFACE,
                                           networkinterface_backend)
-        
-        self.register_backend(extensions.CONSOLE_LINK,
-                                          backend.KindBackend())
-        
-        self.register_backend(extensions.SEC_RULE,
-                                          sec_rule_backend)
-        
-        # OS-OCCI Action extensions 
+
+        # FIware TCP - may not be required depending on downstream code
+        self.register_backend(extensions.TCP, mixin_backend)
+
+        # New OCCI spec candidates
+        self.register_backend(extensions.CONSOLE_LINK, kind_backend)
+        self.register_backend(extensions.SEC_RULE, sec_rule_backend)
+
+        # OS-OCCI Action extensions
         self.register_backend(extensions.OS_CHG_PWD, compute_backend)
         self.register_backend(extensions.OS_REVERT_RESIZE, compute_backend)
         self.register_backend(extensions.OS_CONFIRM_RESIZE, compute_backend)
         self.register_backend(extensions.OS_CREATE_IMAGE, compute_backend)
-     
+
         # OS-OCCI Mixin extensions
-        self.register_backend(extensions.ADMIN_PWD_EXT, admin_password_backend)
-        self.register_backend(extensions.KEY_PAIR_EXT, key_pair_backend)
-        self.register_backend(extensions.SSH_CONSOLE, console_backend)
-        self.register_backend(extensions.VNC_CONSOLE, console_backend)
-        
+        self.register_backend(extensions.ADMIN_PWD_EXT, mixin_backend)
+        self.register_backend(extensions.KEY_PAIR_EXT, mixin_backend)
+        self.register_backend(extensions.SSH_CONSOLE, kind_backend)
+        self.register_backend(extensions.VNC_CONSOLE, kind_backend)
+
         #This must be done as by default OpenStack has a default network
         # to which all new VM instances are attached.
         LOG.info('Registering default network with web app.')
@@ -189,46 +192,50 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                             [infrastructure.IPNETWORK], [],
                             'This is the network all VMs are attached to.',
                             'Default Network')
-        
+
         show_default_net_config = FLAGS.get("show_default_net_config", False)
-        
+
         if show_default_net_config:
             default_network.attributes = {
                     'occi.core.id': name,
-                    
+
                     'occi.network.vlan': '',
                     'occi.network.label': 'public',
                     'occi.network.state': 'up',
-                    
+
                     'occi.network.address': '',
                     'occi.network.gateway': '',
                     'occi.network.allocation': ''
             }
         else:
             ctx = context.get_admin_context()
-            authorize = os_extensions.extension_authorizer('compute', 'networks')
+            authorize = os_extensions.extension_authorizer('compute',
+                                                                    'networks')
             authorize(ctx)
-            
+
             network_api = net_api.API()
             networks = network_api.get_all(ctx)
-            
+
             if networks > 0:
                 LOG.warn('There is more that one network.')
                 LOG.warn('Current implmentation assumes only one.')
-                LOG.warn('Using the first network: id' + str(networks[0]['id']))
-            
+                LOG.warn('Using the first network: id' \
+                                                    + str(networks[0]['id']))
+
             default_network.attributes = {
                     'occi.core.id': name,
-                    
+
                     'occi.network.vlan': '',
                     'occi.network.label': 'public',
                     'occi.network.state': 'up',
-                    
+
                     'occi.network.address': networks[0]['cidr'],
                     'occi.network.gateway': networks[0]['gateway'],
                     'occi.network.allocation': 'dhcp'
             }
-        
+
+            # L8R: cover the case where there are > 1 networks
+
         self.registry.add_resource(name, default_network)
 
     def _register_resource_mixins(self, resource_mixin_backend):
@@ -240,7 +247,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                     'http://schemas.ogf.org/occi/infrastructure#resource_tpl'
 
         os_flavours = instance_types.get_all_types()
-        
+
         for itype in os_flavours:
             resource_template = extensions.ResourceTemplate(term=itype,
                 scheme=template_schema,
@@ -250,14 +257,14 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                 location='/' + itype + '/')
             LOG.debug('Regsitering an OpenStack flavour/instance type as: ' + \
                                                         str(resource_template))
-            
+
             self.register_backend(resource_template, resource_mixin_backend)
-    
+
     def _get_resource_attributes(self, attrs):
-        
+
 #        import ipdb
 #        ipdb.set_trace()
-        
+
 #        test_attrs = {
 #                      'root_gb': 10, 'name': 'm1.medium',
 #                      'deleted': False, 'created_at': None,
@@ -267,15 +274,15 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
 #                      'extra_specs': {}, 'deleted_at': None,
 #                      'vcpu_weight': None, 'id': 1L
 #                      }
-#        
+#
 #        test_attrs['root_gb']
 #        test_attrs['ephemeral_gb']
 #        test_attrs['memory_mb']
 #        test_attrs['vcpus']
 #        test_attrs['swap']
-        
+
         #This is hardcoded atm - might be good to have it configurable
-        attrs = { 
+        attrs = {
                  'occi.compute.cores': 'immutable',
                  'occi.compute.memory': 'immutable',
                  'org.openstack.compute.swap': 'immutable',
@@ -283,7 +290,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                  'org.openstack.compute.storage.ephemeral': 'immutable',
                  }
         return attrs
-       
+
     def _register_os_mixins(self, os_mixin_backend, ctx):
         '''
         Register the os mixins from information retrieved frrom glance.
@@ -299,7 +306,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                                 FLAGS.get("filter_kernel_and_ram_images", True)
 
         for img in images:
-            #If the image is a kernel or ram one 
+            # If the image is a kernel or ram one
             # and we're not to filter them out then register it.
             if ((img['container_format'] or img['disk_format']) \
                     in ('ari', 'aki')) and filter_kernel_and_ram_images:
@@ -313,8 +320,8 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                                 attributes=None,
                                 title='This is an OS ' + img['name'] + \
                                                             ' VM image',
-	                            location='/' + img['name'] + '/')
-            
+                                location='/' + img['name'] + '/')
+
             LOG.debug('Registering an OS image type as: ' \
                                                     + str(os_template))
             self.register_backend(os_template, os_mixin_backend)
@@ -324,30 +331,30 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         # map a security group to a mixin
         # when a security mixin is supplied with the provision request
         # that's the security group to use with the VM
-        
-        #FIXME: this is temporary
-        ctx.is_admin = True
+
         self.compute_api.ensure_default_security_group(ctx)
         groups = db.security_group_get_by_project(ctx, ctx.project_id)
-        
+
         for group in groups:
-            #TODO: ensure group.name is compliant with term ABNF
             sec_grp_id = group.id
+            g_name = group.name
+            if g_name.strip().find(' ') >= 0:
+                raise Exception()
+
             sec_mix = extensions.SecurityGroupMixin(
-                term=group.name,
-                scheme='http://schemas.ogf.org/occi/infrastructure/security/group#',
+                term=g_name,
+                scheme=
+                'http://schemas.ogf.org/occi/infrastructure/security/group#',
                 sec_grp_id=sec_grp_id,
                 related=[],
                 attributes=None,
                 title=group.name,
-                #TODO: review this location name
                 location='/' + group.name + '/')
-            
+
             self.register_backend(sec_mix, backend.MixinBackend())
 
     def _register_occi_extensions(self):
         '''
         Register some other OCCI extensions.
         '''
-        # self.register_backend(extensions.TCP, extensions.TCPBackend())
         pass

@@ -16,9 +16,10 @@
 import random
 
 from nova import exception
-from nova import log as logging 
+from nova import log as logging
 from nova import volume
-from nova.api.occi import backends
+
+from occi import backend
 from occi.extensions import infrastructure
 from webob import exc
 
@@ -32,21 +33,22 @@ from webob import exc
 #Hi I'm a logger, use me! :-)
 LOG = logging.getLogger('nova.api.occi.backends.storage')
 
+
 #NOTE: for this to operate the nova-vol service must be running
 # TODO: remove MyBackend
 # pop/delete attributes on DELETE
-class StorageBackend(backends.MyBackend):
+class StorageBackend(backend.KindBackend, backend.ActionBackend):
     '''
     Backend to handle storage resources.
     '''
     def __init__(self):
+        super(StorageBackend, self).__init__()
         self.volume_api = volume.API()
-    
-        
+
     def create(self, resource, extras):
         """Creates a new volume."""
         size = float(resource.attributes['occi.storage.size'])
-        
+
         # L8R: Right, this sucks. Suggest a patch to OpenStack.
         # OpenStack deals with size in terms of integer.
         # Need to convert float to integer for now and only if the float
@@ -56,12 +58,12 @@ class StorageBackend(backends.MyBackend):
             LOG.error('Volume sizes cannot be specified as fractional floats. \
                                             OpenStack does not support this.')
             raise exc.HTTPBadRequest()
-        
+
         size = str(int(size))
-        
+
         LOG.audit(_("Create volume of %s GB"), size,
                                                 context=extras['nova_ctx'])
-        
+
         disp_name = ''
         try:
             disp_name = resource.attributes['occi.core.title']
@@ -75,12 +77,12 @@ class StorageBackend(backends.MyBackend):
             disp_descr = resource.attributes['occi.core.summary']
         else:
             disp_descr = disp_name
-            
+
         snapshot = None
         #volume_type could be specified by mixin
         volume_type = None
         metadata = None
-        availability_zone = None
+        avail_zone = None
         new_volume = self.volume_api.create(extras['nova_ctx'],
                                             size,
                                             disp_name,
@@ -88,32 +90,31 @@ class StorageBackend(backends.MyBackend):
                                             snapshot=snapshot,
                                             volume_type=volume_type,
                                             metadata=metadata,
-                                            availability_zone=availability_zone)
-        
+                                            availability_zone=avail_zone)
+
         # Work around problem that instance is lazy-loaded...
         new_volume = self.volume_api.get(extras['nova_ctx'], new_volume['id'])
-        
+
         if new_volume['status'] == 'error':
             msg = 'There was an error creating the volume'
             LOG.error(msg)
             raise exc.HTTPServerError(msg)
-        
+
         resource.attributes['occi.core.id'] = str(new_volume['id'])
-        
+
         if new_volume['status'] == 'available':
             resource.attributes['occi.storage.state'] = 'online'
-        
+
         resource.actions = [infrastructure.OFFLINE, infrastructure.BACKUP, \
                             infrastructure.SNAPSHOT, infrastructure.RESIZE]
 
-
     def retrieve(self, entity, extras):
-        
+
         v_id = int(entity.attributes['occi.core.id'])
-        
-        # L8R: handle the case where the volume id is not an integer 
-        #       and is a uuid
-        
+
+        # L8R: handle the case where the volume id is not an integer
+        #       and is a uuid?
+
         try:
             vol = self.volume_api.get(extras['nova_ctx'], v_id)
         except exception.NotFound:
@@ -121,64 +122,64 @@ class StorageBackend(backends.MyBackend):
 
         #FIXME: this should not need to be stringified!
         entity.attributes['occi.storage.size'] = str(float(vol['size']))
-        
+
         # OS volume states:
         #       available, creating, deleting, in-use, error, error_deleting
         if vol['status'] == 'available' or vol['status'] == 'in-use':
             entity.attributes['occi.storage.state'] = 'online'
             entity.actions = [infrastructure.OFFLINE, infrastructure.BACKUP, \
                               infrastructure.SNAPSHOT, infrastructure.RESIZE]
-            
 
     def delete(self, entity, extras):
         # call the management framework to delete this storage instance...
         LOG.info('Removing storage device with id: ' + entity.identifier)
-        
+
         volume_id = int(entity.attributes['occi.core.id'])
-        
+
         try:
             vol = self.volume_api.get(extras['nova_ctx'], volume_id)
             self.volume_api.delete(extras['nova_ctx'], vol)
         except exception.NotFound:
             raise exc.HTTPNotFound()
-        
 
     def action(self, entity, action, extras):
         if action not in entity.actions:
             raise AttributeError("This action is currently no applicable.")
-        
+
         elif action == infrastructure.ONLINE:
             # ONLINE, ready for service, default state of a created volume.
             # could this cover the attach functionality in storage link?
             # The following is not an approach to use:
             # self.volume_api.initialize_connection(context, volume, connector)
-            
+
             # By default storage is ONLINE and can not be brought OFFLINE
-            
+
             LOG.warn('Online storage action requested resource with id: ' + \
                                                             entity.identifier)
             raise exc.HTTPBadRequest()
-            
+
         elif action == infrastructure.OFFLINE:
             # OFFLINE, disconnected? disconnection supported in API otherwise
             # not. The following is not an approach to use:
             # self.volume_api.terminate_connection(context, volume, connector)
-            
+
             # By default storage cannot be brought OFFLINE
             LOG.warn('Offline storage action requested resource with id: ' + \
                                                             entity.identifier)
             raise exc.HTTPBadRequest()
-            
-        elif action == infrastructure.BACKUP: #CDMI?!
+
+        elif action == infrastructure.BACKUP:
+            # CDMI?!
             # L8R: Same as a snapshot? unclear - bad request for now.
             # BACKUP: create a complete copy of the volume.
             LOG.warn('Backup action ...storage resource with id: '
                   + entity.identifier)
             raise exc.HTTPBadRequest()
             #self._snapshot_storage(entity, extras)
-            
-        elif action == infrastructure.SNAPSHOT: #CDMI?!
-            # SNAPSHOT: create a time-stamped copy of the volume? Supported in 
+
+        elif action == infrastructure.SNAPSHOT:
+            # CDMI?!
+            # SNAPSHOT: create a time-stamped copy of the volume? Supported in
             # OS volume API
             self._snapshot_storage(entity, extras)
 
@@ -186,11 +187,11 @@ class StorageBackend(backends.MyBackend):
             # L8R: not supported by API. Patch to OS?
             # RESIZE: increase, decrease size of volume. Not supported directly
             #         by the API
-            
+
             LOG.warn('Resize storage actio requested resource with id: ' + \
                                                             entity.identifier)
             raise exc.HTTPNotImplemented()
-    
+
     # L8R: OCCI has no way to manage snapshots or backups once created :-(
     def _snapshot_storage(self, entity, extras, backup=False):
         LOG.info('Snapshoting...storage resource with id: ' + \
@@ -205,8 +206,7 @@ class StorageBackend(backends.MyBackend):
             name = 'snapshot name'
             description = 'snapshot description'
         self.volume_api.create_snapshot(extras['nova_ctx'],
-                                        vol, name, description)        
-
+                                        vol, name, description)
 
     def update(self, old, new, extras):
         # L8R: this is the same code taken from computeresource.
@@ -218,15 +218,13 @@ class StorageBackend(backends.MyBackend):
                                     or ('occi.core.title' in new.attributes):
                 if len(new.attributes['occi.core.title']) > 0:
                     old.attributes['occi.core.title'] = \
-                                            new.attributes['occi.core.title'] 
+                                            new.attributes['occi.core.title']
 
                 if len(new.attributes['occi.core.summary']) > 0:
                     old.attributes['occi.core.summary'] = \
-                                            new.attributes['occi.core.summary'] 
+                                            new.attributes['occi.core.summary']
             else:
                 LOG.error('Cannot update the supplied attributes.')
                 raise exc.HTTPBadRequest()
         else:
             raise exc.HTTPBadRequest()
-        
-    
