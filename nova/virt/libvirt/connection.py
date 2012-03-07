@@ -880,7 +880,7 @@ class LibvirtConnection(driver.ComputeDriver):
         timer = utils.LoopingCall(_wait_for_boot)
         return timer.start(interval=0.5, now=True)
 
-    def _flush_xen_console(self, virsh_output):
+    def _flush_libvirt_console(self, virsh_output):
         LOG.info(_('virsh said: %r'), virsh_output)
         virsh_output = virsh_output[0].strip()
 
@@ -919,11 +919,17 @@ class LibvirtConnection(driver.ComputeDriver):
             virsh_output = utils.execute('virsh',
                                          'ttyconsole',
                                          instance['name'])
-            data = self._flush_xen_console(virsh_output)
+            data = self._flush_libvirt_console(virsh_output)
             fpath = self._append_to_file(data, console_log)
         elif FLAGS.libvirt_type == 'lxc':
             # LXC is also special
-            LOG.info(_("Unable to read LXC console"), instance=instance)
+            virsh_output = utils.execute('virsh',
+                                         '-c',
+                                         'lxc:///',
+                                         'ttyconsole',
+                                         instance['name'])
+            data = self._flush_libvirt_console(virsh_output)
+            fpath = self._append_to_file(data, console_log)
         else:
             fpath = console_log
 
@@ -2030,12 +2036,12 @@ class LibvirtConnection(driver.ComputeDriver):
                                            block_migration):
         """Post operation of live migration at destination host.
 
-        :params ctxt: security context
-        :params instance_ref:
+        :param ctxt: security context
+        :param instance_ref:
             nova.db.sqlalchemy.models.Instance object
             instance object that is migrated.
-        :params network_info: instance network infomation
-        :params : block_migration: if true, post operation of block_migraiton.
+        :param network_info: instance network infomation
+        :param block_migration: if true, post operation of block_migraiton.
         """
         # Define migrated instance, otherwise, suspend/destroy does not work.
         dom_list = self._conn.listDefinedDomains()
@@ -2064,11 +2070,12 @@ class LibvirtConnection(driver.ComputeDriver):
             nova.db.sqlalchemy.models.Instance object
             instance object that is migrated.
         :return:
-            json strings with below format.
-           "[{'path':'disk', 'type':'raw',
-              'virt_disk_size':'10737418240',
-              'backing_file':'backing_file',
-              'disk_size':'83886080'},...]"
+            json strings with below format::
+
+                "[{'path':'disk', 'type':'raw',
+                  'virt_disk_size':'10737418240',
+                  'backing_file':'backing_file',
+                  'disk_size':'83886080'},...]"
 
         """
         disk_info = []

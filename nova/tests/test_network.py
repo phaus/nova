@@ -135,8 +135,8 @@ class FlatNetworkTestCase(test.TestCase):
                                               is_admin=False)
 
     def tearDown(self):
-        super(FlatNetworkTestCase, self).tearDown()
         self.network.instance_dns_manager.delete_dns_file()
+        super(FlatNetworkTestCase, self).tearDown()
 
     def test_get_instance_nw_info(self):
         fake_get_instance_nw_info = fake_network.fake_get_instance_nw_info
@@ -838,7 +838,7 @@ class VlanNetworkTestCase(test.TestCase):
         # Clean up the ip addresses
         self.network.disassociate_floating_ip(context1, float_addr)
         self.network.deallocate_floating_ip(context1, float_addr)
-        self.network.deallocate_fixed_ip(context1, fix_addr)
+        self.network.deallocate_fixed_ip(context1, fix_addr, 'fake')
         db.floating_ip_destroy(context1.elevated(), float_addr)
         db.fixed_ip_disassociate(context1.elevated(), fix_addr)
 
@@ -1277,8 +1277,8 @@ class FloatingIPTestCase(test.TestCase):
             is_admin=False)
 
     def tearDown(self):
-        super(FloatingIPTestCase, self).tearDown()
         self.network.floating_dns_manager.delete_dns_file()
+        super(FloatingIPTestCase, self).tearDown()
 
     def test_double_deallocation(self):
         instance_ref = db.api.instance_create(self.context,
@@ -1480,8 +1480,8 @@ class InstanceDNSTestCase(test.TestCase):
             is_admin=False)
 
     def tearDown(self):
-        super(InstanceDNSTestCase, self).tearDown()
         self.network.instance_dns_manager.delete_dns_file()
+        super(InstanceDNSTestCase, self).tearDown()
 
     def test_dns_domains_private(self):
         zone1 = 'testzone'
@@ -1525,10 +1525,10 @@ class LdapDNSTestCase(test.TestCase):
         self.driver.create_domain(domain2)
 
     def tearDown(self):
-        super(LdapDNSTestCase, self).tearDown()
         self.driver.delete_domain(domain1)
         self.driver.delete_domain(domain2)
         sys.modules['ldap'] = self.saved_ldap
+        super(LdapDNSTestCase, self).tearDown()
 
     def test_ldap_dns_domains(self):
         domains = self.driver.get_domains()

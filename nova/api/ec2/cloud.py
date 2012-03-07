@@ -28,10 +28,11 @@ import time
 import urllib
 
 from nova.api.ec2 import ec2utils
-from nova.compute import instance_types
 from nova.api.ec2 import inst_state
+from nova.api import validator
 from nova import block_device
 from nova import compute
+from nova.compute import instance_types
 from nova.compute import vm_states
 from nova import crypto
 from nova import db
@@ -40,10 +41,9 @@ from nova import flags
 from nova.image import s3
 from nova import log as logging
 from nova import network
-from nova import rpc
+from nova.rpc import common as rpc_common
 from nova import utils
 from nova import volume
-from nova.api import validator
 
 
 FLAGS = flags.FLAGS
@@ -1215,7 +1215,7 @@ class CloudController(object):
         try:
             public_ip = self.network_api.allocate_floating_ip(context)
             return {'publicIp': public_ip}
-        except rpc.RemoteError as ex:
+        except rpc_common.RemoteError as ex:
             # NOTE(tr3buchet) - why does this block exist?
             if ex.exc_type == 'NoMoreFloatingIps':
                 raise exception.NoMoreFloatingIps()
@@ -1434,6 +1434,9 @@ class CloudController(object):
     def register_image(self, context, image_location=None, **kwargs):
         if image_location is None and kwargs.get('name'):
             image_location = kwargs['name']
+        if image_location is None:
+            raise exception.EC2APIError(_('imageLocation is required'))
+
         metadata = {'properties': {'image_location': image_location}}
 
         if kwargs.get('name'):
@@ -1513,7 +1516,11 @@ class CloudController(object):
         del(image['id'])
 
         image['is_public'] = (operation_type == 'add')
-        return self.image_service.update(context, internal_id, image)
+        try:
+            return self.image_service.update(context, internal_id, image)
+        except exception.ImageNotAuthorized:
+            msg = _('Not allowed to modify attributes for image %s')
+            raise exception.EC2APIError(msg % image_id)
 
     def update_image(self, context, image_id, **kwargs):
         internal_id = ec2utils.ec2_id_to_id(image_id)

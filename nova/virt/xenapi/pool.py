@@ -76,7 +76,7 @@ class ResourcePool(object):
                 # this is the master ->  do a pool-join
                 # To this aim, nova compute on the slave has to go down.
                 # NOTE: it is assumed that ONLY nova compute is running now
-                self._join_slave(aggregate.id, host,
+                self._join_slave(aggregate.id,
                                  kwargs.get('compute_uuid'),
                                  kwargs.get('url'), kwargs.get('user'),
                                  kwargs.get('passwd'))
@@ -127,7 +127,7 @@ class ResourcePool(object):
                                            'from the pool; No master found')
                                            % locals())
 
-    def _join_slave(self, aggregate_id, host, compute_uuid, url, user, passwd):
+    def _join_slave(self, aggregate_id, compute_uuid, url, user, passwd):
         """Joins a slave into a XenServer resource pool."""
         try:
             args = {'compute_uuid': compute_uuid,
@@ -212,5 +212,5 @@ def forward_request(context, request_type, master, aggregate_id,
 def swap_xapi_host(url, host_addr):
     """Replace the XenServer address present in 'url' with 'host_addr'."""
     temp_url = urlparse.urlparse(url)
-    _, sep, port = temp_url.netloc.partition(':')
+    _netloc, sep, port = temp_url.netloc.partition(':')
     return url.replace(temp_url.netloc, '%s%s%s' % (host_addr, sep, port))
