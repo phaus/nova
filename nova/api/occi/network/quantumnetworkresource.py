@@ -12,20 +12,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-
-# TODO: implement create - note: this must handle either nova-network or
-#        quantum APIs - detect via flags and secondarily via import exceptions
-#       implement delete
-#       implement retreive
-#       implement actions
-#       implement updates
-
-# Also see nova/api/openstack/compute/contrib/networks.py
-
+#TODO: implement actions
+#      implement updates
 
 from nova import flags, log as logging
 from occi import backend
-from occi.extensions.infrastructure import UP, DOWN, NETWORK
+from occi.extensions import infrastructure
 
 from nova.network.quantum.client import Client as QuantumClient
 
@@ -33,8 +25,6 @@ from nova.network.quantum.client import Client as QuantumClient
 LOG = logging.getLogger('nova.api.occi.backends.network')
 
 FLAGS = flags.FLAGS
-
-#TODO: clean the crud out!
 
 
 class QuantumNetworkBackend(backend.KindBackend, backend.ActionBackend):
@@ -62,7 +52,7 @@ class QuantumNetworkBackend(backend.KindBackend, backend.ActionBackend):
         entity.attributes['occi.core.id'] = res["network"]["id"]
         entity.attributes['occi.network.vlan'] = ''
         entity.attributes['occi.network.state'] = 'active'
-        entity.actions = [DOWN]
+        entity.actions = [infrastructure.DOWN]
 
     def retrieve(self, entity, extras):
         self.qclient.tenant = extras['nova_ctx'].project_id
@@ -74,10 +64,10 @@ class QuantumNetworkBackend(backend.KindBackend, backend.ActionBackend):
 
         if res['op-status'] == 'UP':
             entity.attributes['occi.network.state'] = 'active'
-            entity.actions = [DOWN]
+            entity.actions = [infrastructure.DOWN]
         else:
             entity.attributes['occi.network.state'] = 'inactive'
-            entity.actions = [UP]
+            entity.actions = [infrastructure.UP]
 
     def delete(self, entity, extras):
         # and deactivate it
@@ -93,29 +83,11 @@ class QuantumNetworkBackend(backend.KindBackend, backend.ActionBackend):
     def action(self, entity, action, extras):
         if action not in entity.actions:
             raise AttributeError("This action is currently no applicable.")
-        elif action.kind == UP:
+        elif action.kind == infrastructure.UP:
             entity.attributes['occi.network.state'] = 'active'
             # read attributes from action and do something with it :-)
             print('Starting VNIC with id: ' + entity.identifier)
-        elif action.kind == DOWN:
+        elif action.kind == infrastructure.DOWN:
             entity.attributes['occi.network.state'] = 'inactive'
             # read attributes from action and do something with it :-)
             print('Stopping VNIC with id: ' + entity.identifier)
-
-#
-#class IpNetworkBackend(backend.MixinBackend):
-#    '''
-#    A mixin backend for the IPnetworking.
-#    '''
-#
-#    def create(self, entity, extras):
-#        if not entity.kind == NETWORK:
-#            raise AttributeError('This mixin cannot be applied to this kind.')
-#        entity.attributes['occi.network.allocation'] = 'dynamic'
-#        entity.attributes['occi.network.gateway'] = '10.0.0.1'
-#        entity.attributes['occi.network.address'] = '10.0.0.1/24'
-#
-#    def delete(self, entity, extras):
-#        entity.attributes.pop('occi.network.allocation')
-#        entity.attributes.pop('occi.network.gateway')
-#        entity.attributes.pop('occi.network.address')
