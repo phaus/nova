@@ -22,11 +22,11 @@ from nova.compute import API
 from nova.openstack.common import cfg
 from nova.network import api as net_api
 from nova.api.openstack import extensions as os_extensions
-from nova.api.occi import backends
 from nova.api.occi import extensions
 from nova.api.occi.compute import computeresource
 from nova.api.occi.network import networklink
 from nova.api.occi.network import networkresource
+from nova.api.occi.network import quantumnetworkresource
 from nova.api.occi.storage import storagelink
 from nova.api.occi.storage import storageresource
 from nova.api.occi.security import ruleresource
@@ -50,6 +50,9 @@ OCCI_OPTS = [
              cfg.BoolOpt("filter_kernel_and_ram_images",
                 default=True,
                 help="Whether to show the Kernel and RAM images to clients"),
+             cfg.StrOpt("net_manager",
+                        default="quantum",
+                        help="The network manager to use with the OCCI API."),
              ]
 FLAGS = flags.FLAGS
 FLAGS.register_opts(OCCI_OPTS)
@@ -83,6 +86,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                                 registry=OpenStackOCCIRegistry())
 
         self.compute_api = API()
+        self.net_manager = FLAGS.get("net_manager", "quantum")
         # setup the occi service...
         self._setup_occi_service()
 
@@ -102,17 +106,17 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         response -- The response.
         '''
         nova_ctx = environ['nova.context']
-
         #L8R this might be pushed into the context middleware
 #        nova_ctx.project_id = environ.get('HTTP_X_AUTH_PROJECT_ID', None)
         nova_ctx.project_id = environ.get('HTTP_X_AUTH_TENANT_ID', None)
+
         if nova_ctx.project_id == None:
             LOG.error('No tenant ID header was supplied in the request')
 
         # register openstack images
-        self._register_os_mixins(backends.MixinBackend(), nova_ctx)
+        self._register_os_mixins(backend.MixinBackend(), nova_ctx)
         # register openstack instance types (flavours)
-        self._register_resource_mixins(backends.MixinBackend())
+        self._register_resource_mixins(backend.MixinBackend())
         # register the openstack security groups (firewall rules) as Mixins
         self._register_security_mixins(nova_ctx)
 
@@ -126,7 +130,12 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         LOG.info('Registering OCCI backends with web app.')
 
         compute_backend = computeresource.ComputeBackend()
-        network_backend = networkresource.NetworkBackend()
+
+        if self.net_manager == "quantum":
+            network_backend = quantumnetworkresource.QuantumNetworkBackend()
+        else:
+            network_backend = networkresource.NetworkBackend()
+
         storage_backend = storageresource.StorageBackend()
         ipnetwork_backend = networkresource.IpNetworkBackend()
         ipnetworking_backend = networklink.IpNetworkInterfaceBackend()
@@ -247,7 +256,6 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                     'http://schemas.ogf.org/occi/infrastructure#resource_tpl'
 
         os_flavours = instance_types.get_all_types()
-
         for itype in os_flavours:
             resource_template = extensions.ResourceTemplate(term=itype,
                 scheme=template_schema,
@@ -261,9 +269,6 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
             self.register_backend(resource_template, resource_mixin_backend)
 
     def _get_resource_attributes(self, attrs):
-
-#        import ipdb
-#        ipdb.set_trace()
 
 #        test_attrs = {
 #                      'root_gb': 10, 'name': 'm1.medium',
@@ -302,6 +307,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         images = image_service.detail(ctx)
 
         # L8R: now the API allows users to supply RAM and Kernel images
+        # can this filter be done via the glance filters?
         filter_kernel_and_ram_images = \
                                 FLAGS.get("filter_kernel_and_ram_images", True)
 

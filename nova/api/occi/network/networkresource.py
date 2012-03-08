@@ -27,9 +27,6 @@ from nova import flags, log as logging
 from occi import backend
 from occi.extensions.infrastructure import UP, DOWN, NETWORK
 
-#from quantum.client import cli_lib as cli
-#from quantum.client import Client
-
 
 #Hi I'm a logger, use me! :-)
 LOG = logging.getLogger('nova.api.occi.backends.network')

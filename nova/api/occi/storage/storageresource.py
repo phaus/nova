@@ -35,7 +35,6 @@ LOG = logging.getLogger('nova.api.occi.backends.storage')
 
 
 #NOTE: for this to operate the nova-vol service must be running
-# TODO: remove MyBackend
 # pop/delete attributes on DELETE
 class StorageBackend(backend.KindBackend, backend.ActionBackend):
     '''

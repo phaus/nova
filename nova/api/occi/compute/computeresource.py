@@ -230,8 +230,10 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         # has not been updated at this point
         vm_net_info = self._get_adapter_info(instances[0], extras, True)
         self._attach_to_default_network(vm_net_info, resource, extras)
-
         self._get_console_info(resource, extras)
+
+        #TODO: if there is ephemeral or root storage, assciate it!
+        self._attach_to_storage()
 
         #set valid actions
         resource.actions = [infrastructure.STOP,
@@ -240,6 +242,9 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
                           extensions.OS_REVERT_RESIZE, \
                           extensions.OS_CONFIRM_RESIZE, \
                           extensions.OS_CREATE_IMAGE]
+
+    def _attach_to_storage(self):
+        pass
 
     def _get_vm_arch(self, context, os_template_mixin):
         # Extract architecture from either:
