@@ -197,15 +197,13 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         self._register_default_network()
 
     def _register_default_network(self, name='DEFAULT_NETWORK'):
-        default_network = core_model.Resource(name, infrastructure.NETWORK, \
-                            [infrastructure.IPNETWORK], [],
-                            'This is the network all VMs are attached to.',
-                            'Default Network')
-
+        #TODO: verify behaviour with quantum
         show_default_net_config = FLAGS.get("show_default_net_config", False)
 
+        net_attrs = {}
+
         if show_default_net_config:
-            default_network.attributes = {
+            net_attrs = {
                     'occi.core.id': name,
 
                     'occi.network.vlan': '',
@@ -225,15 +223,15 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
             network_api = net_api.API()
             networks = network_api.get_all(ctx)
 
-            if networks > 0:
+            if len(networks) > 1:
                 LOG.warn('There is more that one network.')
                 LOG.warn('Current implmentation assumes only one.')
                 LOG.warn('Using the first network: id' \
                                                     + str(networks[0]['id']))
 
-            default_network.attributes = {
-                    'occi.core.id': name,
-
+            net_attrs = {
+#                    'occi.core.id': name,
+                    'occi.core.id': networks[0]['uuid'],
                     'occi.network.vlan': '',
                     'occi.network.label': 'public',
                     'occi.network.state': 'up',
@@ -242,8 +240,14 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                     'occi.network.gateway': networks[0]['gateway'],
                     'occi.network.allocation': 'dhcp'
             }
+            name = networks[0]['uuid']
 
-            # L8R: cover the case where there are > 1 networks
+        default_network = core_model.Resource(name, infrastructure.NETWORK, \
+                        [infrastructure.IPNETWORK], [],
+                        'This is the network all VMs are attached to.',
+                        'Default Network')
+        default_network.attributes = net_attrs
+        # L8R: cover the case where there are > 1 networks
 
         self.registry.add_resource(name, default_network)
 
