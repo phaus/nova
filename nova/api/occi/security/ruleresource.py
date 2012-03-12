@@ -109,6 +109,11 @@ class SecurityRuleBackend(backend.KindBackend):
         if sec_mixin_present > 1:
             raise Exception()
 
+        #TODO: ensure that an OpenStack sec group matches the mixin
+        # if not, create one.
+        #FIXME: this is a temp. solution until there is support in pyssf
+        # for a QI backend
+
         return mixin
 
     # Taken directly from security_groups.py

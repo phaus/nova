@@ -795,7 +795,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         #     e.g. a POST against /-/
         LOG.info('Creating image from virtual machine with id' + \
                                                             entity.identifier)
-        if 'org.openstack.snapshot.image_name' not in entity.attributes:
+        if 'occi.compute.image.name' not in entity.attributes:
             exc.HTTPBadRequest()
 
         image_name = entity.attributes['org.openstack.snapshot.image_name']
