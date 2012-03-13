@@ -23,11 +23,11 @@ from nova import compute
 from nova.network import api as net_api
 from nova import exception
 from nova import log as logging
+from nova import policy
 from nova.compute import task_states
 from nova.compute import vm_states
 from nova.compute import instance_types
 from nova.rpc import common as rpc_common
-from nova import policy
 
 from nova.api.occi import extensions
 
@@ -43,7 +43,6 @@ LOG = logging.getLogger('nova.api.occi.backends.compute')
 
 
 # pop/delete attributes on DELETE
-# TODO: move _os_* actions to their own backend
 class ComputeBackend(backend.KindBackend, backend.ActionBackend):
     '''
     A Backend for compute instances.
@@ -51,10 +50,18 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
 
     def __init__(self):
         super(ComputeBackend, self).__init__()
+        # TODO: are these calls to policy needed?
         policy.reset()
         policy.init()
         self.compute_api = compute.API()
         self.network_api = net_api.API()
+
+
+    def _check_invalid_attrs(self, resource):
+        if ('occi.compute.cores' in resource.attributes) or ('occi.compute.speed' in resource.attributes) or ('occi.compute.memory' in resource.attributes) or ('occi.compute.architecture' in resource.attributes):
+            msg = 'There are unsupported attributes in the request.'
+            LOG.error(msg)
+            raise AttributeError(msg)
 
     def create(self, resource, extras):
 
@@ -62,33 +69,20 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         # like occi.compute.cores then a bad request must be issued
         # OpenStack does not support this.
 
-        if ('occi.compute.cores' in resource.attributes) \
-            or ('occi.compute.speed' in resource.attributes) \
-            or ('occi.compute.memory' in resource.attributes) \
-            or ('occi.compute.architecture' in resource.attributes):
-            msg = 'There are unsupported attributes in the request.'
-            LOG.error(msg)
-            raise AttributeError(msg)
+        LOG.info('Creating the virtual machine.')
+        self._check_invalid_attrs(resource)
 
-        LOG.info('Creating the virtual machine with id: ' +
-                                                        resource.identifier)
-
-        try:
-            name = resource.attributes['occi.compute.hostname']
-        except KeyError:
-            name = None
-            #str(random.randrange(0, 99999999)) + '-compute.occi-wg.org'
+        name = resource.attributes['occi.compute.hostname'] \
+                if 'occi.compute.hostname' in resource.attributes else None
 
         # Supplied by OCCI extension
-        key_name = None
-        key_data = None
+        key_name = key_data = None
 
-        #Auto-gen'ed 1st if OCCI extension supplied this will overwrite this
+        #Auto-gen'ed 1st. If OCCI extension supplied this will overwrite this
         password = utils.generate_password(FLAGS.password_length)
 
         # L8R: see what the effect on VM network config is when these are set
-        access_ip_v4 = None
-        access_ip_v6 = None
+        access_ip_v4 = None; access_ip_v6 = None
         #L8R: would be good to specify user_data via OCCI
         user_data = None
         metadata = {}
@@ -100,10 +94,8 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         availability_zone = None
         config_drive = None
         block_device_mapping = None
-        #L8R: this can be specified through OS Templates
-        kernel_id = None
-        #L8R: this can be specified through OS Templates
-        ramdisk_id = None
+        #L8R: these can be specified through OS Templates
+        kernel_id = ramdisk_id = None
         auto_disk_config = None
         scheduler_hints = None
 
@@ -216,6 +208,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         #     nova/nova/virt/libvirt/connection.py::get_cpu_info()
         # note: this would be the physical node's speed not necessarily
         #     the VMs.
+        LOG.info('Cannot tell what the CPU speed is.')
         resource.attributes['occi.compute.speed'] = str(0.0)
         resource.attributes['occi.compute.memory'] = \
                                 str(float(instances[0]['memory_mb']) / 1024)
@@ -226,8 +219,6 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         # A link is created to this network (IP) and set the ip to that of the
         # allocated ip
 
-        # this must be called as 'live' on create as the cached info
-        # has not been updated at this point
         vm_net_info = self._get_adapter_info(instances[0], extras, True)
         self._attach_to_default_network(vm_net_info, resource, extras)
         self._get_console_info(resource, extras)
@@ -244,6 +235,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
                           extensions.OS_CREATE_IMAGE]
 
     def _attach_to_storage(self):
+        #TODO:
         pass
 
     def _get_vm_arch(self, context, os_template_mixin):
@@ -346,6 +338,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         link.attributes['occi.networkinterface.interface'] = \
                                                         vm_net_info['vm_iface']
         #TODO: mac address info is not available
+        LOG.warn('MAC address info is not available')
         link.attributes['occi.networkinterface.mac'] = ''
         link.attributes['occi.networkinterface.state'] = 'active'
         link.attributes['occi.networkinterface.address'] = \
@@ -356,7 +349,6 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         link.attributes['occi.networkinterface.allocation'] = 'dhcp'
 
         resource.links.append(link)
-
         registry.add_resource(identifier, link)
 
     def _get_console_info(self, resource, extras):
@@ -427,13 +419,12 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
 
             resource.links.append(vnc_console_link)
 
-    # Note this is a direct lift from nova/api/openstack/compute/servers.py
-    # however as it is protected we cannot import it :-(
     def _handle_quota_error(self, error):
         """
         Reraise quota errors as api-specific http exceptions
         """
-
+        # Note this is a direct lift from nova/api/openstack/compute/servers.py
+        # however as it is protected we cannot import it :-(
         code_mappings = {
             "OnsetFileLimitExceeded":
                     _("Personality file limit exceeded"),
@@ -556,35 +547,16 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
 
         instance = self.retrieve(old, extras)
 
-        # update attributes.
         if len(new.attributes) > 0:
-            LOG.info('Updating mutable attributes of instance')
-            # support only title and summary changes now.
-            if ('occi.core.title' in new.attributes) \
-                                    or ('occi.core.title' in new.attributes):
-                if len(new.attributes['occi.core.title']) > 0:
-                    old.attributes['occi.core.title'] = \
-                                            new.attributes['occi.core.title']
-
-                if len(new.attributes['occi.core.summary']) > 0:
-                    old.attributes['occi.core.summary'] = \
-                                            new.attributes['occi.core.summary']
-            else:
-                LOG.error('Cannot update the supplied attributes.')
-                raise exc.HTTPBadRequest
+            self._update_attrs(old, new)
 
         # for now we will only handle one mixin change per request
-
-        #Find out what the mixin is.
         mixin = new.mixins[0]
-        # check for scale up in new
         if isinstance(mixin, extensions.ResourceTemplate):
-            self._os_resize_vm(old, extras, instance, mixin)
-
-        # check for new os rebuild in new
-        # supported by all hypervisors
+            self._update_resize_vm(old, extras, instance, mixin)
         elif isinstance(mixin, extensions.OsTemplate):
-            self._os_rebuild_vm(old, extras, instance, mixin)
+            # do we need to check for new os rebuild in new?
+            self._update_rebuild_vm(old, extras, instance, mixin)
         elif isinstance(mixin, extensions.SecurityGroupMixin):
             #TODO
             LOG.info('Updating security rule group')
@@ -593,7 +565,19 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
                                                 mixin.scheme + mixin.term)
             raise exc.HTTPBadRequest()
 
-    def _os_resize_vm(self, old, extras, instance, mixin):
+    def _update_attrs(self, old, new):
+        LOG.info('Updating mutable attributes of instance')
+    # support only title and summary changes now.
+        if ('occi.core.title' in new.attributes) or ('occi.core.title' in new.attributes):
+            if len(new.attributes['occi.core.title']) > 0:
+                old.attributes['occi.core.title'] = new.attributes['occi.core.title']
+            if len(new.attributes['occi.core.summary']) > 0:
+                old.attributes['occi.core.summary'] = new.attributes['occi.core.summary']
+        else:
+            LOG.error('Cannot update the supplied attributes.')
+            raise exc.HTTPBadRequest
+
+    def _update_resize_vm(self, old, extras, instance, mixin):
         LOG.info('Resize requested')
         # Update: libvirt now supports resize see:
         # http://wiki.openstack.org/HypervisorSupportMatrix
@@ -617,7 +601,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
                 m = mixin
                 LOG.debug('Resource template is changed: ' + m.scheme + m.term)
 
-    def _os_rebuild_vm(self, old, extras, instance, mixin):
+    def _update_rebuild_vm(self, old, extras, instance, mixin):
         LOG.info('Rebuild requested')
         image_href = mixin.os_id
         # L8R: Use the admin_password extension?
@@ -661,14 +645,6 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
             self._restart_vm(entity, instance, context)
         elif action == infrastructure.SUSPEND:
             self._suspend_vm(entity, instance, context)
-        elif action == extensions.OS_CHG_PWD:
-            self._os_chg_passwd_vm(entity, instance, context)
-        elif action == extensions.OS_REVERT_RESIZE:
-            self._os_revert_resize_vm(entity, instance, context)
-        elif action == extensions.OS_CONFIRM_RESIZE:
-            self._os_confirm_resize_vm(entity, instance, context)
-        elif action == extensions.OS_CREATE_IMAGE:
-            self._os_create_image(entity, instance, context)
         else:
             raise exc.HTTPBadRequest()
 
@@ -747,66 +723,3 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
             raise exc.HTTPServerError()
         entity.attributes['occi.compute.state'] = 'suspended'
         entity.actions = [infrastructure.START]
-
-    def _os_chg_passwd_vm(self, entity, instance, context):
-        # Use the password extension?
-        LOG.info('Changing admin password of virtual machine with id' \
-                                                        + entity.identifier)
-        if 'org.openstack.credentials.admin_pwd' not in entity.attributes:
-            exc.HTTPBadRequest()
-
-        new_password = entity.attributes['org.openstack.credentials.admin_pwd']
-        self.compute_api.set_admin_password(context, instance, new_password)
-
-        # No need to update attributes - state remains the same.
-
-    def _os_revert_resize_vm(self, entity, instance, context):
-        LOG.info('Reverting resized virtual machine with id' \
-                                                        + entity.identifier)
-        try:
-            self.compute_api.revert_resize(context, instance)
-        except exception.MigrationNotFound:
-            msg = _("Instance has not been resized.")
-            raise exc.HTTPBadRequest(explanation=msg)
-        except exception.InstanceInvalidState:
-            exc.HTTPConflict()
-        except Exception as e:
-            LOG.exception(_("Error in revert-resize %s"), e)
-            raise exc.HTTPBadRequest()
-        #TODO: update actions
-
-    def _os_confirm_resize_vm(self, entity, instance, context):
-        LOG.info('Confirming resize of virtual machine with id' + \
-                                                            entity.identifier)
-        try:
-            self.compute_api.confirm_resize(context, instance)
-        except exception.MigrationNotFound:
-            msg = _("Instance has not been resized.")
-            raise exc.HTTPBadRequest(explanation=msg)
-        except exception.InstanceInvalidState:
-            exc.HTTPConflict()
-        except Exception as e:
-            LOG.exception(_("Error in confirm-resize %s"), e)
-            raise exc.HTTPBadRequest()
-        #TODO: update actions
-
-    def _os_create_image(self, entity, instance, context):
-        #L8R: There might be a more 'occi' way of doing this
-        #     e.g. a POST against /-/
-        LOG.info('Creating image from virtual machine with id' + \
-                                                            entity.identifier)
-        if 'occi.compute.image.name' not in entity.attributes:
-            exc.HTTPBadRequest()
-
-        image_name = entity.attributes['org.openstack.snapshot.image_name']
-        props = {}
-
-        try:
-            self.compute_api.snapshot(context,
-                                      instance,
-                                      image_name,
-                                      extra_properties=props)
-
-        except exception.InstanceInvalidState:
-            exc.HTTPConflict()
-        #TODO: update actions

@@ -100,6 +100,9 @@ SEC_RULE = core_model.Kind(
         SEC_RULE_ATTRIBUTES,
         '/network/security/rule/')
 
+SEC_GROUP = core_model.Mixin(\
+    'http://schemas.ogf.org/occi/infrastructure/security/group#',
+    'group', attributes=None)
 
 # Trusted Compute Pool technology mixin definition
 TCP_ATTRIBUTES = {'eu.fi-ware.compute.tcp': '', }

@@ -30,6 +30,7 @@ from nova.api.occi.network import quantumnetworkresource
 from nova.api.occi.storage import storagelink
 from nova.api.occi.storage import storageresource
 from nova.api.occi.security import ruleresource
+from nova.api.occi.compute.os import os_actions
 from nova.compute import instance_types
 
 from occi import registry
@@ -137,15 +138,15 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
             network_backend = networkresource.NetworkBackend()
         else: raise Exception()
 
+        kind_backend = backend.KindBackend()
+        mixin_backend = backend.MixinBackend()
         storage_backend = storageresource.StorageBackend()
         ipnetwork_backend = networkresource.IpNetworkBackend()
         ipnetworking_backend = networklink.IpNetworkInterfaceBackend()
         storage_link_backend = storagelink.StorageLinkBackend()
         networkinterface_backend = networklink.NetworkInterfaceBackend()
         sec_rule_backend = ruleresource.SecurityRuleBackend()
-
-        kind_backend = backend.KindBackend()
-        mixin_backend = backend.MixinBackend()
+        os_actions_backend = os_actions.OsComputeActionBackend()
 
         # register kinds with backends
         self.register_backend(infrastructure.COMPUTE, compute_backend)
@@ -173,32 +174,32 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         self.register_backend(infrastructure.NETWORKINTERFACE,
                                           networkinterface_backend)
 
-        # FIware TCP - may not be required depending on downstream code
-        self.register_backend(extensions.TCP, mixin_backend)
-
         # New OCCI spec candidates
         self.register_backend(extensions.CONSOLE_LINK, kind_backend)
         self.register_backend(extensions.SEC_RULE, sec_rule_backend)
 
-        # OS-OCCI Action extensions
-        self.register_backend(extensions.OS_CHG_PWD, compute_backend)
-        self.register_backend(extensions.OS_REVERT_RESIZE, compute_backend)
-        self.register_backend(extensions.OS_CONFIRM_RESIZE, compute_backend)
-        self.register_backend(extensions.OS_CREATE_IMAGE, compute_backend)
-
-        # OS-OCCI Mixin extensions
+        # OS-OCCI Mixin and Action extensions
+        self.register_backend(extensions.OS_CHG_PWD, os_actions_backend)
+        self.register_backend(extensions.OS_REVERT_RESIZE, os_actions_backend)
+        self.register_backend(extensions.OS_CONFIRM_RESIZE, os_actions_backend)
+        self.register_backend(extensions.OS_CREATE_IMAGE, os_actions_backend)
         self.register_backend(extensions.ADMIN_PWD_EXT, mixin_backend)
         self.register_backend(extensions.KEY_PAIR_EXT, mixin_backend)
+        #TODO: remove these once URI support present in pyssf
         self.register_backend(extensions.SSH_CONSOLE, kind_backend)
         self.register_backend(extensions.VNC_CONSOLE, kind_backend)
 
+        # FIware TCP - may not be required depending on downstream code
+        self.register_backend(extensions.TCP, mixin_backend)
+
         #This must be done as by default OpenStack has a default network
         # to which all new VM instances are attached.
-        LOG.info('Registering default network with web app.')
         self._register_default_network()
 
     def _register_default_network(self, name='DEFAULT_NETWORK'):
         #TODO: verify behaviour with quantum
+        #      i.e. cover the case where there are > 1 networks
+        LOG.info('Registering default network with web app.')
         show_default_net_config = FLAGS.get("show_default_net_config", False)
 
         net_attrs = {}
@@ -248,7 +249,6 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                         'This is the network all VMs are attached to.',
                         'Default Network')
         default_network.attributes = net_attrs
-        # L8R: cover the case where there are > 1 networks
 
         self.registry.add_resource(name, default_network)
 
@@ -355,9 +355,9 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
             sec_mix = extensions.SecurityGroupMixin(
                 term=g_name,
                 scheme=
-                'http://schemas.ogf.org/occi/infrastructure/security/group#',
+                'http://schemas.openstack.org/infrastructure/security/group#',
                 sec_grp_id=sec_grp_id,
-                related=[],
+                related=[extensions.SEC_GROUP],
                 attributes=None,
                 title=group.name,
                 location='/' + group.name + '/')
