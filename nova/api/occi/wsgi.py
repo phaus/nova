@@ -51,7 +51,7 @@ OCCI_OPTS = [
                 default=True,
                 help="Whether to show the Kernel and RAM images to clients"),
              cfg.StrOpt("net_manager",
-                        default="quantum",
+                        default="nova", #also quantum
                         help="The network manager to use with the OCCI API."),
              ]
 FLAGS = flags.FLAGS
@@ -86,7 +86,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                                 registry=OpenStackOCCIRegistry())
 
         self.compute_api = API()
-        self.net_manager = FLAGS.get("net_manager", "quantum")
+        self.net_manager = FLAGS.get("net_manager", "nova")
         # setup the occi service...
         self._setup_occi_service()
 
@@ -133,8 +133,9 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
 
         if self.net_manager == "quantum":
             network_backend = quantumnetworkresource.QuantumNetworkBackend()
-        else:
+        elif self.net_manager == "nova":
             network_backend = networkresource.NetworkBackend()
+        else: raise Exception()
 
         storage_backend = storageresource.StorageBackend()
         ipnetwork_backend = networkresource.IpNetworkBackend()
