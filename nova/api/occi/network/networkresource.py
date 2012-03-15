@@ -26,25 +26,20 @@
 from nova import flags, log as logging
 from occi import backend
 from occi.extensions.infrastructure import UP, DOWN, NETWORK
+from nova.network.quantum.client import Client as QuantumClient
 
+from occi.extensions import infrastructure
 
 #Hi I'm a logger, use me! :-)
 LOG = logging.getLogger('nova.api.occi.backends.network')
 
 FLAGS = flags.FLAGS
 
-#TODO: clean the crud out!
-
 
 class NetworkBackend(backend.KindBackend, backend.ActionBackend):
     '''
     Backend to handle network resources.
     '''
-#    def __init__(self):
-#        self.tenant_id = 'admin'
-#        FORMAT = 'json'
-#        self.client = Client(tenant=self.tenant_id, format=FORMAT)
-
     def create(self, entity, extras):
         # create a VNIC...
         entity.attributes['occi.network.vlan'] = '1'
@@ -91,7 +86,6 @@ class IpNetworkBackend(backend.MixinBackend):
     '''
     A mixin backend for the IPnetworking.
     '''
-
     def create(self, entity, extras):
         if not entity.kind == NETWORK:
             raise AttributeError('This mixin cannot be applied to this kind.')
@@ -103,3 +97,76 @@ class IpNetworkBackend(backend.MixinBackend):
         entity.attributes.pop('occi.network.allocation')
         entity.attributes.pop('occi.network.gateway')
         entity.attributes.pop('occi.network.address')
+
+
+class QuantumNetworkBackend(backend.KindBackend, backend.ActionBackend):
+    '''
+    Backend to handle network resources.
+    '''
+    def __init__(self):
+        super(QuantumNetworkBackend, self).__init__()
+        # TODO: read from FLAGS
+        self.qclient = QuantumClient(host='10.211.55.85', format='json')
+
+    def create(self, entity, extras):
+        LOG.info('Creating a virtual network')
+
+        if 'occi.network.label' not in entity.attributes:
+            raise Exception()
+
+        self.qclient.tenant = extras['nova_ctx'].project_id
+        params = {'network': {'name': entity.attributes['occi.network.label']}}
+
+        try:
+            res = self.qclient.create_network(params)
+        except Exception:
+            raise Exception()
+
+        entity.attributes['occi.core.id'] = res["network"]["id"]
+        # VLANs are stored in the openvswitch db - vlan_bindings
+        # Need to access these some way. Note this is only OVS functionality
+        entity.attributes['occi.network.vlan'] = ''
+        entity.attributes['occi.network.state'] = 'active'
+        entity.actions = [infrastructure.DOWN]
+
+    def retrieve(self, entity, extras):
+        # FIXME: hackish - subclass network?
+        if entity.title == 'Default Network':
+            self.qclient.tenant = 'default'
+        else:
+            self.qclient.tenant = extras['nova_ctx'].project_id
+        try:
+            res = self.qclient.show_network_details(
+                                            entity.attributes['occi.core.id'])
+        except:
+            raise Exception()
+
+        if res['network']['op-status'] == 'UP':
+            entity.attributes['occi.network.state'] = 'active'
+            entity.actions = [infrastructure.DOWN]
+        else:
+            entity.attributes['occi.network.state'] = 'inactive'
+            entity.actions = [infrastructure.UP]
+
+    def delete(self, entity, extras):
+        # and deactivate it
+        LOG.info('Removing network of with id:' + entity.identifier)
+        self.qclient.tenant = extras['nova_ctx'].project_id
+        try:
+            self.qclient.show_network_details(
+                                            entity.attributes['occi.core.id'])
+        except Exception:
+            raise Exception()
+        self.qclient.delete_network(entity.attributes['occi.core.id'])
+
+    def action(self, entity, action, extras):
+        if action not in entity.actions:
+            raise AttributeError("This action is currently no applicable.")
+        elif action.kind == infrastructure.UP:
+            entity.attributes['occi.network.state'] = 'active'
+            # read attributes from action and do something with it :-)
+            print('Starting vnet with id: ' + entity.identifier)
+        elif action.kind == infrastructure.DOWN:
+            entity.attributes['occi.network.state'] = 'inactive'
+            # read attributes from action and do something with it :-)
+            print('Stopping vnet with id: ' + entity.identifier)

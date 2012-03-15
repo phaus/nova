@@ -26,7 +26,6 @@ from nova.api.occi import extensions
 from nova.api.occi.compute import computeresource
 from nova.api.occi.network import networklink
 from nova.api.occi.network import networkresource
-from nova.api.occi.network import quantumnetworkresource
 from nova.api.occi.storage import storagelink
 from nova.api.occi.storage import storageresource
 from nova.api.occi.security import ruleresource
@@ -130,21 +129,21 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         '''
         LOG.info('Registering OCCI backends with web app.')
 
+        kind_backend = backend.KindBackend()
+        mixin_backend = backend.MixinBackend()
         compute_backend = computeresource.ComputeBackend()
 
         if self.net_manager == "quantum":
-            network_backend = quantumnetworkresource.QuantumNetworkBackend()
+            network_backend = networkresource.QuantumNetworkBackend()
         elif self.net_manager == "nova":
             network_backend = networkresource.NetworkBackend()
+            networkinterface_backend = networklink.NetworkInterfaceBackend()
+            ipnetwork_backend = networkresource.IpNetworkBackend()
+            ipnetworking_backend = networklink.IpNetworkInterfaceBackend()
         else: raise Exception()
 
-        kind_backend = backend.KindBackend()
-        mixin_backend = backend.MixinBackend()
         storage_backend = storageresource.StorageBackend()
-        ipnetwork_backend = networkresource.IpNetworkBackend()
-        ipnetworking_backend = networklink.IpNetworkInterfaceBackend()
         storage_link_backend = storagelink.StorageLinkBackend()
-        networkinterface_backend = networklink.NetworkInterfaceBackend()
         sec_rule_backend = ruleresource.SecurityRuleBackend()
         os_actions_backend = os_actions.OsComputeActionBackend()
 
@@ -158,6 +157,11 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         self.register_backend(infrastructure.NETWORK, network_backend)
         self.register_backend(infrastructure.UP, network_backend)
         self.register_backend(infrastructure.DOWN, network_backend)
+        self.register_backend(infrastructure.NETWORKINTERFACE,
+                                          networkinterface_backend)
+        self.register_backend(infrastructure.IPNETWORK, ipnetwork_backend)
+        self.register_backend(infrastructure.IPNETWORKINTERFACE,
+                                          ipnetworking_backend)
 
         self.register_backend(infrastructure.STORAGE, storage_backend)
         self.register_backend(infrastructure.ONLINE, storage_backend)
@@ -165,14 +169,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         self.register_backend(infrastructure.BACKUP, storage_backend)
         self.register_backend(infrastructure.SNAPSHOT, storage_backend)
         self.register_backend(infrastructure.RESIZE, storage_backend)
-
-        self.register_backend(infrastructure.IPNETWORK, ipnetwork_backend)
-        self.register_backend(infrastructure.IPNETWORKINTERFACE,
-                                          ipnetworking_backend)
-
         self.register_backend(infrastructure.STORAGELINK, storage_link_backend)
-        self.register_backend(infrastructure.NETWORKINTERFACE,
-                                          networkinterface_backend)
 
         # New OCCI spec candidates
         self.register_backend(extensions.CONSOLE_LINK, kind_backend)
@@ -232,8 +229,8 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                                                     + str(networks[0]['id']))
 
             net_attrs = {
-#                    'occi.core.id': name,
-                    'occi.core.id': networks[0]['uuid'],
+                    'occi.core.id': name,
+#                    'occi.core.id': networks[0]['uuid'],
                     'occi.network.vlan': '',
                     'occi.network.label': 'public',
                     'occi.network.state': 'up',
@@ -242,7 +239,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                     'occi.network.gateway': networks[0]['gateway'],
                     'occi.network.allocation': 'dhcp'
             }
-            name = networks[0]['uuid']
+#            name = networks[0]['uuid']
 
         default_network = core_model.Resource(name, infrastructure.NETWORK, \
                         [infrastructure.IPNETWORK], [],

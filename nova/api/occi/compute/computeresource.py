@@ -56,9 +56,11 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         self.compute_api = compute.API()
         self.network_api = net_api.API()
 
-
     def _check_invalid_attrs(self, resource):
-        if ('occi.compute.cores' in resource.attributes) or ('occi.compute.speed' in resource.attributes) or ('occi.compute.memory' in resource.attributes) or ('occi.compute.architecture' in resource.attributes):
+        if ('occi.compute.cores' in resource.attributes) or \
+            ('occi.compute.speed' in resource.attributes) or \
+            ('occi.compute.memory' in resource.attributes) or \
+            ('occi.compute.architecture' in resource.attributes):
             msg = 'There are unsupported attributes in the request.'
             LOG.error(msg)
             raise AttributeError(msg)
@@ -291,8 +293,12 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         # Quantum
         if not live_query:
             sj = json.loads(sj)
-        vm_net_info['vm_iface'] = \
-                        sj[0]['network']['meta']['bridge_interface']
+        # TODO: bridge iface missing
+#        vm_net_info['vm_iface'] = \
+#                        sj[0]['network']['meta']['bridge']
+        import ipdb
+        ipdb.set_trace()
+        vm_net_info['vm_iface'] = 'eth0'
         #OS-specific if a VM is stopped it has no IP address
         if len(sj[0]['network']['subnets'][0]['ips']) > 0:
             vm_net_info['address'] = \
