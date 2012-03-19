@@ -21,15 +21,19 @@ from nova import db
 from nova.compute import API
 from nova.openstack.common import cfg
 from nova.network import api as net_api
-from nova.api.openstack import extensions as os_extensions
+
 from nova.api.occi import extensions
+from nova.api.occi.extensions import occi_future
+from nova.api.openstack import extensions as os_extensions
+
+from nova.api.occi.compute import templates
 from nova.api.occi.compute import computeresource
 from nova.api.occi.network import networklink
 from nova.api.occi.network import networkresource
 from nova.api.occi.storage import storagelink
 from nova.api.occi.storage import storageresource
-from nova.api.occi.security import ruleresource
-from nova.api.occi.compute.os import os_actions
+#from nova.api.occi.security import ruleresource
+#from nova.api.occi.compute.os import os_actions
 from nova.compute import instance_types
 
 from occi import registry
@@ -70,6 +74,13 @@ class OpenStackOCCIRegistry(registry.NonePersistentRegistry):
         key = resource.kind.location + resource.attributes['occi.core.id']
         resource.identifier = key
         registry.NonePersistentRegistry.add_resource(self, key, resource)
+
+#    def set_handler(self, handler):
+#        for cat, backend in self.BACKENDS.items():
+#            import ipdb
+#            ipdb.set_trace()
+#            if type(backend) == type(handler):
+
 
 
 class OCCIApplication(occi_wsgi.Application, wsgi.Application):
@@ -129,65 +140,8 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         '''
         LOG.info('Registering OCCI backends with web app.')
 
-        kind_backend = backend.KindBackend()
-        mixin_backend = backend.MixinBackend()
-        compute_backend = computeresource.ComputeBackend()
-
-        if self.net_manager == "quantum":
-            network_backend = networkresource.QuantumNetworkBackend()
-        elif self.net_manager == "nova":
-            network_backend = networkresource.NetworkBackend()
-            networkinterface_backend = networklink.NetworkInterfaceBackend()
-            ipnetwork_backend = networkresource.IpNetworkBackend()
-            ipnetworking_backend = networklink.IpNetworkInterfaceBackend()
-        else: raise Exception()
-
-        storage_backend = storageresource.StorageBackend()
-        storage_link_backend = storagelink.StorageLinkBackend()
-        sec_rule_backend = ruleresource.SecurityRuleBackend()
-        os_actions_backend = os_actions.OsComputeActionBackend()
-
-        # register kinds with backends
-        self.register_backend(infrastructure.COMPUTE, compute_backend)
-        self.register_backend(infrastructure.START, compute_backend)
-        self.register_backend(infrastructure.STOP, compute_backend)
-        self.register_backend(infrastructure.RESTART, compute_backend)
-        self.register_backend(infrastructure.SUSPEND, compute_backend)
-
-        self.register_backend(infrastructure.NETWORK, network_backend)
-        self.register_backend(infrastructure.UP, network_backend)
-        self.register_backend(infrastructure.DOWN, network_backend)
-        self.register_backend(infrastructure.NETWORKINTERFACE,
-                                          networkinterface_backend)
-        self.register_backend(infrastructure.IPNETWORK, ipnetwork_backend)
-        self.register_backend(infrastructure.IPNETWORKINTERFACE,
-                                          ipnetworking_backend)
-
-        self.register_backend(infrastructure.STORAGE, storage_backend)
-        self.register_backend(infrastructure.ONLINE, storage_backend)
-        self.register_backend(infrastructure.OFFLINE, storage_backend)
-        self.register_backend(infrastructure.BACKUP, storage_backend)
-        self.register_backend(infrastructure.SNAPSHOT, storage_backend)
-        self.register_backend(infrastructure.RESIZE, storage_backend)
-        self.register_backend(infrastructure.STORAGELINK, storage_link_backend)
-
-        # New OCCI spec candidates
-        self.register_backend(extensions.CONSOLE_LINK, kind_backend)
-        self.register_backend(extensions.SEC_RULE, sec_rule_backend)
-
-        # OS-OCCI Mixin and Action extensions
-        self.register_backend(extensions.OS_CHG_PWD, os_actions_backend)
-        self.register_backend(extensions.OS_REVERT_RESIZE, os_actions_backend)
-        self.register_backend(extensions.OS_CONFIRM_RESIZE, os_actions_backend)
-        self.register_backend(extensions.OS_CREATE_IMAGE, os_actions_backend)
-        self.register_backend(extensions.ADMIN_PWD_EXT, mixin_backend)
-        self.register_backend(extensions.KEY_PAIR_EXT, mixin_backend)
-        #TODO: remove these once URI support present in pyssf
-        self.register_backend(extensions.SSH_CONSOLE, kind_backend)
-        self.register_backend(extensions.VNC_CONSOLE, kind_backend)
-
-        # FIware TCP - may not be required depending on downstream code
-        self.register_backend(extensions.TCP, mixin_backend)
+        self._register_occi_infra()
+        self._register_occi_extensions()
 
         #This must be done as by default OpenStack has a default network
         # to which all new VM instances are attached.
@@ -259,7 +213,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
 
         os_flavours = instance_types.get_all_types()
         for itype in os_flavours:
-            resource_template = extensions.ResourceTemplate(term=itype,
+            resource_template = templates.ResourceTemplate(term=itype,
                 scheme=template_schema,
                 related=[resource_schema],
                 attributes=self._get_resource_attributes(os_flavours[itype]),
@@ -306,10 +260,15 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         os_schema = 'http://schemas.ogf.org/occi/infrastructure#os_tpl'
 
         image_service = image.get_default_image_service()
-        images = image_service.detail(ctx)
 
         # L8R: now the API allows users to supply RAM and Kernel images
         # can this filter be done via the glance filters?
+        # filters = {'container_format': 'saving', 'disk_format': ''}
+        # ovf, bare, ami
+        # raw, vhd, vmdk, vdi, iso, qcow2, ami
+        # not aki, ari
+        # note possibly large list where there are many images 
+        images = image_service.detail(ctx)
         filter_kernel_and_ram_images = \
                                 FLAGS.get("filter_kernel_and_ram_images", True)
 
@@ -321,7 +280,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                 LOG.warn('Not registering kernel/RAM image.')
                 continue
 
-            os_template = extensions.OsTemplate(
+            os_template = templates.OsTemplate(
                                 term=img['name'],
                                 scheme=template_schema, \
                                 os_id=img['id'], related=[os_schema], \
@@ -349,20 +308,67 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
             if g_name.strip().find(' ') >= 0:
                 raise Exception()
 
-            sec_mix = extensions.SecurityGroupMixin(
+            sec_mix = occi_future.SecurityGroupMixin(
                 term=g_name,
                 scheme=
                 'http://schemas.openstack.org/infrastructure/security/group#',
                 sec_grp_id=sec_grp_id,
-                related=[extensions.SEC_GROUP],
+                related=[occi_future.SEC_GROUP],
                 attributes=None,
                 title=group.name,
                 location='/' + group.name + '/')
 
             self.register_backend(sec_mix, backend.MixinBackend())
 
+    def _register_occi_infra(self):
+        compute_backend = computeresource.ComputeBackend()
+
+        if self.net_manager == "quantum":
+            network_backend = networkresource.QuantumNetworkBackend()
+        elif self.net_manager == "nova":
+            network_backend = networkresource.NetworkBackend()
+            networkinterface_backend = networklink.NetworkInterfaceBackend()
+            ipnetwork_backend = networkresource.IpNetworkBackend()
+            ipnetworking_backend = networklink.IpNetworkInterfaceBackend()
+        else: raise Exception()
+
+        storage_backend = storageresource.StorageBackend()
+        storage_link_backend = storagelink.StorageLinkBackend()
+#        sec_rule_backend = ruleresource.SecurityRuleBackend()
+#        os_actions_backend = os_actions.OsComputeActionBackend()
+
+        # register kinds with backends
+        self.register_backend(infrastructure.COMPUTE, compute_backend)
+        self.register_backend(infrastructure.START, compute_backend)
+        self.register_backend(infrastructure.STOP, compute_backend)
+        self.register_backend(infrastructure.RESTART, compute_backend)
+        self.register_backend(infrastructure.SUSPEND, compute_backend)
+
+        self.register_backend(infrastructure.NETWORK, network_backend)
+        self.register_backend(infrastructure.UP, network_backend)
+        self.register_backend(infrastructure.DOWN, network_backend)
+        self.register_backend(infrastructure.NETWORKINTERFACE,
+                                          networkinterface_backend)
+        self.register_backend(infrastructure.IPNETWORK, ipnetwork_backend)
+        self.register_backend(infrastructure.IPNETWORKINTERFACE,
+                                          ipnetworking_backend)
+
+        self.register_backend(infrastructure.STORAGE, storage_backend)
+        self.register_backend(infrastructure.ONLINE, storage_backend)
+        self.register_backend(infrastructure.OFFLINE, storage_backend)
+        self.register_backend(infrastructure.BACKUP, storage_backend)
+        self.register_backend(infrastructure.SNAPSHOT, storage_backend)
+        self.register_backend(infrastructure.RESIZE, storage_backend)
+        self.register_backend(infrastructure.STORAGELINK, storage_link_backend)
+
     def _register_occi_extensions(self):
         '''
-        Register some other OCCI extensions.
+        Register OCCI extensions.
         '''
-        pass
+        #EXTENSIONS is a list of hasmaps. The hashmap contains the handler.
+        #The hashmap contains a list of categories to be handled by the handler
+        for extn in extensions.EXTENSIONS:
+            #miaow! kittens, kittens, kittens!
+            for ext in extn:
+                for cat in ext['categories']:
+                    self.register_backend(cat, ext['handler'])

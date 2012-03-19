@@ -11,3 +11,22 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
+
+from occi import core_model
+from occi import backend
+
+
+def get_extensions():
+    return [
+            {
+             'categories':[TCP],
+             'handler': backend.MixinBackend()
+            }
+           ]
+
+### FIware Specific Additions ###
+# Trusted Compute Pool technology mixin definition
+TCP_ATTRIBUTES = {'eu.fi-ware.compute.tcp': '', }
+TCP = core_model.Mixin(\
+    'http://schemas.fi-ware.eu/occi/infrastructure/compute#',
+    'tcp', attributes=TCP_ATTRIBUTES)

@@ -1,4 +1,5 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
+
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
 #    a copy of the License at
@@ -15,9 +16,9 @@ from nova import logging
 from nova import compute
 from nova import exception
 from nova import policy
-from nova.api.occi import extensions
 
 from occi import backend
+from occi import core_model
 
 from webob import exc
 
@@ -26,6 +27,62 @@ from webob import exc
 LOG = logging.getLogger('nova.api.occi.backends.compute.os')
 
 
+######### 1. define the method to retreive all extension information #########
+def get_extensions():
+
+    return  [
+             {
+              'categories':[OS_CHG_PWD, OS_REVERT_RESIZE,
+                          OS_CONFIRM_RESIZE, OS_CREATE_IMAGE],
+              'handler': OsComputeActionBackend(),
+             },
+             {
+              'categories':[OS_KEY_PAIR_EXT, OS_ADMIN_PWD_EXT],
+              'handler': backend.MixinBackend(),
+             }
+            ]
+
+
+##### 2. define the extension categories - OpenStack Specific Additions ######
+
+#OS action extensions
+# these should be associated with their handler more explicitly
+OS_CHG_PWD = core_model.Action(
+                'http://schemas.openstack.org/instance/action#',
+                 'chg_pwd', 'Removes all data on the server and replaces' + \
+                                    'it with the specified image (via Mixin).',
+                 {'org.openstack.credentials.admin_pwd': ''})
+
+OS_REVERT_RESIZE = core_model.Action(
+                'http://schemas.openstack.org/instance/action#',
+                 'revert_resize', 'Revert the resize and roll back to \
+                                                     the original server')
+
+OS_CONFIRM_RESIZE = core_model.Action(
+                'http://schemas.openstack.org/instance/action#',
+                 'confirm_resize', 'Use this to confirm the resize action')
+
+OS_CREATE_IMAGE = core_model.Action(
+                'http://schemas.openstack.org/instance/action#',
+                 'create_image', 'Creates a new image for the given server.',
+                 {'image_name': ''})
+
+# OS Key pair extension
+OS_KEY_PAIR_ATTRIBUTES = {'org.openstack.credentials.publickey.name': '',
+                       'org.openstack.credentials.publickey.data': '', }
+OS_KEY_PAIR_EXT = core_model.Mixin(\
+    'http://schemas.openstack.org/instance/credentials#',
+    'public_key', attributes=OS_KEY_PAIR_ATTRIBUTES)
+
+
+# OS VM Administrative password extension
+OS_ADMIN_PWD_ATTRIBUTES = {'org.openstack.credentials.admin_pwd': '', }
+OS_ADMIN_PWD_EXT = core_model.Mixin(\
+    'http://schemas.openstack.org/instance/credentials#',
+    'admin_pwd', attributes=OS_ADMIN_PWD_ATTRIBUTES)
+
+
+##################### 3. define the extension handler(s) #####################
 class OsComputeActionBackend(backend.ActionBackend):
 
     def __init__(self):
@@ -45,13 +102,13 @@ class OsComputeActionBackend(backend.ActionBackend):
         except exception.NotFound:
             raise exc.HTTPNotFound()
 
-        if action == extensions.OS_CHG_PWD:
+        if action == OS_CHG_PWD:
             self._os_chg_passwd_vm(entity, instance, context)
-        elif action == extensions.OS_REVERT_RESIZE:
+        elif action == OS_REVERT_RESIZE:
             self._os_revert_resize_vm(entity, instance, context)
-        elif action == extensions.OS_CONFIRM_RESIZE:
+        elif action == OS_CONFIRM_RESIZE:
             self._os_confirm_resize_vm(entity, instance, context)
-        elif action == extensions.OS_CREATE_IMAGE:
+        elif action == OS_CREATE_IMAGE:
             self._os_create_image(entity, instance, context)
 
     def _os_chg_passwd_vm(self, entity, instance, context):

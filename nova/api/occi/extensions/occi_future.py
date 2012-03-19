@@ -20,12 +20,93 @@ from nova import utils
 from nova import flags
 from nova.compute import API
 
+from occi import core_model
 from occi import backend
 
 #Hi I'm a logger, use me! :-)
 LOG = logging.getLogger('nova.api.occi.backends.securityrule')
 
 FLAGS = flags.FLAGS
+
+
+def get_extensions():
+    return [
+            {
+             'categories': [CONSOLE_LINK, SSH_CONSOLE, VNC_CONSOLE],
+             'handler': backend.KindBackend()
+            },
+            {
+             'categories': [SEC_RULE],
+             'handler': SecurityRuleBackend()
+            },
+           ]
+
+### OCCI Candidate Spec Additions ###
+# Console Link Extension
+CONSOLE_LINK = core_model.Kind(
+                        'http://schemas.ogf.org/infrastructure/compute#',
+                        'console',
+                        [core_model.Link.kind],
+                        None,
+                        'This is a link to the VMs console',
+                        None,
+                        '/compute/consolelink/')
+
+# SSH Console Kind Extension
+# TODO: Remove this once URI support is added to pyssf
+SSH_CONSOLE_ATTRIBUTES = {'org.openstack.compute.console.ssh': '', }
+SSH_CONSOLE = core_model.Kind(
+                'http://schemas.openstack.org/occi/infrastructure/compute#',
+                'ssh_console',
+                None,
+                None,
+                'SSH console kind',
+                SSH_CONSOLE_ATTRIBUTES,
+                '/compute/console/ssh/')
+
+
+# VNC Console Kind Extension
+# TODO: Remove this once URI support is added to pyssf
+VNC_CONSOLE_ATTRIBUTES = {'org.openstack.compute.console.vnc': '', }
+VNC_CONSOLE = core_model.Kind(
+                'http://schemas.openstack.org/occi/infrastructure/compute#',
+                'vnc_console',
+                None,
+                None,
+                'VNC console kind',
+                VNC_CONSOLE_ATTRIBUTES,
+                '/compute/console/vnc/')
+
+
+# Network security rule extension to specify firewall rules
+SEC_RULE_ATTRIBUTES = {
+                       'occi.network.security.protocol': '',
+                       'occi.network.security.to': '',
+                       'occi.network.security.from': '',
+                       'occi.network.security.range': '',
+                       }
+SEC_RULE = core_model.Kind(
+        'http://schemas.openstack.org/occi/infrastructure/network/security#',
+        'rule',
+        [core_model.Resource.kind],
+        None,
+        'Network security rule kind',
+        SEC_RULE_ATTRIBUTES,
+        '/network/security/rule/')
+
+SEC_GROUP = core_model.Mixin(\
+    'http://schemas.ogf.org/occi/infrastructure/security/group#',
+    'group', attributes=None)
+
+
+# An extended Mixin, an extension
+class SecurityGroupMixin(core_model.Mixin):
+    def __init__(self, scheme, term, sec_grp_id, related=None, actions=None,
+                 title='', attributes=None, location=None):
+        super(SecurityGroupMixin, self).__init__(scheme, term, related,
+                                                 actions, title,
+                                                 attributes, location)
+        self.sec_grp_id = sec_grp_id
 
 
 class SecurityRuleBackend(backend.KindBackend):
@@ -151,3 +232,4 @@ class SecurityRuleBackend(backend.KindBackend):
         self.compute_api.trigger_security_group_rules_refresh(
                                                         extras['nova_ctx'],
                                     security_group_id=security_group['id'])
+

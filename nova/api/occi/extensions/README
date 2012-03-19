@@ -1,0 +1,5 @@
+# To create extensions:
+ 1. define the method to retreive all extension information
+ 2. define the extension categories
+ 3. define the extension handler(s)
+ 

@@ -29,7 +29,9 @@ from nova.compute import vm_states
 from nova.compute import instance_types
 from nova.rpc import common as rpc_common
 
-from nova.api.occi import extensions
+from nova.api.occi.compute import templates
+from nova.api.occi.extensions import openstack as os_extns
+from nova.api.occi.extensions import occi_future
 
 from occi import backend
 from occi.extensions import infrastructure
@@ -103,22 +105,22 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
 
         rc = oc = 0
         for mixin in resource.mixins:
-            if isinstance(mixin, extensions.ResourceTemplate):
+            if isinstance(mixin, templates.ResourceTemplate):
                 r = mixin
                 rc += 1
-            elif isinstance(mixin, extensions.OsTemplate):
+            elif isinstance(mixin, templates.OsTemplate):
                 o = mixin
                 oc += 1
             elif (mixin.scheme + mixin.term) == \
-                                (extensions.KEY_PAIR_EXT.scheme +
-                                            extensions.KEY_PAIR_EXT.term):
+                                (os_extns.OS_KEY_PAIR_EXT.scheme +
+                                            os_extns.OS_KEY_PAIR_EXT.term):
                 key_name = \
                 resource.attributes['org.openstack.credentials.publickey.name']
                 key_data = \
                 resource.attributes['org.openstack.credentials.publickey.data']
             elif (mixin.scheme + mixin.term) == \
-                            (extensions.ADMIN_PWD_EXT.scheme + \
-                                            extensions.ADMIN_PWD_EXT.term):
+                            (os_extns.OS_ADMIN_PWD_EXT.scheme + \
+                                            os_extns.OS_ADMIN_PWD_EXT.term):
                 password = \
                     resource.attributes['org.openstack.credentials.admin_pwd']
             elif mixin.scheme == \
@@ -232,9 +234,9 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         resource.actions = [infrastructure.STOP,
                           infrastructure.SUSPEND, \
                           infrastructure.RESTART, \
-                          extensions.OS_REVERT_RESIZE, \
-                          extensions.OS_CONFIRM_RESIZE, \
-                          extensions.OS_CREATE_IMAGE]
+                          os_extns.OS_REVERT_RESIZE, \
+                          os_extns.OS_CONFIRM_RESIZE, \
+                          os_extns.OS_CREATE_IMAGE]
 
     def _attach_to_storage(self):
         #TODO:
@@ -384,7 +386,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
 
             identifier = str(uuid.uuid4())
             ssh_console = core_model.Resource(
-                identifier, extensions.SSH_CONSOLE, [],
+                identifier, occi_future.SSH_CONSOLE, [],
                 links=None, summary='',
                 title='')
             ssh_console.attributes['occi.core.id'] = identifier
@@ -395,7 +397,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
             identifier = str(uuid.uuid4())
             ssh_console_link = core_model.Link(
                                     identifier,
-                                    extensions.CONSOLE_LINK, \
+                                    occi_future.CONSOLE_LINK, \
                                     [], resource, ssh_console)
             ssh_console_link.attributes['occi.core.id'] = identifier
             registry.add_resource(identifier, ssh_console_link)
@@ -407,7 +409,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
 
             identifier = str(uuid.uuid4())
             vnc_console = core_model.Resource(
-                identifier, extensions.VNC_CONSOLE, [],
+                identifier, occi_future.VNC_CONSOLE, [],
                 links=None, summary='',
                 title='')
             vnc_console.attributes['occi.core.id'] = identifier
@@ -418,7 +420,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
             identifier = str(uuid.uuid4())
             vnc_console_link = core_model.Link(
                                     identifier,
-                                    extensions.CONSOLE_LINK, \
+                                    occi_future.CONSOLE_LINK, \
                                     [], resource, vnc_console)
             vnc_console_link.attributes['occi.core.id'] = identifier
             registry.add_resource(identifier, vnc_console_link)
@@ -475,10 +477,10 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
             entity.actions = [infrastructure.STOP, \
                               infrastructure.SUSPEND, \
                               infrastructure.RESTART, \
-                              extensions.OS_CONFIRM_RESIZE, \
-                              extensions.OS_REVERT_RESIZE, \
-                              extensions.OS_CHG_PWD, \
-                              extensions.OS_CREATE_IMAGE]
+                              os_extns.OS_CONFIRM_RESIZE, \
+                              os_extns.OS_REVERT_RESIZE, \
+                              os_extns.OS_CHG_PWD, \
+                              os_extns.OS_CREATE_IMAGE]
 
         # reboot server - OS, OCCI
         # start server - OCCI
@@ -558,12 +560,12 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
 
         # for now we will only handle one mixin change per request
         mixin = new.mixins[0]
-        if isinstance(mixin, extensions.ResourceTemplate):
+        if isinstance(mixin, templates.ResourceTemplate):
             self._update_resize_vm(old, extras, instance, mixin)
-        elif isinstance(mixin, extensions.OsTemplate):
+        elif isinstance(mixin, templates.OsTemplate):
             # do we need to check for new os rebuild in new?
             self._update_rebuild_vm(old, extras, instance, mixin)
-        elif isinstance(mixin, extensions.SecurityGroupMixin):
+        elif isinstance(mixin, occi_future.SecurityGroupMixin):
             #TODO
             LOG.info('Updating security rule group')
         else:
@@ -669,9 +671,9 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         entity.actions = [infrastructure.STOP,
                           infrastructure.SUSPEND, \
                           infrastructure.RESTART, \
-                          extensions.OS_REVERT_RESIZE, \
-                          extensions.OS_CONFIRM_RESIZE, \
-                          extensions.OS_CREATE_IMAGE]
+                          os_extns.OS_REVERT_RESIZE, \
+                          os_extns.OS_CONFIRM_RESIZE, \
+                          os_extns.OS_CREATE_IMAGE]
 
     def _stop_vm(self, entity, instance, context):
         # OCCI -> graceful, acpioff, poweroff
