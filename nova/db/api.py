@@ -65,9 +65,6 @@ db_opts = [
     cfg.StrOpt('snapshot_name_template',
                default='snapshot-%08x',
                help='Template string to be used to generate snapshot names'),
-    cfg.StrOpt('vsa_name_template',
-               default='vsa-%08x',
-               help='Template string to be used to generate VSA names'),
     ]
 
 FLAGS = flags.FLAGS
@@ -562,9 +559,11 @@ def instance_get_all(context):
     return IMPL.instance_get_all(context)
 
 
-def instance_get_all_by_filters(context, filters):
+def instance_get_all_by_filters(context, filters, sort_key='created_at',
+                                sort_dir='desc'):
     """Get all instances that match all filters."""
-    return IMPL.instance_get_all_by_filters(context, filters)
+    return IMPL.instance_get_all_by_filters(context, filters, sort_key,
+                                            sort_dir)
 
 
 def instance_get_active_by_window(context, begin, end=None, project_id=None):
@@ -1567,39 +1566,6 @@ def volume_type_extra_specs_update_or_create(context, volume_type_id,
     key/value pairs specified in the extra specs dict argument"""
     IMPL.volume_type_extra_specs_update_or_create(context, volume_type_id,
                                                     extra_specs)
-
-
-####################
-
-
-def vsa_create(context, values):
-    """Creates Virtual Storage Array record."""
-    return IMPL.vsa_create(context, values)
-
-
-def vsa_update(context, vsa_id, values):
-    """Updates Virtual Storage Array record."""
-    return IMPL.vsa_update(context, vsa_id, values)
-
-
-def vsa_destroy(context, vsa_id):
-    """Deletes Virtual Storage Array record."""
-    return IMPL.vsa_destroy(context, vsa_id)
-
-
-def vsa_get(context, vsa_id):
-    """Get Virtual Storage Array record by ID."""
-    return IMPL.vsa_get(context, vsa_id)
-
-
-def vsa_get_all(context):
-    """Get all Virtual Storage Array records."""
-    return IMPL.vsa_get_all(context)
-
-
-def vsa_get_all_by_project(context, project_id):
-    """Get all Virtual Storage Array records by project ID."""
-    return IMPL.vsa_get_all_by_project(context, project_id)
 
 
 ###################

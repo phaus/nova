@@ -40,6 +40,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 from sqlalchemy.orm import joinedload_all
 from sqlalchemy.sql import func
+from sqlalchemy.sql.expression import asc
 from sqlalchemy.sql.expression import desc
 from sqlalchemy.sql.expression import literal_column
 
@@ -1014,16 +1015,17 @@ def fixed_ip_disassociate_all_by_timeout(context, host, time):
     host_filter = or_(and_(models.Instance.host == host,
                            models.Network.multi_host == True),
                       models.Network.host == host)
-    fixed_ips = model_query(context, models.FixedIp.id, session=session,
+    fixed_ips = model_query(context, models.FixedIp, session=session,
                        read_deleted="yes").\
                       filter(models.FixedIp.updated_at < time).\
                       filter(models.FixedIp.instance_id != None).\
                       filter(models.FixedIp.allocated == False).\
                       filter(host_filter).\
                       all()
+    fixed_ip_ids = [fip.id for fip in fixed_ips]
     result = model_query(context, models.FixedIp, session=session,
                          read_deleted="yes").\
-                     filter(models.FixedIp.id.in_(fixed_ips)).\
+                     filter(models.FixedIp.id.in_(fixed_ip_ids)).\
                      update({'instance_id': None,
                              'leased': False,
                              'updated_at': utils.utcnow()},
@@ -1379,7 +1381,7 @@ def instance_get_all(context):
 
 
 @require_context
-def instance_get_all_by_filters(context, filters):
+def instance_get_all_by_filters(context, filters, sort_key, sort_dir):
     """Return instances that match all filters.  Deleted instances
     will be returned by default, unless there's a filter that says
     otherwise"""
@@ -1406,13 +1408,15 @@ def instance_get_all_by_filters(context, filters):
             return True
         return False
 
+    sort_fn = {'desc': desc, 'asc': asc}
+
     session = get_session()
     query_prefix = session.query(models.Instance).\
             options(joinedload('info_cache')).\
             options(joinedload('security_groups')).\
             options(joinedload('metadata')).\
             options(joinedload('instance_type')).\
-            order_by(desc(models.Instance.created_at))
+            order_by(sort_fn[sort_dir](getattr(models.Instance, sort_key)))
 
     # Make a copy of the filters dictionary to use going forward, as we'll
     # be modifying it and we shouldn't affect the caller's use of it.
@@ -2064,11 +2068,15 @@ def network_get_all_by_instance(context, instance_id):
 
 @require_admin_context
 def network_get_all_by_host(context, host):
+    session = get_session()
+    fixed_ip_query = model_query(context, models.FixedIp.network_id,
+                                 session=session).\
+                        filter(models.FixedIp.host == host)
     # NOTE(vish): return networks that have host set
     #             or that have a fixed ip with host set
     host_filter = or_(models.Network.host == host,
-                      models.FixedIp.host == host)
-    return _network_get_query(context).\
+                      models.Network.id.in_(fixed_ip_query.subquery()))
+    return _network_get_query(context, session=session).\
                        filter(host_filter).\
                        all()
 
@@ -2727,20 +2735,6 @@ def security_group_exists(context, project_id, group_name):
 def security_group_in_use(context, group_id):
     session = get_session()
     with session.begin():
-        # Are there any other groups that haven't been deleted
-        # that include this group in their rules?
-        rules = session.query(models.SecurityGroupIngressRule).\
-                filter_by(group_id=group_id).\
-                filter_by(deleted=False).\
-                all()
-        for r in rules:
-            num_groups = session.query(models.SecurityGroup).\
-                        filter_by(deleted=False).\
-                        filter_by(id=r.parent_group_id).\
-                        count()
-            if num_groups:
-                return True
-
         # Are there any instances that haven't been deleted
         # that include this group?
         inst_assoc = session.query(models.SecurityGroupInstanceAssociation).\
@@ -3852,88 +3846,6 @@ def volume_type_extra_specs_update_or_create(context, volume_type_id,
                          "deleted": 0})
         spec_ref.save(session=session)
     return specs
-
-
-####################
-
-
-def _vsa_get_query(context, session=None, project_only=False):
-    return model_query(context, models.VirtualStorageArray, session=session,
-                       project_only=project_only).\
-                         options(joinedload('vsa_instance_type'))
-
-
-@require_admin_context
-def vsa_create(context, values):
-    """
-    Creates Virtual Storage Array record.
-    """
-    try:
-        vsa_ref = models.VirtualStorageArray()
-        vsa_ref.update(values)
-        vsa_ref.save()
-    except Exception, e:
-        raise exception.DBError(e)
-    return vsa_ref
-
-
-@require_admin_context
-def vsa_update(context, vsa_id, values):
-    """
-    Updates Virtual Storage Array record.
-    """
-    session = get_session()
-    with session.begin():
-        vsa_ref = vsa_get(context, vsa_id, session=session)
-        vsa_ref.update(values)
-        vsa_ref.save(session=session)
-    return vsa_ref
-
-
-@require_admin_context
-def vsa_destroy(context, vsa_id):
-    """
-    Deletes Virtual Storage Array record.
-    """
-    session = get_session()
-    with session.begin():
-        session.query(models.VirtualStorageArray).\
-                filter_by(id=vsa_id).\
-                update({'deleted': True,
-                        'deleted_at': utils.utcnow(),
-                        'updated_at': literal_column('updated_at')})
-
-
-@require_context
-def vsa_get(context, vsa_id, session=None):
-    """
-    Get Virtual Storage Array record by ID.
-    """
-    result = _vsa_get_query(context, session=session, project_only=True).\
-                filter_by(id=vsa_id).\
-                first()
-
-    if not result:
-        raise exception.VirtualStorageArrayNotFound(id=vsa_id)
-
-    return result
-
-
-@require_admin_context
-def vsa_get_all(context):
-    """
-    Get all Virtual Storage Array records.
-    """
-    return _vsa_get_query(context).all()
-
-
-@require_context
-def vsa_get_all_by_project(context, project_id):
-    """
-    Get all Virtual Storage Array records by project ID.
-    """
-    authorize_project_context(context, project_id)
-    return _vsa_get_query(context).filter_by(project_id=project_id).all()
 
 
 ####################

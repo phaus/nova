@@ -36,8 +36,6 @@ topologies.  All of the network commands are issued to a subclass of
 :network_size:  Number of addresses in each private subnet
 :floating_range:  Floating IP address block
 :fixed_range:  Fixed IP address block
-:date_dhcp_on_disassociate:  Whether to update dhcp when fixed_ip
-                             is disassociated
 :fixed_ip_disassociate_timeout:  Seconds after which a deallocated ip
                                  is disassociated
 :create_unique_mac_address_attempts:  Number of times to attempt creating
@@ -1123,12 +1121,13 @@ class NetworkManager(manager.SchedulerDependentManager):
         self._allocate_fixed_ips(context, instance_id, host, networks)
 
     @wrap_check_policy
-    def remove_fixed_ip_from_instance(self, context, instance_id, address):
+    def remove_fixed_ip_from_instance(self, context, instance_id, host,
+                                      address):
         """Removes a fixed ip from an instance from specified network."""
         fixed_ips = self.db.fixed_ip_get_by_instance(context, instance_id)
         for fixed_ip in fixed_ips:
             if fixed_ip['address'] == address:
-                self.deallocate_fixed_ip(context, address)
+                self.deallocate_fixed_ip(context, address, host)
                 return
         raise exception.FixedIpNotFoundForSpecificInstance(
                                     instance_id=instance_id, ip=address)
@@ -1635,6 +1634,35 @@ class FlatManager(NetworkManager):
     def _teardown_network_on_host(self, context, network):
         """Tear down network on this host."""
         pass
+
+    # NOTE(justinsb): The floating ip functions are stub-implemented.
+    # We were throwing an exception, but this was messing up horizon.
+    # Timing makes it difficult to implement floating ips here, in Essex.
+
+    @wrap_check_policy
+    def get_floating_ip(self, context, id):
+        """Returns a floating IP as a dict"""
+        return None
+
+    @wrap_check_policy
+    def get_floating_pools(self, context):
+        """Returns list of floating pools"""
+        return {}
+
+    @wrap_check_policy
+    def get_floating_ip_by_address(self, context, address):
+        """Returns a floating IP as a dict"""
+        return None
+
+    @wrap_check_policy
+    def get_floating_ips_by_project(self, context):
+        """Returns the floating IPs allocated to a project"""
+        return []
+
+    @wrap_check_policy
+    def get_floating_ips_by_fixed_address(self, context, fixed_address):
+        """Returns the floating IPs associated with a fixed_address"""
+        return []
 
 
 class FlatDHCPManager(RPCAllocateFixedIP, FloatingIP, NetworkManager):
