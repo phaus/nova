@@ -11,31 +11,31 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+# TODO: use OCCI exceptions
+
 import uuid
 import json
-# TODO: use OCCI exceptions
 from webob import exc
 
 from nova import utils
 from nova import image
 from nova import flags
 from nova import compute
-from nova.network import api as net_api
 from nova import exception
 from nova import log as logging
-from nova import policy
 from nova.compute import task_states
 from nova.compute import vm_states
 from nova.compute import instance_types
+from nova.network import api as net_api
 from nova.rpc import common as rpc_common
 
 from nova.api.occi.compute import templates
 from nova.api.occi.extensions import openstack as os_extns
 from nova.api.occi.extensions import occi_future
 
+from occi import core_model
 from occi import backend
 from occi.extensions import infrastructure
-from occi import core_model
 
 
 FLAGS = flags.FLAGS
@@ -52,9 +52,6 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
 
     def __init__(self):
         super(ComputeBackend, self).__init__()
-        # TODO: are these calls to policy needed?
-        policy.reset()
-        policy.init()
         self.compute_api = compute.API()
         self.network_api = net_api.API()
 
@@ -86,8 +83,10 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         password = utils.generate_password(FLAGS.password_length)
 
         # L8R: see what the effect on VM network config is when these are set
-        access_ip_v4 = None; access_ip_v6 = None
-        #L8R: would be good to specify user_data via OCCI
+        access_ip_v4 = None
+        access_ip_v6 = None
+        #L8R: would be good to specify user_data via OCCI. Look to use
+        #     CompatibleOne extensions
         user_data = None
         metadata = {}
         injected_files = []
@@ -225,10 +224,10 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
 
         vm_net_info = self._get_adapter_info(instances[0], extras, True)
         self._attach_to_default_network(vm_net_info, resource, extras)
-        self._get_console_info(resource, extras)
+        self._get_console_info(resource, instances[0], extras)
 
         #TODO: if there is ephemeral or root storage, assciate it!
-        self._attach_to_storage()
+        self._attach_to_local_storage()
 
         #set valid actions
         resource.actions = [infrastructure.STOP,
@@ -238,7 +237,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
                           os_extns.OS_CONFIRM_RESIZE, \
                           os_extns.OS_CREATE_IMAGE]
 
-    def _attach_to_storage(self):
+    def _attach_to_local_storage(self):
         #TODO:
         pass
 
@@ -277,7 +276,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
 
     def _get_adapter_info(self, instance, extras, live_query=False):
 
-        vm_net_info = {'vm_iface': '', 'address': '', 'gateway': ''}
+        vm_net_info = {'vm_iface': '', 'address': '', 'gateway': '', 'mac': ''}
 
         if live_query:
             sj = self.network_api.get_instance_nw_info(extras['nova_ctx'], \
@@ -291,16 +290,10 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
             return vm_net_info
 
         # L8R: currently this assumes one adapter on the VM.
-        # It's likely that this will not be the case when using
-        # Quantum
+        # It's likely that this will not be the case when using Quantum
         if not live_query:
             sj = json.loads(sj)
-        # TODO: bridge iface missing
-#        vm_net_info['vm_iface'] = \
-#                        sj[0]['network']['meta']['bridge']
-        import ipdb
-        ipdb.set_trace()
-        vm_net_info['vm_iface'] = 'eth0'
+        vm_net_info['vm_iface'] = sj[0]['network']['meta']['bridge_interface']
         #OS-specific if a VM is stopped it has no IP address
         if len(sj[0]['network']['subnets'][0]['ips']) > 0:
             vm_net_info['address'] = \
@@ -309,7 +302,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
             vm_net_info['address'] = ''
         vm_net_info['gateway'] = \
                         sj[0]['network']['subnets'][0]['gateway']['address']
-
+        vm_net_info['mac'] = sj[0]['address']
         return vm_net_info
 
     def _attach_to_default_network(self, vm_net_info, resource, extras):
@@ -327,12 +320,12 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
                                                         vm_net_info['address']
                     link.attributes['occi.networkinterface.gateway'] = \
                                                         vm_net_info['gateway']
+                    link.attributes['occi.networkinterface.mac'] = \
+                                                        vm_net_info['mac']
                     return
 
         # If the network association does not exist...
         # Get a handle to the default network
-        # TODO: use occi.workflow
-        #       this will remove need of registry in extras
         registry = extras['registry']
         default_network = registry.get_resource('/network/DEFAULT_NETWORK')
         source = resource
@@ -345,9 +338,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         link.attributes['occi.core.id'] = identifier
         link.attributes['occi.networkinterface.interface'] = \
                                                         vm_net_info['vm_iface']
-        #TODO: mac address info is not available
-        LOG.warn('MAC address info is not available')
-        link.attributes['occi.networkinterface.mac'] = ''
+        link.attributes['occi.networkinterface.mac'] = vm_net_info['mac']
         link.attributes['occi.networkinterface.state'] = 'active'
         link.attributes['occi.networkinterface.address'] = \
                                                         vm_net_info['address']
@@ -359,8 +350,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         resource.links.append(link)
         registry.add_resource(identifier, link)
 
-    def _get_console_info(self, resource, extras):
-        #L8R: There are assumptions here about port numbers, URL fragments
+    def _get_console_info(self, resource, instance, extras):
         address = resource.links[0].attributes['occi.networkinterface.address']
 
         ssh_console_present = False
@@ -405,6 +395,16 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
             resource.links.append(ssh_console_link)
 
         if not vnc_console_present:
+
+#            import ipdb
+#            ipdb.set_trace()
+#            try:
+#                console = self.compute_api.get_vnc_console(extras['nova_ctx'],
+#                                                      instance,
+#                                                      'novnc')
+#            except:
+#                pass
+
             registry = extras['registry']
 
             identifier = str(uuid.uuid4())
@@ -415,6 +415,8 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
             vnc_console.attributes['occi.core.id'] = identifier
             vnc_console.attributes['org.openstack.compute.console.vnc'] = \
                                                     'http://' + address + ':80'
+#   console['url']
+
             registry.add_resource(identifier, vnc_console)
 
             identifier = str(uuid.uuid4())
@@ -526,7 +528,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         #Now we have the instance state, get its updated network info
         vm_net_info = self._get_adapter_info(instance, extras)
         self._attach_to_default_network(vm_net_info, entity, extras)
-        self._get_console_info(entity, extras)
+        self._get_console_info(entity, instance, extras)
 
         return instance
 
@@ -576,11 +578,14 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
     def _update_attrs(self, old, new):
         LOG.info('Updating mutable attributes of instance')
     # support only title and summary changes now.
-        if ('occi.core.title' in new.attributes) or ('occi.core.title' in new.attributes):
+        if ('occi.core.title' in new.attributes) \
+                                    or ('occi.core.title' in new.attributes):
             if len(new.attributes['occi.core.title']) > 0:
-                old.attributes['occi.core.title'] = new.attributes['occi.core.title']
+                old.attributes['occi.core.title'] = \
+                                            new.attributes['occi.core.title']
             if len(new.attributes['occi.core.summary']) > 0:
-                old.attributes['occi.core.summary'] = new.attributes['occi.core.summary']
+                old.attributes['occi.core.summary'] = \
+                                            new.attributes['occi.core.summary']
         else:
             LOG.error('Cannot update the supplied attributes.')
             raise exc.HTTPBadRequest

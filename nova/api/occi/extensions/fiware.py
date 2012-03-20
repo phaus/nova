@@ -16,6 +16,7 @@ from occi import core_model
 from occi import backend
 
 
+######################### FIware Specific Additions ##########################
 def get_extensions():
     return [
             {
@@ -24,7 +25,6 @@ def get_extensions():
             }
            ]
 
-### FIware Specific Additions ###
 # Trusted Compute Pool technology mixin definition
 TCP_ATTRIBUTES = {'eu.fi-ware.compute.tcp': '', }
 TCP = core_model.Mixin(\

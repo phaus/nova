@@ -27,6 +27,7 @@ from webob import exc
 LOG = logging.getLogger('nova.api.occi.backends.compute.os')
 
 
+######################## OpenStack Specific Addtitions #######################
 ######### 1. define the method to retreive all extension information #########
 def get_extensions():
 
@@ -154,8 +155,6 @@ class OsComputeActionBackend(backend.ActionBackend):
         #TODO: update actions
 
     def _os_create_image(self, entity, instance, context):
-        #L8R: There might be a more 'occi' way of doing this
-        #     e.g. a POST against /-/
         LOG.info('Creating image from virtual machine with id' + \
                                                             entity.identifier)
         if 'occi.compute.image.name' not in entity.attributes:

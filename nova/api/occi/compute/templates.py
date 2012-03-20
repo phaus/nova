@@ -32,5 +32,4 @@ class ResourceTemplate(core_model.Mixin):
     Represents the Resource Template mechanism as per OCCI specification.
     An Resource template is equivocal to a flavor in OpenStack.
     '''
-
     pass

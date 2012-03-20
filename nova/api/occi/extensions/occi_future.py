@@ -23,12 +23,15 @@ from nova.compute import API
 from occi import core_model
 from occi import backend
 
+# TODO: Remove SSH Console and VNC Console once URI support is added to pyssf
+
 #Hi I'm a logger, use me! :-)
 LOG = logging.getLogger('nova.api.occi.backends.securityrule')
 
 FLAGS = flags.FLAGS
 
 
+####################### OCCI Candidate Spec Additions ########################
 def get_extensions():
     return [
             {
@@ -41,7 +44,6 @@ def get_extensions():
             },
            ]
 
-### OCCI Candidate Spec Additions ###
 # Console Link Extension
 CONSOLE_LINK = core_model.Kind(
                         'http://schemas.ogf.org/infrastructure/compute#',
@@ -53,7 +55,6 @@ CONSOLE_LINK = core_model.Kind(
                         '/compute/consolelink/')
 
 # SSH Console Kind Extension
-# TODO: Remove this once URI support is added to pyssf
 SSH_CONSOLE_ATTRIBUTES = {'org.openstack.compute.console.ssh': '', }
 SSH_CONSOLE = core_model.Kind(
                 'http://schemas.openstack.org/occi/infrastructure/compute#',
@@ -66,7 +67,6 @@ SSH_CONSOLE = core_model.Kind(
 
 
 # VNC Console Kind Extension
-# TODO: Remove this once URI support is added to pyssf
 VNC_CONSOLE_ATTRIBUTES = {'org.openstack.compute.console.vnc': '', }
 VNC_CONSOLE = core_model.Kind(
                 'http://schemas.openstack.org/occi/infrastructure/compute#',
@@ -192,8 +192,6 @@ class SecurityRuleBackend(backend.KindBackend):
 
         #TODO: ensure that an OpenStack sec group matches the mixin
         # if not, create one.
-        #FIXME: this is a temp. solution until there is support in pyssf
-        # for a QI backend
 
         return mixin
 
@@ -232,4 +230,3 @@ class SecurityRuleBackend(backend.KindBackend):
         self.compute_api.trigger_security_group_rules_refresh(
                                                         extras['nova_ctx'],
                                     security_group_id=security_group['id'])
-

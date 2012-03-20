@@ -18,23 +18,19 @@ from nova import log
 from nova import wsgi
 from nova import flags
 from nova import db
-from nova.compute import API
 from nova.openstack.common import cfg
+from nova.compute import API
+from nova.compute import instance_types
 from nova.network import api as net_api
-
+from nova.api.openstack import extensions as os_extensions
 from nova.api.occi import extensions
 from nova.api.occi.extensions import occi_future
-from nova.api.openstack import extensions as os_extensions
-
 from nova.api.occi.compute import templates
 from nova.api.occi.compute import computeresource
 from nova.api.occi.network import networklink
 from nova.api.occi.network import networkresource
 from nova.api.occi.storage import storagelink
 from nova.api.occi.storage import storageresource
-#from nova.api.occi.security import ruleresource
-#from nova.api.occi.compute.os import os_actions
-from nova.compute import instance_types
 
 from occi import registry
 from occi import core_model
@@ -74,13 +70,6 @@ class OpenStackOCCIRegistry(registry.NonePersistentRegistry):
         key = resource.kind.location + resource.attributes['occi.core.id']
         resource.identifier = key
         registry.NonePersistentRegistry.add_resource(self, key, resource)
-
-#    def set_handler(self, handler):
-#        for cat, backend in self.BACKENDS.items():
-#            import ipdb
-#            ipdb.set_trace()
-#            if type(backend) == type(handler):
-
 
 
 class OCCIApplication(occi_wsgi.Application, wsgi.Application):
@@ -267,7 +256,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         # ovf, bare, ami
         # raw, vhd, vmdk, vdi, iso, qcow2, ami
         # not aki, ari
-        # note possibly large list where there are many images 
+        # note possibly large list where there are many images
         images = image_service.detail(ctx)
         filter_kernel_and_ram_images = \
                                 FLAGS.get("filter_kernel_and_ram_images", True)

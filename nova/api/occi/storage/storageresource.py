@@ -14,6 +14,7 @@
 
 
 import random
+from webob import exc
 
 from nova import exception
 from nova import log as logging
@@ -21,21 +22,17 @@ from nova import volume
 
 from occi import backend
 from occi.extensions import infrastructure
-from webob import exc
 
 
-# FIXME: Storage allows to go offline and online. StorageLink allows to go
-#        active or inactive. How should storage 'go offline' or 'come online'?
-
-# L8R: there is no error state in the OCCI model!
+# L8R: Storage allows to go offline and online. StorageLink allows to go
+#      active or inactive. How should storage 'go offline' or 'come online'?
+# L8R: volume_type can be specified by mixin
 
 
 #Hi I'm a logger, use me! :-)
 LOG = logging.getLogger('nova.api.occi.backends.storage')
 
 
-#NOTE: for this to operate the nova-vol service must be running
-# pop/delete attributes on DELETE
 class StorageBackend(backend.KindBackend, backend.ActionBackend):
     '''
     Backend to handle storage resources.
@@ -78,7 +75,6 @@ class StorageBackend(backend.KindBackend, backend.ActionBackend):
             disp_descr = disp_name
 
         snapshot = None
-        #volume_type could be specified by mixin
         volume_type = None
         metadata = None
         avail_zone = None
@@ -111,15 +107,11 @@ class StorageBackend(backend.KindBackend, backend.ActionBackend):
 
         v_id = int(entity.attributes['occi.core.id'])
 
-        # L8R: handle the case where the volume id is not an integer
-        #       and is a uuid?
-
         try:
             vol = self.volume_api.get(extras['nova_ctx'], v_id)
         except exception.NotFound:
             raise exc.HTTPNotFound()
 
-        #FIXME: this should not need to be stringified!
         entity.attributes['occi.storage.size'] = str(float(vol['size']))
 
         # OS volume states:
@@ -168,8 +160,6 @@ class StorageBackend(backend.KindBackend, backend.ActionBackend):
             raise exc.HTTPBadRequest()
 
         elif action == infrastructure.BACKUP:
-            # CDMI?!
-            # L8R: Same as a snapshot? unclear - bad request for now.
             # BACKUP: create a complete copy of the volume.
             LOG.warn('Backup action ...storage resource with id: '
                   + entity.identifier)
@@ -191,7 +181,6 @@ class StorageBackend(backend.KindBackend, backend.ActionBackend):
                                                             entity.identifier)
             raise exc.HTTPNotImplemented()
 
-    # L8R: OCCI has no way to manage snapshots or backups once created :-(
     def _snapshot_storage(self, entity, extras, backup=False):
         LOG.info('Snapshoting...storage resource with id: ' + \
                                                             entity.identifier)

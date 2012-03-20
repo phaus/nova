@@ -14,15 +14,14 @@
 
 
 import uuid
+from webob import exc
 
+from nova import compute
 from nova import log as logging
 from nova import volume
-from nova import compute
 
 from occi import backend
 from occi.extensions import infrastructure
-
-from webob import exc
 
 
 #Hi I'm a logger, use me! :-)
@@ -41,10 +40,6 @@ class StorageLinkBackend(backend.KindBackend):
 
     def create(self, link, extras):
         LOG.info('Linking compute to storage via StorageLink.')
-
-        #FIXME: temporary. For some reason the admin is not seen as having
-        #       admin permissions!
-        extras['nova_ctx'].is_admin = True
 
         inst_to_attach = self._get_inst_to_attach(extras['nova_ctx'], link)
         vol_to_attach = self._get_vol_to_attach(extras['nova_ctx'], link)
@@ -95,10 +90,6 @@ class StorageLinkBackend(backend.KindBackend):
 
     def delete(self, link, extras):
         LOG.info('Unlinking entity from storage via StorageLink.')
-
-        #FIXME: temporary. For some reason the admin is not seen as having
-        #       admin permissions!
-        extras['nova_ctx'].is_admin = True
 
         try:
             vol_to_detach = self._get_vol_to_attach(extras['nova_ctx'], link)
