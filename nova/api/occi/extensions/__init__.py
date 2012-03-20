@@ -28,21 +28,18 @@ def load_extensions():
     pth = FILE.rpartition(os.sep)
     pth = pth[0] + pth[1]
 
-    mods_to_load = []
+#    mods_to_load = []
     #walkthrough the extensions directory
+    LOG.info('Loading the following extensions...')
     for _, _, filenames in os.walk(pth):
         for filename in filenames:
             if filename.endswith('.py') \
-                and not filename.startswith('__init__'):
-                mods_to_load.append(filename.split('.py')[0])
+            and not filename.startswith('__init__'):
+                mod = filename.split('.py')[0]
+                exec('from %s import %s' % (PKG, mod))
+                extn = eval(mod).get_extensions()
+                EXTENSIONS.append(extn)
+                LOG.info(extn)
 
-    #import and collect extension instances
-    LOG.info('Loading the following extensions...')
-    for mod in mods_to_load:
-        pkg = PKG
-        exec('from %s import %s' % (pkg, mod))
-        extn = eval(mod).get_extensions()
-        EXTENSIONS.append(extn)
-        LOG.info(extn)
 
 load_extensions()
