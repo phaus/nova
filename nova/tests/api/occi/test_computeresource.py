@@ -13,7 +13,7 @@ from nova import rpc
 from nova.image import fake
 
 from nova.api.occi.compute import computeresource
-from nova.api.occi import extensions
+from nova.api.occi.compute import templates
 
 from occi.core_model import Entity
 
@@ -61,8 +61,8 @@ class TestOcciComputeResource(test.TestCase):
         self.stubs.Set(rpc, 'cast', fake_rpc_cast)
 
         # OCCI related setup
-        self.os_template = extensions.OsTemplate('http://schemas.openstack.org/template/os#', 'foo', '1')
-        self.resource_template = extensions.ResourceTemplate('http://schemas.openstack.org/template/resource#', 'm1.small')
+        self.os_template = templates.OsTemplate('http://schemas.openstack.org/template/os#', 'foo', '1')
+        self.resource_template = templates.ResourceTemplate('http://schemas.openstack.org/template/resource#', 'm1.small')
 
         self.entity = Entity("123", 'A test entity', None, [self.os_template, self.resource_template])
         self.extras = {'nova_ctx': self.context}
