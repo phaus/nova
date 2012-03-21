@@ -15,7 +15,6 @@
 from nova import logging
 from nova import compute
 from nova import exception
-from nova import policy
 
 from occi import backend
 from occi import core_model

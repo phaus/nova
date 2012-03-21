@@ -48,7 +48,6 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
     '''
     A Backend for compute instances.
     '''
-
     def __init__(self):
         super(ComputeBackend, self).__init__()
         self.compute_api = compute.API()
@@ -88,7 +87,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         # L8R: see what the effect on VM network config is when these are set
         access_ip_v4 = None
         access_ip_v6 = None
-        #L8R: would be good to specify user_data via OCCI. Look to use
+        # L8R: would be good to specify user_data via OCCI. Look to use
         #     CompatibleOne extensions
         user_data = None
         metadata = {}
@@ -100,7 +99,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         availability_zone = None
         config_drive = None
         block_device_mapping = None
-        #L8R: these can be specified through OS Templates
+        # L8R: these can be specified through OS Templates
         kernel_id = ramdisk_id = None
         auto_disk_config = None
         scheduler_hints = None
@@ -232,7 +231,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         self._attach_to_default_network(vm_net_info, resource, extras)
         self._get_console_info(resource, instances[0], extras)
 
-        #TODO: if there is ephemeral or root storage, assciate it!
+        # TODO: if there is ephemeral or root storage, assciate it!
         self._attach_to_local_storage()
 
         #set valid actions
@@ -244,7 +243,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
                           os_extns.OS_CREATE_IMAGE]
 
     def _attach_to_local_storage(self):
-        #TODO:
+        # TODO:
         pass
 
     def _get_vm_arch(self, context, os_template_mixin):
@@ -358,7 +357,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
                                                         vm_net_info['address']
         link.attributes['occi.networkinterface.gateway'] = \
                                                         vm_net_info['gateway']
-        #TODO: set this based on API not by default
+        # TODO: set this based on API not by default
         link.attributes['occi.networkinterface.allocation'] = 'dhcp'
 
         resource.links.append(link)
@@ -698,7 +697,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
     def _start_vm(self, entity, instance, context):
         '''
         Starts a vm that is in the stopped state. Note, currently we do not
-        use the nova start and stop, rather the resume/suspend methods. The 
+        use the nova start and stop, rather the resume/suspend methods. The
         start action also unpauses a paused VM.
         '''
         LOG.info('Starting virtual machine with id' + entity.identifier)
