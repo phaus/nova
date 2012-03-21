@@ -1,3 +1,5 @@
+Copyright (c) 2012, Intel Performance Learning Solutions Ltd.
+
 To create OCCI extensions:
 
  1. Define the method to retreive all extension information. This method 
