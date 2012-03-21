@@ -86,6 +86,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                                 registry=OpenStackOCCIRegistry())
         self.compute_api = API()
         self.net_manager = FLAGS.get("net_manager", "nova")
+        self.no_default_network = True
         self._setup_occi_service()
         self._register_occi_extensions()
 
@@ -108,11 +109,18 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         if nova_ctx.project_id == None:
             LOG.error('No tenant ID header was supplied in the request')
 
-        # register openstack images
+        # When the API boots the network services may not be started.
+        # The call to the service is a sync RPC over rabbitmq and will block.
+        # We must register the network only once and once all services are
+        # available. Hence we perform the registration once here.
+        if self.no_default_network:
+            self._register_default_network()
+
+        # register/refresh openstack images
         self._register_os_mixins(backend.MixinBackend(), nova_ctx)
-        # register openstack instance types (flavours)
+        # register/refresh openstack instance types (flavours)
         self._register_resource_mixins(backend.MixinBackend())
-        # register the openstack security groups (firewall rules) as Mixins
+        # register/refresh the openstack security groups as Mixins
         self._register_security_mixins(nova_ctx)
 
         return self._call_occi(environ, response, nova_ctx=nova_ctx,
@@ -129,7 +137,6 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
 
         #This must be done as by default OpenStack has a default network
         # to which all new VM instances are attached.
-        self._register_default_network()
 
     def _register_default_network(self, name='DEFAULT_NETWORK'):
         '''
@@ -191,6 +198,8 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         default_network.attributes = net_attrs
 
         self.registry.add_resource(name, default_network)
+
+        self.no_default_network = False
 
     def _register_resource_mixins(self, resource_mixin_backend):
         '''
