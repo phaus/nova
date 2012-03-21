@@ -39,6 +39,10 @@ class StorageLinkBackend(backend.KindBackend):
         self.compute_api = compute.API()
 
     def create(self, link, extras):
+        '''
+        Creates a link from a compute instance to a storage volume.
+        The user must specify what the device id is to be.
+        '''
         LOG.info('Linking compute to storage via StorageLink.')
 
         inst_to_attach = self._get_inst_to_attach(extras['nova_ctx'], link)
@@ -51,13 +55,6 @@ class StorageLinkBackend(backend.KindBackend):
                                 vol_to_attach['id'], \
                                 link.attributes['occi.storagelink.deviceid'])
 
-#        self.volume_api.attach(
-#                               extras['nova_ctx'],
-#                               vol_to_attach, \
-#                               inst_to_attach['id'], \
-#                               link.attributes['occi.storagelink.deviceid'])
-#        def attach_volume(, context, instance, volume_id, device):
-
         link.attributes['occi.core.id'] = str(uuid.uuid4())
         link.attributes['occi.storagelink.deviceid'] = \
                                 link.attributes['occi.storagelink.deviceid']
@@ -65,6 +62,9 @@ class StorageLinkBackend(backend.KindBackend):
         link.attributes['occi.storagelink.state'] = 'active'
 
     def _get_inst_to_attach(self, context, link):
+        '''
+        Gets the compute instance that is to have the storage attached.
+        '''
         # it's instance_id not UUID
         if link.target.kind == infrastructure.COMPUTE:
             instance = self.compute_api.get(context, \
@@ -77,6 +77,9 @@ class StorageLinkBackend(backend.KindBackend):
         return instance
 
     def _get_vol_to_attach(self, context, link):
+        '''
+        Gets the storage instance that is to have the compute attached.
+        '''
         if link.target.kind == infrastructure.STORAGE:
             vol_to_attach = self.volume_api.get(context, \
                                         link.target.attributes['occi.core.id'])
@@ -89,17 +92,15 @@ class StorageLinkBackend(backend.KindBackend):
         return vol_to_attach
 
     def delete(self, link, extras):
+        '''
+        Unlinks the the compute from the storage resource.
+        '''
         LOG.info('Unlinking entity from storage via StorageLink.')
 
         try:
             vol_to_detach = self._get_vol_to_attach(extras['nova_ctx'], link)
             self.compute_api.detach_volume(extras['nova_ctx'],
                                                         vol_to_detach['id'])
-#            self.volume_api.detach(extras['nova_ctx'], vol_to_detach)
         except Exception, e:
             LOG.error('Error in detaching storage volume. ' + str(e))
             raise e
-
-        link.attributes.pop('occi.storagelink.deviceid')
-        link.attributes.pop('occi.storagelink.mountpoint')
-        link.attributes.pop('occi.storagelink.state')

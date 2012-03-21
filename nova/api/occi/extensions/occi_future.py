@@ -94,6 +94,7 @@ SEC_RULE = core_model.Kind(
         SEC_RULE_ATTRIBUTES,
         '/network/security/rule/')
 
+# Network security rule group
 SEC_GROUP = core_model.Mixin(\
     'http://schemas.ogf.org/occi/infrastructure/security/group#',
     'group', attributes=None)
@@ -117,6 +118,9 @@ class SecurityRuleBackend(backend.KindBackend):
         self.sgh = utils.import_object(FLAGS.security_group_handler)
 
     def _make_sec_rule(self, entity, sec_mixin):
+        '''
+        Create and validate a security rule.
+        '''
         sg_rule = {}
         sg_rule['id'] = random.randrange(0, 99999999)
         entity.attributes['occi.core.id'] = str(sg_rule['id'])
@@ -149,6 +153,9 @@ class SecurityRuleBackend(backend.KindBackend):
         return sg_rule
 
     def _get_sec_group(self, extras, sec_mixin):
+        '''
+        Retreive the security group associated with the security mixin.
+        '''
         try:
             parent_group_id = int(sec_mixin.sec_grp_id)
             security_group = db.security_group_get(extras['nova_ctx'], \
@@ -159,15 +166,15 @@ class SecurityRuleBackend(backend.KindBackend):
         return security_group
 
     def create(self, entity, extras):
-        # the group to add the rule to must exist
-        # in OCCI-speak this means the mixin must be supplied with the request
-
+        '''
+        creates a security rule
+        the group to add the rule to must exist
+        in OCCI-speak this means the mixin must be supplied with the request
+        '''
         LOG.info('Creating a network security rule')
 
         sec_mixin = self._get_sec_mixin(entity)
-
         security_group = self._get_sec_group(extras, sec_mixin)
-
         sg_rule = self._make_sec_rule(entity, sec_mixin)
 
         if self._security_group_rule_exists(security_group, sg_rule):
@@ -177,7 +184,9 @@ class SecurityRuleBackend(backend.KindBackend):
         db.security_group_rule_create(extras['nova_ctx'], sg_rule)
 
     def _get_sec_mixin(self, entity):
-
+        '''
+        Get the security mixin of the supplied entity.
+        '''
         sec_mixin_present = 0
         mixin = None
         for mixin in entity.mixins:
@@ -195,8 +204,8 @@ class SecurityRuleBackend(backend.KindBackend):
 
         return mixin
 
-    # Taken directly from security_groups.py
     def _security_group_rule_exists(self, security_group, values):
+        # Taken directly from security_groups.py
         """Indicates whether the specified rule values are already
            defined in the given security group.
         """
@@ -212,6 +221,9 @@ class SecurityRuleBackend(backend.KindBackend):
         return False
 
     def delete(self, entity, extras):
+        '''
+        Deletes the security rule
+        '''
         LOG.info('Deleting a network security rule')
         self.compute_api.ensure_default_security_group(extras['nova_ctx'])
         try:

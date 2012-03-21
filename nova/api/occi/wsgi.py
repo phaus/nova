@@ -65,7 +65,7 @@ class OpenStackOCCIRegistry(registry.NonePersistentRegistry):
 
     def add_resource(self, key, resource):
         '''
-        Make sure OS keys get used!
+        Ensures OpenStack keys are used as resource identifiers
         '''
         key = resource.kind.location + resource.attributes['occi.core.id']
         resource.identifier = key
@@ -84,13 +84,9 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         '''
         super(OCCIApplication, self).__init__(
                                 registry=OpenStackOCCIRegistry())
-
         self.compute_api = API()
         self.net_manager = FLAGS.get("net_manager", "nova")
-        # setup the occi service...
         self._setup_occi_service()
-
-        # register extensions to the basic occi entities
         self._register_occi_extensions()
 
     def __call__(self, environ, response):
@@ -106,8 +102,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         response -- The response.
         '''
         nova_ctx = environ['nova.context']
-        #L8R this might be pushed into the context middleware
-#        nova_ctx.project_id = environ.get('HTTP_X_AUTH_PROJECT_ID', None)
+        #L8R: this might be pushed into the context middleware
         nova_ctx.project_id = environ.get('HTTP_X_AUTH_TENANT_ID', None)
 
         if nova_ctx.project_id == None:
@@ -137,7 +132,12 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         self._register_default_network()
 
     def _register_default_network(self, name='DEFAULT_NETWORK'):
-        #TODO: verify behaviour with quantum
+        '''
+        By default nova attaches a compute resource to a network.
+        In the OCCI model this is represented as a Network resource.
+        This method constructs that Network resource.
+        '''
+        #L8R: verify behaviour with quantum backend
         #      i.e. cover the case where there are > 1 networks
         LOG.info('Registering default network with web app.')
         show_default_net_config = FLAGS.get("show_default_net_config", False)
@@ -194,7 +194,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
 
     def _register_resource_mixins(self, resource_mixin_backend):
         '''
-        Register the resource resource templates to which the user has access.
+        Register the flavors as ResourceTemplates to which the user has access.
         '''
         template_schema = 'http://schemas.openstack.org/template/resource#'
         resource_schema = \
@@ -214,7 +214,10 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
             self.register_backend(resource_template, resource_mixin_backend)
 
     def _get_resource_attributes(self, attrs):
-
+        '''
+        Gets the attributes required to render occi compliant compute
+        resource information.
+        '''
 #        test_attrs = {
 #                      'root_gb': 10, 'name': 'm1.medium',
 #                      'deleted': False, 'created_at': None,
@@ -243,7 +246,8 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
 
     def _register_os_mixins(self, os_mixin_backend, ctx):
         '''
-        Register the os mixins from information retrieved frrom glance.
+        Register images as OsTemplate mixins from
+        information retrieved from glance (shared and user-specific).
         '''
         template_schema = 'http://schemas.openstack.org/template/os#'
         os_schema = 'http://schemas.ogf.org/occi/infrastructure#os_tpl'
@@ -283,6 +287,9 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
             self.register_backend(os_template, os_mixin_backend)
 
     def _register_security_mixins(self, ctx):
+        '''
+        Registers security groups as security mixins
+        '''
         # get a listing of all security groups for the user
         # map a security group to a mixin
         # when a security mixin is supplied with the provision request
@@ -310,6 +317,10 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
             self.register_backend(sec_mix, backend.MixinBackend())
 
     def _register_occi_infra(self):
+        '''
+        Registers the OCCI infrastructure resources to ensure compliance
+        with GFD184
+        '''
         compute_backend = computeresource.ComputeBackend()
 
         if self.net_manager == "quantum":
@@ -352,7 +363,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
 
     def _register_occi_extensions(self):
         '''
-        Register OCCI extensions.
+        Register OCCI extensions contained within the 'extension' package.
         '''
         #EXTENSIONS is a list of hasmaps. The hashmap contains the handler.
         #The hashmap contains a list of categories to be handled by the handler

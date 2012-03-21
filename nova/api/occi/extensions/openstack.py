@@ -47,22 +47,25 @@ def get_extensions():
 ##### 2. define the extension categories - OpenStack Specific Additions ######
 
 #OS action extensions
-# these should be associated with their handler more explicitly
+# OS change adminstrative password action
 OS_CHG_PWD = core_model.Action(
                 'http://schemas.openstack.org/instance/action#',
                  'chg_pwd', 'Removes all data on the server and replaces' + \
                                     'it with the specified image (via Mixin).',
                  {'org.openstack.credentials.admin_pwd': ''})
 
+# OS revert a resized VM action
 OS_REVERT_RESIZE = core_model.Action(
                 'http://schemas.openstack.org/instance/action#',
                  'revert_resize', 'Revert the resize and roll back to \
                                                      the original server')
 
+# OS confirm a resized VM action
 OS_CONFIRM_RESIZE = core_model.Action(
                 'http://schemas.openstack.org/instance/action#',
                  'confirm_resize', 'Use this to confirm the resize action')
 
+# OS create image from VM action
 OS_CREATE_IMAGE = core_model.Action(
                 'http://schemas.openstack.org/instance/action#',
                  'create_image', 'Creates a new image for the given server.',
@@ -88,12 +91,14 @@ class OsComputeActionBackend(backend.ActionBackend):
 
     def __init__(self):
         super(OsComputeActionBackend, self).__init__()
-        policy.reset()
-        policy.init()
+#        policy.reset()
+#        policy.init()
         self.compute_api = compute.API()
 
     def action(self, entity, action, extras):
-
+        '''
+        This is called by pyssf when an action request is issued.
+        '''
         context = extras['nova_ctx']
 
         uid = entity.attributes['occi.core.id']
@@ -113,6 +118,9 @@ class OsComputeActionBackend(backend.ActionBackend):
             self._os_create_image(entity, instance, context)
 
     def _os_chg_passwd_vm(self, entity, instance, context):
+        '''
+        Implements changing of a vm's admin password
+        '''
         # Use the password extension?
         LOG.info('Changing admin password of virtual machine with id' \
                                                         + entity.identifier)
@@ -125,6 +133,9 @@ class OsComputeActionBackend(backend.ActionBackend):
         # No need to update attributes - state remains the same.
 
     def _os_revert_resize_vm(self, entity, instance, context):
+        '''
+        Implements reverting of a resized vm
+        '''
         LOG.info('Reverting resized virtual machine with id' \
                                                         + entity.identifier)
         try:
@@ -140,6 +151,9 @@ class OsComputeActionBackend(backend.ActionBackend):
         #TODO: update actions
 
     def _os_confirm_resize_vm(self, entity, instance, context):
+        '''
+        Implements the confirmation of a resized vm.
+        '''
         LOG.info('Confirming resize of virtual machine with id' + \
                                                             entity.identifier)
         try:
@@ -155,6 +169,9 @@ class OsComputeActionBackend(backend.ActionBackend):
         #TODO: update actions
 
     def _os_create_image(self, entity, instance, context):
+        '''
+        implements the creation of an image of the specified vm
+        '''
         LOG.info('Creating image from virtual machine with id' + \
                                                             entity.identifier)
         if 'occi.compute.image.name' not in entity.attributes:

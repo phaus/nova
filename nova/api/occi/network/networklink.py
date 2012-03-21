@@ -38,20 +38,23 @@ LOG = logging.getLogger('nova.api.occi.backends.network.link')
 
 class NetworkInterfaceBackend(backend.KindBackend):
     '''
-    A backend for the network links.
+    A backend for network links.
     '''
 
     def create(self, link, extras):
-        # TODO implement with Quantum
+        '''
+        As nova does not support creation of L2 networks we don't.
+        '''
+        # implement with Quantum
         raise exc.HTTPBadRequest()
-        #link.attributes['occi.networkinterface.state'] = 'up'
-        #link.attributes['occi.networkinterface.mac'] = 'aa:bb:cc:dd:ee:ff'
-        #link.attributes['occi.networkinterface.interface'] = 'eth0'
 
-    #L8R: here we associate a security group
-    #L8R: here we could possibly assign a static (floating) ip - request must
-    #     include a ipnetworkinterface mixin
     def update(self, old, new, extras):
+        '''
+        Allows for the update of network links.
+        '''
+        #L8R: here we associate a security group
+        #L8R: here we could possibly assign a static (floating) ip - request must
+        #     include a ipnetworkinterface mixin
         # make sure the link has an IP mixin
         # get a reference to the compute instance
         # get the security group
@@ -60,19 +63,20 @@ class NetworkInterfaceBackend(backend.KindBackend):
         raise exc.HTTPBadRequest()
 
     def delete(self, link, extras):
+        '''
+        no-op
+        '''
         pass
-#        raise exc.HTTPBadRequest()
-#        link.attributes.pop('occi.networkinterface.state')
-#        link.attributes.pop('occi.networkinterface.mac')
-#        link.attributes.pop('occi.networkinterface.interface')
 
 
 class IpNetworkInterfaceBackend(backend.MixinBackend):
     '''
     A mixin backend for the IpNetworkingInterface.
     '''
-
     def create(self, link, extras):
+        '''
+        Can't create in nova so we don't either.
+        '''
         raise exc.HTTPBadRequest()
 
 #        if not link.kind == NETWORKINTERFACE:
@@ -82,19 +86,22 @@ class IpNetworkInterfaceBackend(backend.MixinBackend):
 #        link.attributes['occi.networkinterface.allocation'] = 'dynamic'
 
     def delete(self, entity, extras):
+        '''
+        no-op
+        '''
         pass
-#        raise exc.HTTPBadRequest()
-#        entity.attributes.pop('occi.networkinterface.address')
-#        entity.attributes.pop('occi.networkinterface.gateway')
-#        entity.attributes.pop('occi.networkinterface.allocation')
 
     def action(self):
+        '''
+        no-op
+        '''
         pass
 
 
+# work in progress
 class QuantumNetworkInterfaceBackend(backend.KindBackend):
     '''
-    A backend for the network links.
+    A quantum backend for the network links.
     '''
 
     def __init__(self):
@@ -107,7 +114,7 @@ class QuantumNetworkInterfaceBackend(backend.KindBackend):
     # bring explicit qunatum dependencies into nova, which may not be desired
     # should we move this create operation to IPNetworkInterface and 401 here?
     def create(self, link, extras):
-        # TODO implement with Quantum
+        # TODO: implement with Quantum
         # Number of steps required here:
         # 1. create the VIF
         # 2. add a port to the target network
@@ -133,10 +140,6 @@ class QuantumNetworkInterfaceBackend(backend.KindBackend):
         except Exception, e:
             raise e
         print res
-
-        #link.attributes['occi.networkinterface.state'] = 'up'
-        #link.attributes['occi.networkinterface.mac'] = 'aa:bb:cc:dd:ee:ff'
-        #link.attributes['occi.networkinterface.interface'] = 'eth0'
 
     #TODO: here we associate a security group
     # What happens here if there are two adapters associated with the VM
@@ -166,17 +169,14 @@ class QuantumNetworkInterfaceBackend(backend.KindBackend):
         except Exception, e:
             raise e
         print res
-#        link.attributes.pop('occi.networkinterface.state')
-#        link.attributes.pop('occi.networkinterface.mac')
-#        link.attributes.pop('occi.networkinterface.interface')
+
 
 # This function will be shared between networklink and quantumnetworklink
-
-
 def _update_sec_grps():
     pass
 
 
+# work in progress
 class QuantumIpNetworkInterfaceBackend(backend.MixinBackend):
     '''
     A mixin backend for the IpNetworkingInterface.
@@ -193,7 +193,3 @@ class QuantumIpNetworkInterfaceBackend(backend.MixinBackend):
 
     def delete(self, entity, extras):
         pass
-        #raise exc.HTTPBadRequest()
-#        entity.attributes.pop('occi.networkinterface.address')
-#        entity.attributes.pop('occi.networkinterface.gateway')
-#        entity.attributes.pop('occi.networkinterface.allocation')

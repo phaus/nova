@@ -13,8 +13,7 @@
 #    under the License.
 
 
-# TODO: implement create - note: this must handle either nova-network or
-#        quantum APIs - detect via flags and secondarily via import exceptions
+# TODO: implement create
 #       implement delete
 #       implement retreive
 #       implement actions
@@ -99,6 +98,7 @@ class IpNetworkBackend(backend.MixinBackend):
         entity.attributes.pop('occi.network.address')
 
 
+# work in progress
 class QuantumNetworkBackend(backend.KindBackend, backend.ActionBackend):
     '''
     Backend to handle network resources.

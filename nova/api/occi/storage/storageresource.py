@@ -104,7 +104,10 @@ class StorageBackend(backend.KindBackend, backend.ActionBackend):
                             infrastructure.SNAPSHOT, infrastructure.RESIZE]
 
     def retrieve(self, entity, extras):
-
+        '''
+        Gets a representation of the storage volume and presents it ready for
+        rendering by pyssf
+        '''
         v_id = int(entity.attributes['occi.core.id'])
 
         try:
@@ -122,7 +125,9 @@ class StorageBackend(backend.KindBackend, backend.ActionBackend):
                               infrastructure.SNAPSHOT, infrastructure.RESIZE]
 
     def delete(self, entity, extras):
-        # call the management framework to delete this storage instance...
+        '''
+        Deletes the storage resource
+        '''
         LOG.info('Removing storage device with id: ' + entity.identifier)
 
         volume_id = int(entity.attributes['occi.core.id'])
@@ -134,6 +139,9 @@ class StorageBackend(backend.KindBackend, backend.ActionBackend):
             raise exc.HTTPNotFound()
 
     def action(self, entity, action, extras):
+        '''
+        Executes actions against the target storage resource.
+        '''
         if action not in entity.actions:
             raise AttributeError("This action is currently no applicable.")
 
@@ -182,7 +190,10 @@ class StorageBackend(backend.KindBackend, backend.ActionBackend):
             raise exc.HTTPNotImplemented()
 
     def _snapshot_storage(self, entity, extras, backup=False):
-        LOG.info('Snapshoting...storage resource with id: ' + \
+        '''
+        Takes a snapshot of the specified storage resource
+        '''
+        LOG.info('Snapshoting storage resource with id: ' + \
                                                             entity.identifier)
         volume_id = int(entity.attributes['occi.core.id'])
         vol = self.volume_api.get(extras['nova_ctx'], volume_id)
@@ -197,6 +208,10 @@ class StorageBackend(backend.KindBackend, backend.ActionBackend):
                                         vol, name, description)
 
     def update(self, old, new, extras):
+        '''
+        Updates simple attributes of a storage resource:
+        occi.core.title, occi.core.summary
+        '''
         # L8R: this is the same code taken from computeresource.
         # update attributes.
         if len(new.attributes) > 0:
