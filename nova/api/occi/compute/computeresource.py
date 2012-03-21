@@ -78,13 +78,9 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         name = resource.attributes['occi.compute.hostname'] \
                 if 'occi.compute.hostname' in resource.attributes else None
 
-        # Supplied by OCCI extension
         key_name = key_data = None
-
         #Auto-gen'ed 1st. If OCCI extension supplied this will overwrite this
         password = utils.generate_password(FLAGS.password_length)
-
-        # L8R: see what the effect on VM network config is when these are set
         access_ip_v4 = None
         access_ip_v6 = None
         # L8R: would be good to specify user_data via OCCI. Look to use
@@ -105,6 +101,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         scheduler_hints = None
 
         # extract mixin information
+        # L8R: refactor, more validation of values
         rc = oc = 0
         for mixin in resource.mixins:
             if isinstance(mixin, templates.ResourceTemplate):
@@ -128,6 +125,15 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
             elif mixin.scheme == \
                 'http://schemas.ogf.org/occi/infrastructure/security/group#':
                 sg_names.append(mixin.term)
+            elif (mixin.scheme + mixin.term) == \
+                            (os_extns.OS_ACCESS_IP_EXT.scheme + \
+                                            os_extns.OS_ACCESS_IP_EXT.term):
+                if resource.attributes['org.openstack.network.access.version'] == 'ipv4':
+                    access_ip_v4 = resource.attributes['org.openstack.network.access.ip']
+                elif resource.attributes['org.openstack.network.access.version'] == 'ipv6':
+                    access_ip_v6 = resource.attributes['org.openstack.network.access.ip']
+                else:
+                    raise exc.HTTPBadRequest()
 
         if rc < 1 and oc < 1:
             LOG.error('No resource or OS template in the request.')
@@ -230,8 +236,6 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         vm_net_info = self._get_adapter_info(instances[0], extras, True)
         self._attach_to_default_network(vm_net_info, resource, extras)
         self._get_console_info(resource, instances[0], extras)
-
-        # TODO: if there is ephemeral or root storage, assciate it!
         self._attach_to_local_storage()
 
         #set valid actions
@@ -243,7 +247,10 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
                           os_extns.OS_CREATE_IMAGE]
 
     def _attach_to_local_storage(self):
-        # TODO:
+        '''
+        Associate ephemeral or root storage with compute instance
+        '''
+        # TODO: if there is ephemeral or root storage, assciate it!
         pass
 
     def _get_vm_arch(self, context, os_template_mixin):

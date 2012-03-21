@@ -33,7 +33,8 @@ def get_extensions():
     return  [
              {
               'categories':[OS_CHG_PWD, OS_REVERT_RESIZE,
-                          OS_CONFIRM_RESIZE, OS_CREATE_IMAGE],
+                            OS_CONFIRM_RESIZE, OS_CREATE_IMAGE,
+                            OS_ACCESS_IP_EXT],
               'handler': OsComputeActionBackend(),
              },
              {
@@ -83,6 +84,13 @@ OS_ADMIN_PWD_ATTRIBUTES = {'org.openstack.credentials.admin_pwd': '', }
 OS_ADMIN_PWD_EXT = core_model.Mixin(\
     'http://schemas.openstack.org/instance/credentials#',
     'admin_pwd', attributes=OS_ADMIN_PWD_ATTRIBUTES)
+
+# OS access IP extension
+OS_ACCESS_IP_ATTRIBUTES = {'org.openstack.network.access.ip': '',
+                           'org.openstack.network.access.version': ''}
+OS_ACCESS_IP_EXT = core_model.Mixin(\
+    'http://schemas.openstack.org/instance/network#',
+    'access_ip', attributes=OS_ACCESS_IP_ATTRIBUTES)
 
 
 ##################### 3. define the extension handler(s) #####################
