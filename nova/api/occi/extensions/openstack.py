@@ -37,7 +37,8 @@ def get_extensions():
     return  [
              {
               'categories':[OS_CHG_PWD, OS_REVERT_RESIZE,
-                            OS_CONFIRM_RESIZE, OS_CREATE_IMAGE],
+                            OS_CONFIRM_RESIZE, OS_CREATE_IMAGE,
+                            OS_ALLOC_FLOATING_IP, OS_DEALLOC_FLOATING_IP],
               'handler': OsComputeActionBackend(),
              },
              {
@@ -95,13 +96,6 @@ _OS_ACCESS_IP_ATTRIBUTES = {'org.openstack.network.access.ip': '',
 OS_ACCESS_IP_EXT = core_model.Mixin(\
     'http://schemas.openstack.org/instance/network#',
     'access_ip', attributes=_OS_ACCESS_IP_ATTRIBUTES)
-
-# OS Floating IP Pool extension
-_OS_FLOATING_IP_POOL_ATTRIBUTES = {'org.openstack.network.access.ip': '',
-                                  'org.openstack.network.access.version': ''}
-OS_FLOATING_IP_POOL_EXT = core_model.Mixin(\
-    'http://schemas.openstack.org/instance/network#',
-    'access_ip', attributes=_OS_FLOATING_IP_POOL_ATTRIBUTES)
 
 # OS floating IP allocation action
 # expected parameter is the floating IP pool to take the IP from
@@ -236,18 +230,26 @@ class OsComputeActionBackend(backend.ActionBackend):
     def _os_allocate_floating_ip(self, entity, instance, context):
         '''
         This allocates a floating ip from the supplied floating ip pool. The
-        pool is specified as a parameter in the action request. Currently,
-        this only supports the assignment of 1 floating IP.
+        pool is specified as an optional parameter in the action request.
+        Currently, this only supports the assignment of 1 floating IP.
         '''
         for mixin in entity.mixins:
-            if (mixin.scheme + mixin.term) == 'http://':
-                LOG.warn('There is already a floating IP assigned to the VM')
+            if (mixin.scheme + mixin.term) == OS_FLOATING_IP_EXT.scheme + \
+                                                    OS_FLOATING_IP_EXT.term:
+                #TODO(dizz): implement support for multiple floating ips
+                #            needs support in pyssf for URI in link
+                exc.HTTPBadRequest(explanation=
+                        _('There is already a floating IP assigned to the VM'))
+                LOG.error('There is already a floating IP assigned to the VM')
 
-        if 'org.openstack.ip.pool' not in entity.attributes:
-            exc.HTTPBadRequest()
+        if 'org.openstack.network.floating.pool' not in entity.attributes:
+            pool = None
+        else:
+            pool = entity.attributes['org.openstack.network.floating.pool']
 
-        pool = entity.attributes['org.openstack.ip.pool']
         address = self.network_api.allocate_floating_ip(context, pool)
+
+        self.compute_api.associate_floating_ip(context, instance, address)
 
         # once the address is allocated we need to reflect that fact
         # on the resource holding it.
@@ -260,19 +262,16 @@ class OsComputeActionBackend(backend.ActionBackend):
         This returns the deallocated IP address to the pool.
         '''
 
-        entity_id = entity.attributes['occi.core.id']
+        import ipdb
+        ipdb.set_trace()
 
-        floating_ip = self.network_api.get_floating_ip(context, entity_id)
-
-        if floating_ip.get('fixed_ip_id'):
-            self.network_api.disassociate_floating_ip(context,
-                                                      floating_ip['address'])
-
-        self.network_api.release_floating_ip(context,
-                                             address=floating_ip['address'])
+        address = entity.attributes['org.openstack.network.floating.ip']
+        self.network_api.disassociate_floating_ip(context, address)
+        self.network_api.release_floating_ip(context, address)
 
         # remove the mixin
         for mixin in entity.mixins:
-            if (mixin.scheme + mixin.term) == 'http://':
+            if (mixin.scheme + mixin.term) == OS_FLOATING_IP_EXT.scheme + \
+                                                    OS_FLOATING_IP_EXT.term:
                 entity.mixins.remove(mixin)
-                entity.attributes.pop('org.openstack.ip.pool')
+                entity.attributes.pop('org.openstack.network.floating.ip')

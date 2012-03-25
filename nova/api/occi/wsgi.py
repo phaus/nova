@@ -375,11 +375,11 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         for pool in pools:
             pool_mixin = core_model.Mixin(\
                              term=pool['name'],
-                             scheme='http://schemas.openstack.org/instance/network#',
+                             scheme='http://schemas.openstack.org/instance/network/pool/floating#',
                              related=[],
                              attributes=None,
                              title="This is a floating IP pool",
-                             location='/network/pool/')
+                             location='/network/pool/floating/')
             self.register_backend(pool_mixin, os_mixin_backend)
 
     def _register_occi_infra(self):
