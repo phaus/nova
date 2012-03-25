@@ -15,6 +15,7 @@
 #    under the License.
 
 import copy
+import errno
 import eventlet
 import mox
 import os
@@ -41,6 +42,7 @@ from nova.compute import vm_states
 from nova.virt import images
 from nova.virt import driver
 from nova.virt import firewall as base_firewall
+from nova.virt.libvirt import config
 from nova.virt.libvirt import connection
 from nova.virt.libvirt import firewall
 from nova.virt.libvirt import volume
@@ -156,8 +158,8 @@ class LibvirtVolumeTestCase(test.TestCase):
                'provider_location': '%s,fake %s' % (location, iqn)}
         connection_info = vol_driver.initialize_connection(vol, self.connr)
         mount_device = "vde"
-        xml = libvirt_driver.connect_volume(connection_info, mount_device)
-        tree = ElementTree.fromstring(xml)
+        conf = libvirt_driver.connect_volume(connection_info, mount_device)
+        tree = conf.format_dom()
         dev_str = '/dev/disk/by-path/ip-%s-iscsi-%s-lun-0' % (location, iqn)
         self.assertEqual(tree.get('type'), 'block')
         self.assertEqual(tree.find('./source').get('dev'), dev_str)
@@ -195,8 +197,8 @@ class LibvirtVolumeTestCase(test.TestCase):
                'provider_location': '%s,fake %s' % (location, iqn)}
         connection_info = vol_driver.initialize_connection(vol, self.connr)
         mount_device = "vde"
-        xml = libvirt_driver.connect_volume(connection_info, mount_device)
-        tree = ElementTree.fromstring(xml)
+        conf = libvirt_driver.connect_volume(connection_info, mount_device)
+        tree = conf.format_dom()
         dev_str = '/dev/disk/by-path/ip-%s-iscsi-%s-lun-0' % (location, iqn)
         self.assertEqual(tree.get('type'), 'block')
         self.assertEqual(tree.find('./source').get('dev'), dev_str)
@@ -218,8 +220,8 @@ class LibvirtVolumeTestCase(test.TestCase):
         vol = {'id': 1, 'name': name}
         connection_info = vol_driver.initialize_connection(vol, self.connr)
         mount_device = "vde"
-        xml = libvirt_driver.connect_volume(connection_info, mount_device)
-        tree = ElementTree.fromstring(xml)
+        conf = libvirt_driver.connect_volume(connection_info, mount_device)
+        tree = conf.format_dom()
         self.assertEqual(tree.get('type'), 'network')
         self.assertEqual(tree.find('./source').get('protocol'), 'sheepdog')
         self.assertEqual(tree.find('./source').get('name'), name)
@@ -233,8 +235,8 @@ class LibvirtVolumeTestCase(test.TestCase):
         vol = {'id': 1, 'name': name}
         connection_info = vol_driver.initialize_connection(vol, self.connr)
         mount_device = "vde"
-        xml = libvirt_driver.connect_volume(connection_info, mount_device)
-        tree = ElementTree.fromstring(xml)
+        conf = libvirt_driver.connect_volume(connection_info, mount_device)
+        tree = conf.format_dom()
         self.assertEqual(tree.get('type'), 'network')
         self.assertEqual(tree.find('./source').get('protocol'), 'rbd')
         rbd_name = '%s/%s' % (FLAGS.rbd_pool, name)
@@ -255,8 +257,8 @@ class LibvirtVolumeTestCase(test.TestCase):
                'provider_location': '%s,fake %s' % (location, iqn)}
         connection_info = vol_driver.initialize_connection(vol, self.connr)
         mount_device = "vde"
-        xml = libvirt_driver.connect_volume(connection_info, mount_device)
-        tree = ElementTree.fromstring(xml)
+        conf = libvirt_driver.connect_volume(connection_info, mount_device)
+        tree = conf.format_dom()
         dev_str = '/dev/disk/by-path/ip-%s-iscsi-%s-lun-0' % (location, iqn)
         self.assertEqual(tree.get('type'), 'block')
         self.assertEqual(tree.find('./source').get('dev'), dev_str)
@@ -435,19 +437,58 @@ class LibvirtConnTestCase(test.TestCase):
         result = conn.get_volume_connector(volume)
         self.assertDictMatch(expected, result)
 
-    def test_preparing_xml_info(self):
+    def test_get_guest_config(self):
         conn = connection.LibvirtConnection(True)
         instance_ref = db.instance_create(self.context, self.test_instance)
 
-        result = conn._prepare_xml_info(instance_ref,
-                                        _fake_network_info(self.stubs, 1),
-                                        None, False)
-        self.assertTrue(len(result['nics']) == 1)
+        cfg = conn.get_guest_config(instance_ref,
+                                    _fake_network_info(self.stubs, 1),
+                                    None, False)
+        self.assertEquals(cfg.acpi, True)
+        self.assertEquals(cfg.memory, 1024 * 1024 * 2)
+        self.assertEquals(cfg.vcpus, 1)
+        self.assertEquals(cfg.os_type, "hvm")
+        self.assertEquals(cfg.os_boot_dev, "hd")
+        self.assertEquals(len(cfg.devices), 7)
+        self.assertEquals(type(cfg.devices[0]),
+                          config.LibvirtConfigGuestDisk)
+        self.assertEquals(type(cfg.devices[1]),
+                          config.LibvirtConfigGuestDisk)
+        self.assertEquals(type(cfg.devices[2]),
+                          config.LibvirtConfigGuestInterface)
+        self.assertEquals(type(cfg.devices[3]),
+                          config.LibvirtConfigGuestSerial)
+        self.assertEquals(type(cfg.devices[4]),
+                          config.LibvirtConfigGuestSerial)
+        self.assertEquals(type(cfg.devices[5]),
+                          config.LibvirtConfigGuestInput)
+        self.assertEquals(type(cfg.devices[6]),
+                          config.LibvirtConfigGuestGraphics)
 
-        result = conn._prepare_xml_info(instance_ref,
-                                        _fake_network_info(self.stubs, 2),
-                                        None, False)
-        self.assertTrue(len(result['nics']) == 2)
+        cfg = conn.get_guest_config(instance_ref,
+                                    _fake_network_info(self.stubs, 2),
+                                    None, False)
+        self.assertEquals(cfg.acpi, True)
+        self.assertEquals(cfg.memory, 1024 * 1024 * 2)
+        self.assertEquals(cfg.vcpus, 1)
+        self.assertEquals(cfg.os_type, "hvm")
+        self.assertEquals(cfg.os_boot_dev, "hd")
+        self.assertEquals(type(cfg.devices[0]),
+                          config.LibvirtConfigGuestDisk)
+        self.assertEquals(type(cfg.devices[1]),
+                          config.LibvirtConfigGuestDisk)
+        self.assertEquals(type(cfg.devices[2]),
+                          config.LibvirtConfigGuestInterface)
+        self.assertEquals(type(cfg.devices[3]),
+                          config.LibvirtConfigGuestInterface)
+        self.assertEquals(type(cfg.devices[4]),
+                          config.LibvirtConfigGuestSerial)
+        self.assertEquals(type(cfg.devices[5]),
+                          config.LibvirtConfigGuestSerial)
+        self.assertEquals(type(cfg.devices[6]),
+                          config.LibvirtConfigGuestInput)
+        self.assertEquals(type(cfg.devices[7]),
+                          config.LibvirtConfigGuestGraphics)
 
     def test_xml_and_uri_no_ramdisk_no_kernel(self):
         instance_data = dict(self.test_instance)
@@ -800,6 +841,19 @@ class LibvirtConnTestCase(test.TestCase):
                                  (check(tree), expected_result, i))
 
     def _check_xml_and_disk_driver(self, image_meta):
+        os_open = os.open
+        directio_supported = True
+
+        def os_open_stub(path, flags, *args, **kwargs):
+            if flags & os.O_DIRECT:
+                if not directio_supported:
+                    raise OSError(errno.EINVAL,
+                                  '%s: %s' % (os.strerror(errno.EINVAL), path))
+                flags &= ~os.O_DIRECT
+            return os_open(path, flags, *args, **kwargs)
+
+        self.stubs.Set(os, 'open', os_open_stub)
+
         user_context = context.RequestContext(self.user_id, self.project_id)
         instance_ref = db.instance_create(user_context, self.test_instance)
         network_info = _fake_network_info(self.stubs, 1)
@@ -811,6 +865,18 @@ class LibvirtConnTestCase(test.TestCase):
         disks = tree.findall('./devices/disk/driver')
         for disk in disks:
             self.assertEqual(disk.get("cache"), "none")
+
+        directio_supported = False
+
+        # The O_DIRECT availability is cached on first use in
+        # LibvirtConnection, hence we re-create it here
+        xml = connection.LibvirtConnection(True).to_xml(instance_ref,
+                                                        network_info,
+                                                        image_meta)
+        tree = ElementTree.fromstring(xml)
+        disks = tree.findall('./devices/disk/driver')
+        for disk in disks:
+            self.assertEqual(disk.get("cache"), "writethrough")
 
     def _check_xml_and_disk_bus(self, image_meta, device_type, bus):
         user_context = context.RequestContext(self.user_id, self.project_id)

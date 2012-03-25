@@ -687,13 +687,14 @@ class LoopingCall(object):
         self.f = f
         self._running = False
 
-    def start(self, interval, now=True):
+    def start(self, interval, initial_delay=None):
         self._running = True
         done = event.Event()
 
         def _inner():
-            if not now:
-                greenthread.sleep(interval)
+            if initial_delay:
+                greenthread.sleep(initial_delay)
+
             try:
                 while self._running:
                     self.f(*self.args, **self.kw)
@@ -1218,6 +1219,10 @@ def is_valid_cidr(address):
         # Validate the correct CIDR Address
         netaddr.IPNetwork(address)
     except netaddr.core.AddrFormatError:
+        return False
+    except UnboundLocalError:
+        # NOTE(MotoKen): work around bug in netaddr 0.7.5 (see detail in
+        # https://github.com/drkjam/netaddr/issues/2)
         return False
 
     # Prior validation partially verify /xx part

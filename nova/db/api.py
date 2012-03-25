@@ -209,11 +209,6 @@ def certificate_create(context, values):
     return IMPL.certificate_create(context, values)
 
 
-def certificate_destroy(context, certificate_id):
-    """Destroy the certificate or raise if it does not exist."""
-    return IMPL.certificate_destroy(context, certificate_id)
-
-
 def certificate_get_all_by_project(context, project_id):
     """Get all certificates for a project."""
     return IMPL.certificate_get_all_by_project(context, project_id)
@@ -229,15 +224,6 @@ def certificate_get_all_by_user_and_project(context, user_id, project_id):
     return IMPL.certificate_get_all_by_user_and_project(context,
                                                         user_id,
                                                         project_id)
-
-
-def certificate_update(context, certificate_id, values):
-    """Set the given properties on an certificate and update it.
-
-    Raises NotFound if service does not exist.
-
-    """
-    return IMPL.certificate_update(context, certificate_id, values)
 
 
 ###################
@@ -922,6 +908,39 @@ def quota_destroy(context, project_id, resource):
 def quota_destroy_all_by_project(context, project_id):
     """Destroy all quotas associated with a given project."""
     return IMPL.quota_get_all_by_project(context, project_id)
+
+
+###################
+
+
+def quota_class_create(context, class_name, resource, limit):
+    """Create a quota class for the given name and resource."""
+    return IMPL.quota_class_create(context, class_name, resource, limit)
+
+
+def quota_class_get(context, class_name, resource):
+    """Retrieve a quota class or raise if it does not exist."""
+    return IMPL.quota_class_get(context, class_name, resource)
+
+
+def quota_class_get_all_by_name(context, class_name):
+    """Retrieve all quotas associated with a given quota class."""
+    return IMPL.quota_class_get_all_by_name(context, class_name)
+
+
+def quota_class_update(context, class_name, resource, limit):
+    """Update a quota class or raise if it does not exist."""
+    return IMPL.quota_class_update(context, class_name, resource, limit)
+
+
+def quota_class_destroy(context, class_name, resource):
+    """Destroy the quota class or raise if it does not exist."""
+    return IMPL.quota_class_destroy(context, class_name, resource)
+
+
+def quota_class_destroy_all_by_name(context, class_name):
+    """Destroy all quotas associated with a given quota class."""
+    return IMPL.quota_class_destroy_all_by_name(context, class_name)
 
 
 ###################
@@ -1683,14 +1702,14 @@ def aggregate_create(context, values, metadata=None):
     return IMPL.aggregate_create(context, values, metadata)
 
 
-def aggregate_get(context, aggregate_id, read_deleted='no'):
+def aggregate_get(context, aggregate_id, **kwargs):
     """Get a specific aggregate by id."""
-    return IMPL.aggregate_get(context, aggregate_id, read_deleted)
+    return IMPL.aggregate_get(context, aggregate_id, **kwargs)
 
 
-def aggregate_get_by_host(context, host, read_deleted='no'):
+def aggregate_get_by_host(context, host, **kwargs):
     """Get a specific aggregate by host"""
-    return IMPL.aggregate_get_by_host(context, host, read_deleted)
+    return IMPL.aggregate_get_by_host(context, host, **kwargs)
 
 
 def aggregate_update(context, aggregate_id, values):
@@ -1704,9 +1723,9 @@ def aggregate_delete(context, aggregate_id):
     return IMPL.aggregate_delete(context, aggregate_id)
 
 
-def aggregate_get_all(context, read_deleted='yes'):
+def aggregate_get_all(context, **kwargs):
     """Get all aggregates."""
-    return IMPL.aggregate_get_all(context, read_deleted)
+    return IMPL.aggregate_get_all(context, **kwargs)
 
 
 def aggregate_metadata_add(context, aggregate_id, metadata, set_delete=False):
@@ -1714,9 +1733,9 @@ def aggregate_metadata_add(context, aggregate_id, metadata, set_delete=False):
     IMPL.aggregate_metadata_add(context, aggregate_id, metadata, set_delete)
 
 
-def aggregate_metadata_get(context, aggregate_id, read_deleted='no'):
+def aggregate_metadata_get(context, aggregate_id, **kwargs):
     """Get metadata for the specified aggregate."""
-    return IMPL.aggregate_metadata_get(context, aggregate_id, read_deleted)
+    return IMPL.aggregate_metadata_get(context, aggregate_id, **kwargs)
 
 
 def aggregate_metadata_delete(context, aggregate_id, key):
@@ -1729,9 +1748,9 @@ def aggregate_host_add(context, aggregate_id, host):
     IMPL.aggregate_host_add(context, aggregate_id, host)
 
 
-def aggregate_host_get_all(context, aggregate_id, read_deleted='yes'):
+def aggregate_host_get_all(context, aggregate_id, **kwargs):
     """Get hosts for the specified aggregate."""
-    return IMPL.aggregate_host_get_all(context, aggregate_id, read_deleted)
+    return IMPL.aggregate_host_get_all(context, aggregate_id, **kwargs)
 
 
 def aggregate_host_delete(context, aggregate_id, host):
