@@ -21,17 +21,13 @@ from nova import log as logging
 from occi import backend
 from nova import network
 from nova import compute
-#from occi.extensions.infrastructure import NETWORKINTERFACE
-
-# Retrieve functionality is already present via pyssf
 
 # With Quantum:
-#     TODO: implement create - note: this must handle either nova-network or
-#            quantum APIs - detect via flags and secondarily via import
-#            exceptions
-#           implement delete
-#           implement update
-
+#     TODO(dizz): implement create - note: this must handle either
+#                 nova-network or quantum APIs - detect via flags and
+#                 secondarily via import exceptions
+#                 implement delete
+#                 implement update
 # Also see nova/api/openstack/compute/contrib/multinic.py
 
 
@@ -117,7 +113,7 @@ class QuantumNetworkInterfaceBackend(backend.KindBackend):
     # bring explicit qunatum dependencies into nova, which may not be desired
     # should we move this create operation to IPNetworkInterface and 401 here?
     def create(self, link, extras):
-        # TODO: implement with Quantum
+        # FIXME(dizz): implement with Quantum
         # Number of steps required here:
         # 1. create the VIF
         # 2. add a port to the target network
@@ -144,7 +140,7 @@ class QuantumNetworkInterfaceBackend(backend.KindBackend):
             raise e
         print res
 
-    #TODO: here we associate a security group
+    #FIXME(dizz): here we might associate a security group?
     # What happens here if there are two adapters associated with the VM
     # and different rule groups are to be applied to one adapter and another
     # set to the second?

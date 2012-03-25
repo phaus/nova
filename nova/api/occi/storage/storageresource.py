@@ -27,9 +27,9 @@ from occi import backend
 from occi.extensions import infrastructure
 
 
-# L8R: Storage allows to go offline and online. StorageLink allows to go
+# TODO(dizz): Storage allows to go offline and online. StorageLink allows to go
 #      active or inactive. How should storage 'go offline' or 'come online'?
-# L8R: volume_type can be specified by mixin
+# TODO(dizz): volume_type can be specified by mixin
 
 
 #Hi I'm a logger, use me! :-)
@@ -48,7 +48,7 @@ class StorageBackend(backend.KindBackend, backend.ActionBackend):
         """Creates a new volume."""
         size = float(resource.attributes['occi.storage.size'])
 
-        # L8R: Right, this sucks. Suggest a patch to OpenStack.
+        # TODO(dizz): Right, this sucks. Suggest a patch to OpenStack.
         # OpenStack deals with size in terms of integer.
         # Need to convert float to integer for now and only if the float
         # can be losslessly converted to integer
@@ -184,7 +184,7 @@ class StorageBackend(backend.KindBackend, backend.ActionBackend):
             self._snapshot_storage(entity, extras)
 
         elif action == infrastructure.RESIZE:
-            # L8R: not supported by API. Patch to OS?
+            # TODO(dizz): not supported by API. Patch to OS?
             # RESIZE: increase, decrease size of volume. Not supported directly
             #         by the API
 
@@ -215,7 +215,7 @@ class StorageBackend(backend.KindBackend, backend.ActionBackend):
         Updates simple attributes of a storage resource:
         occi.core.title, occi.core.summary
         '''
-        # L8R: this is the same code taken from computeresource.
+        # TODO(dizz): this is the same code taken from computeresource.
         # update attributes.
         if len(new.attributes) > 0:
             LOG.info('Updating mutable attributes of volume instance')

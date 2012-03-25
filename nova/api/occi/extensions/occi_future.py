@@ -27,7 +27,8 @@ from nova.compute import API
 from occi import core_model
 from occi import backend
 
-# TODO: Remove SSH Console and VNC Console once URI support is added to pyssf
+# TODO(dizz): Remove SSH Console and VNC Console once URI support is added to
+#             pyssf
 
 #Hi I'm a logger, use me! :-)
 LOG = logging.getLogger('nova.api.occi.backends.securityrule')

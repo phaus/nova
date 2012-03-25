@@ -16,11 +16,11 @@
 #    under the License.
 
 
-# TODO: implement create
-#       implement delete
-#       implement retreive
-#       implement actions
-#       implement updates
+# TODO(dizz): implement create
+#             implement delete
+#             implement retreive
+#             implement actions
+#             implement updates
 
 # Also see nova/api/openstack/compute/contrib/networks.py
 
@@ -108,7 +108,7 @@ class QuantumNetworkBackend(backend.KindBackend, backend.ActionBackend):
     '''
     def __init__(self):
         super(QuantumNetworkBackend, self).__init__()
-        # TODO: read from FLAGS
+        # FIXME(dizz): read from FLAGS
         self.qclient = QuantumClient(host='10.211.55.85', format='json')
 
     def create(self, entity, extras):

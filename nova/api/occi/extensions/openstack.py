@@ -186,7 +186,7 @@ class OsComputeActionBackend(backend.ActionBackend):
         except Exception as e:
             LOG.exception(_("Error in revert-resize %s"), e)
             raise exc.HTTPBadRequest()
-        #TODO: update actions
+        #TODO(dizz): update actions
 
     def _os_confirm_resize_vm(self, entity, instance, context):
         '''
@@ -225,7 +225,7 @@ class OsComputeActionBackend(backend.ActionBackend):
 
         except exception.InstanceInvalidState:
             exc.HTTPConflict()
-        #TODO: update actions
+        #TODO(dizz): update actions
 
     def _os_allocate_floating_ip(self, entity, instance, context):
         '''
