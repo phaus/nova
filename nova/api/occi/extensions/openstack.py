@@ -261,10 +261,6 @@ class OsComputeActionBackend(backend.ActionBackend):
         This deallocates a floating ip from the compute resource.
         This returns the deallocated IP address to the pool.
         '''
-
-        import ipdb
-        ipdb.set_trace()
-
         address = entity.attributes['org.openstack.network.floating.ip']
         self.network_api.disassociate_floating_ip(context, address)
         self.network_api.release_floating_ip(context, address)
