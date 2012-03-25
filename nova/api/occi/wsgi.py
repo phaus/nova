@@ -124,7 +124,9 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         # register/refresh openstack instance types (flavours)
         self._register_resource_mixins(backend.MixinBackend())
         # register/refresh the openstack security groups as Mixins
-        self._register_security_mixins(nova_ctx)
+        self._register_security_mixins(backend.MixinBackend(), nova_ctx)
+        # register/refresh the openstack floating IP pools as Mixins
+        self._register_floating_ip_pool_mixins(backend.MixinBackend(), nova_ctx)
 
         return self._call_occi(environ, response, nova_ctx=nova_ctx,
                                                         registry=self.registry)
@@ -298,7 +300,7 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
                                                     + str(os_template))
             self.register_backend(os_template, os_mixin_backend)
 
-    def _register_security_mixins(self, ctx):
+    def _register_security_mixins(self, mixin_backend, ctx):
         '''
         Registers security groups as security mixins
         '''
@@ -307,7 +309,43 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
         # when a security mixin is supplied with the provision request
         # that's the security group to use with the VM
 
+        # Argh! Warning.
+        # There is the possibility that security groups exist within the
+        # pyssf registry already. These must be registered as
+        # securitygroupmixins - again, we need support for create/delete
+        # backends in pyssf
+
         self.compute_api.ensure_default_security_group(ctx)
+
+        excld_grps = []
+        categories = self.registry.get_categories()
+        # caters for user defined security groups
+        # if any of the categories are generic mixins but with a rel pointing
+        # to the securitygroup mixin scheme+term value,
+        # recreate them as securitygroupmixin
+        for cat in categories:
+            if isinstance(cat, core_model.Mixin):
+                for rel in cat.related:
+                    if rel == occi_future.SEC_GROUP.scheme + \
+                                                occi_future.SEC_GROUP.term:
+
+                        excld_grps.append(cat.term)
+
+                        LOG.debug('Recreating security group mixin')
+
+                        sec_mix = occi_future.SecurityGroupMixin(
+                            term=cat.term,
+                            scheme=cat.scheme,
+                            sec_grp_id=None,
+                            related=[occi_future.SEC_GROUP],
+                            attributes=None,
+                            title=cat.term,
+                            location=cat.location)
+
+                        self.register_backend(sec_mix, mixin_backend)
+
+        # caters for existing OS managed security groups - for now the default
+        # group
         groups = db.security_group_get_by_project(ctx, ctx.project_id)
 
         for group in groups:
@@ -316,17 +354,33 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
             if g_name.strip().find(' ') >= 0:
                 raise Exception()
 
-            sec_mix = occi_future.SecurityGroupMixin(
-                term=g_name,
-                scheme=
-                'http://schemas.openstack.org/infrastructure/security/group#',
-                sec_grp_id=sec_grp_id,
-                related=[occi_future.SEC_GROUP],
-                attributes=None,
-                title=group.name,
-                location='/' + group.name + '/')
+            if g_name not in excld_grps:
+                sec_mix = occi_future.SecurityGroupMixin(
+                    term=g_name,
+                    scheme=
+                    'http://schemas.openstack.org/infrastructure/security/group#',
+                    sec_grp_id=sec_grp_id,
+                    related=[occi_future.SEC_GROUP],
+                    attributes=None,
+                    title=group.name,
+                    location='/' + group.name + '/')
 
-            self.register_backend(sec_mix, backend.MixinBackend())
+                self.register_backend(sec_mix, mixin_backend)
+
+    def _register_floating_ip_pool_mixins(self, os_mixin_backend, ctx):
+
+        network_api = net_api.API()
+        pools = network_api.get_floating_ip_pools(ctx)
+
+        for pool in pools:
+            pool_mixin = core_model.Mixin(\
+                             term=pool['name'],
+                             scheme='http://schemas.openstack.org/instance/network#',
+                             related=[],
+                             attributes=None,
+                             title="This is a floating IP pool",
+                             location='/network/pool/')
+            self.register_backend(pool_mixin, os_mixin_backend)
 
     def _register_occi_infra(self):
         '''
@@ -346,8 +400,6 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
 
         storage_backend = storageresource.StorageBackend()
         storage_link_backend = storagelink.StorageLinkBackend()
-#        sec_rule_backend = ruleresource.SecurityRuleBackend()
-#        os_actions_backend = os_actions.OsComputeActionBackend()
 
         # register kinds with backends
         self.register_backend(infrastructure.COMPUTE, compute_backend)
@@ -383,4 +435,6 @@ class OCCIApplication(occi_wsgi.Application, wsgi.Application):
             #miaow! kittens, kittens, kittens!
             for ext in extn:
                 for cat in ext['categories']:
+#                    import ipdb
+#                    ipdb.set_trace()
                     self.register_backend(cat, ext['handler'])

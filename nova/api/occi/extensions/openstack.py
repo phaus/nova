@@ -18,6 +18,7 @@
 from nova import logging
 from nova import compute
 from nova import exception
+from nova.network import api as net_api
 
 from occi import backend
 from occi import core_model
@@ -36,12 +37,12 @@ def get_extensions():
     return  [
              {
               'categories':[OS_CHG_PWD, OS_REVERT_RESIZE,
-                            OS_CONFIRM_RESIZE, OS_CREATE_IMAGE,
-                            OS_ACCESS_IP_EXT],
+                            OS_CONFIRM_RESIZE, OS_CREATE_IMAGE],
               'handler': OsComputeActionBackend(),
              },
              {
-              'categories':[OS_KEY_PAIR_EXT, OS_ADMIN_PWD_EXT],
+              'categories':[OS_KEY_PAIR_EXT, OS_ADMIN_PWD_EXT,
+                            OS_ACCESS_IP_EXT],
               'handler': backend.MixinBackend(),
              }
             ]
@@ -75,25 +76,51 @@ OS_CREATE_IMAGE = core_model.Action(
                  {'image_name': ''})
 
 # OS Key pair extension
-OS_KEY_PAIR_ATTRIBUTES = {'org.openstack.credentials.publickey.name': '',
+_OS_KEY_PAIR_ATTRIBUTES = {'org.openstack.credentials.publickey.name': '',
                        'org.openstack.credentials.publickey.data': '', }
 OS_KEY_PAIR_EXT = core_model.Mixin(\
     'http://schemas.openstack.org/instance/credentials#',
-    'public_key', attributes=OS_KEY_PAIR_ATTRIBUTES)
+    'public_key', attributes=_OS_KEY_PAIR_ATTRIBUTES)
 
 
 # OS VM Administrative password extension
-OS_ADMIN_PWD_ATTRIBUTES = {'org.openstack.credentials.admin_pwd': '', }
+_OS_ADMIN_PWD_ATTRIBUTES = {'org.openstack.credentials.admin_pwd': '', }
 OS_ADMIN_PWD_EXT = core_model.Mixin(\
     'http://schemas.openstack.org/instance/credentials#',
-    'admin_pwd', attributes=OS_ADMIN_PWD_ATTRIBUTES)
+    'admin_pwd', attributes=_OS_ADMIN_PWD_ATTRIBUTES)
 
 # OS access IP extension
-OS_ACCESS_IP_ATTRIBUTES = {'org.openstack.network.access.ip': '',
+_OS_ACCESS_IP_ATTRIBUTES = {'org.openstack.network.access.ip': '',
                            'org.openstack.network.access.version': ''}
 OS_ACCESS_IP_EXT = core_model.Mixin(\
     'http://schemas.openstack.org/instance/network#',
-    'access_ip', attributes=OS_ACCESS_IP_ATTRIBUTES)
+    'access_ip', attributes=_OS_ACCESS_IP_ATTRIBUTES)
+
+# OS Floating IP Pool extension
+_OS_FLOATING_IP_POOL_ATTRIBUTES = {'org.openstack.network.access.ip': '',
+                                  'org.openstack.network.access.version': ''}
+OS_FLOATING_IP_POOL_EXT = core_model.Mixin(\
+    'http://schemas.openstack.org/instance/network#',
+    'access_ip', attributes=_OS_FLOATING_IP_POOL_ATTRIBUTES)
+
+# OS floating IP allocation action
+# expected parameter is the floating IP pool to take the IP from
+OS_ALLOC_FLOATING_IP = core_model.Action(
+                'http://schemas.openstack.org/instance/action#',
+                 'alloc_float_ip', 'Allocate a floating IP to \
+                                                     compute resource.')
+
+# OS floating IP deallocation action
+OS_DEALLOC_FLOATING_IP = core_model.Action(
+                'http://schemas.openstack.org/instance/action#',
+                 'dealloc_float_ip', 'Deallocate a floating IP from \
+                                                     compute resource.')
+
+# OS floating IP extension
+_OS_FLOATING_IP_ATTRIBUTES = {'org.openstack.network.floating.ip': '', }
+OS_FLOATING_IP_EXT = core_model.Mixin(\
+    'http://schemas.openstack.org/instance/network#',
+    'floating_ip', attributes=_OS_FLOATING_IP_ATTRIBUTES)
 
 
 ##################### 3. define the extension handler(s) #####################
@@ -104,6 +131,7 @@ class OsComputeActionBackend(backend.ActionBackend):
 #        policy.reset()
 #        policy.init()
         self.compute_api = compute.API()
+        self.network_api = net_api.API()
 
     def action(self, entity, action, extras):
         '''
@@ -126,6 +154,12 @@ class OsComputeActionBackend(backend.ActionBackend):
             self._os_confirm_resize_vm(entity, instance, context)
         elif action == OS_CREATE_IMAGE:
             self._os_create_image(entity, instance, context)
+        elif action == OS_ALLOC_FLOATING_IP:
+            self._os_allocate_floating_ip(entity, instance, context)
+        elif action == OS_DEALLOC_FLOATING_IP:
+            self._os_deallocate_floating_ip(entity, instance, context)
+        else:
+            raise exc.HTTPBadRequest()
 
     def _os_chg_passwd_vm(self, entity, instance, context):
         '''
@@ -176,7 +210,6 @@ class OsComputeActionBackend(backend.ActionBackend):
         except Exception as e:
             LOG.exception(_("Error in confirm-resize %s"), e)
             raise exc.HTTPBadRequest()
-        #TODO: update actions
 
     def _os_create_image(self, entity, instance, context):
         '''
@@ -199,3 +232,47 @@ class OsComputeActionBackend(backend.ActionBackend):
         except exception.InstanceInvalidState:
             exc.HTTPConflict()
         #TODO: update actions
+
+    def _os_allocate_floating_ip(self, entity, instance, context):
+        '''
+        This allocates a floating ip from the supplied floating ip pool. The
+        pool is specified as a parameter in the action request. Currently,
+        this only supports the assignment of 1 floating IP.
+        '''
+        for mixin in entity.mixins:
+            if (mixin.scheme + mixin.term) == 'http://':
+                LOG.warn('There is already a floating IP assigned to the VM')
+
+        if 'org.openstack.ip.pool' not in entity.attributes:
+            exc.HTTPBadRequest()
+
+        pool = entity.attributes['org.openstack.ip.pool']
+        address = self.network_api.allocate_floating_ip(context, pool)
+
+        # once the address is allocated we need to reflect that fact
+        # on the resource holding it.
+        entity.mixins.append(OS_FLOATING_IP_EXT)
+        entity.attributes['org.openstack.network.floating.ip'] = address
+
+    def _os_deallocate_floating_ip(self, entity, instance, context):
+        '''
+        This deallocates a floating ip from the compute resource.
+        This returns the deallocated IP address to the pool.
+        '''
+
+        entity_id = entity.attributes['occi.core.id']
+
+        floating_ip = self.network_api.get_floating_ip(context, entity_id)
+
+        if floating_ip.get('fixed_ip_id'):
+            self.network_api.disassociate_floating_ip(context,
+                                                      floating_ip['address'])
+
+        self.network_api.release_floating_ip(context,
+                                             address=floating_ip['address'])
+
+        # remove the mixin
+        for mixin in entity.mixins:
+            if (mixin.scheme + mixin.term) == 'http://':
+                entity.mixins.remove(mixin)
+                entity.attributes.pop('org.openstack.ip.pool')

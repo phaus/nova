@@ -15,8 +15,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-# TODO: use OCCI exceptions
-
 import uuid
 import json
 from webob import exc
@@ -87,8 +85,8 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         password = utils.generate_password(FLAGS.password_length)
         access_ip_v4 = None
         access_ip_v6 = None
-        # L8R: would be good to specify user_data via OCCI. Look to use
-        #     CompatibleOne extensions
+        # TODO(dizz): would be good to specify user_data via OCCI. Look to use
+        #             CompatibleOne extensions spec.
         user_data = None
         metadata = {}
         injected_files = []
@@ -99,15 +97,16 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         availability_zone = None
         config_drive = None
         block_device_mapping = None
-        # L8R: these can be specified through OS Templates
+        # TODO(dizz): these can be specified through OS Templates
         kernel_id = ramdisk_id = None
         auto_disk_config = None
         scheduler_hints = None
 
+        # TODO(dizz): refactor, more validation of values
         # extract mixin information
-        # L8R: refactor, more validation of values
         rc = oc = 0
         for mixin in resource.mixins:
+
             if isinstance(mixin, templates.ResourceTemplate):
                 r = mixin
                 rc += 1
@@ -126,18 +125,24 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
                                             os_extns.OS_ADMIN_PWD_EXT.term):
                 password = \
                     resource.attributes['org.openstack.credentials.admin_pwd']
-            elif mixin.scheme == \
-                'http://schemas.ogf.org/occi/infrastructure/security/group#':
-                sg_names.append(mixin.term)
             elif (mixin.scheme + mixin.term) == \
                             (os_extns.OS_ACCESS_IP_EXT.scheme + \
                                             os_extns.OS_ACCESS_IP_EXT.term):
                 if resource.attributes['org.openstack.network.access.version'] == 'ipv4':
-                    access_ip_v4 = resource.attributes['org.openstack.network.access.ip']
+                    access_ip_v4 = \
+                        resource.attributes['org.openstack.network.access.ip']
                 elif resource.attributes['org.openstack.network.access.version'] == 'ipv6':
-                    access_ip_v6 = resource.attributes['org.openstack.network.access.ip']
+                    access_ip_v6 = \
+                        resource.attributes['org.openstack.network.access.ip']
                 else:
                     raise exc.HTTPBadRequest()
+
+            for rel in mixin.related:
+                #Look for security group. If the group is non-existant, the
+                #call to create will fail.
+                if rel == occi_future.SEC_GROUP.scheme + \
+                                                    occi_future.SEC_GROUP.term:
+                    sg_names.append(mixin.term)
 
         if rc < 1 and oc < 1:
             LOG.error('No resource or OS template in the request.')
@@ -218,13 +223,11 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         resource.attributes['occi.compute.architecture'] = \
                                     self._get_vm_arch(extras['nova_ctx'], o)
         resource.attributes['occi.compute.cores'] = str(instances[0]['vcpus'])
-        # L8R: occi.compute.speed is not available in instances by default.
-        # CPU speed is not available but could be made available through
-        # db::nova::compute_nodes::cpu_info
-        # additional code is required in
+        # TODO(dizz): occi.compute.speed is not available in instances by
+        # default.CPU speed is not available but could be made available
+        # through: db::nova::compute_nodes::cpu_info
+        # Additional code is required in:
         #     nova/nova/virt/libvirt/connection.py::get_cpu_info()
-        # note: this would be the physical node's speed not necessarily
-        #     the VMs.
         LOG.info('Cannot tell what the CPU speed is.')
         resource.attributes['occi.compute.speed'] = str(0.0)
         resource.attributes['occi.compute.memory'] = \
@@ -254,7 +257,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         '''
         Associate ephemeral or root storage with compute instance
         '''
-        # TODO: if there is ephemeral or root storage, assciate it!
+        # TODO(dizz): if there is ephemeral or root storage, assciate it!
         pass
 
     def _get_vm_arch(self, context, os_template_mixin):
@@ -368,7 +371,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
                                                         vm_net_info['address']
         link.attributes['occi.networkinterface.gateway'] = \
                                                         vm_net_info['gateway']
-        # TODO: set this based on API not by default
+        # TODO(dizz): set this based on API not by default
         link.attributes['occi.networkinterface.allocation'] = 'dhcp'
 
         resource.links.append(link)
@@ -422,9 +425,10 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
             resource.links.append(ssh_console_link)
 
         if not vnc_console_present:
-
+# TODO(dizz): implement
 #            import ipdb
 #            ipdb.set_trace()
+#            novnc, vnc+xvp,vmrc+credentials
 #            try:
 #                console = self.compute_api.get_vnc_console(extras['nova_ctx'],
 #                                                      instance,
@@ -603,8 +607,9 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
             # do we need to check for new os rebuild in new?
             self._update_rebuild_vm(old, extras, instance, mixin)
         elif isinstance(mixin, occi_future.SecurityGroupMixin):
-            #TODO
+            #TODO(dizz): implement
             LOG.info('Updating security rule group')
+            raise exc.HTTPBadRequest()
         else:
             LOG.error('I\'ve no idea what this mixin is! ' + \
                                                 mixin.scheme + mixin.term)

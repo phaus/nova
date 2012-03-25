@@ -29,7 +29,7 @@ def get_extensions():
            ]
 
 # Trusted Compute Pool technology mixin definition
-TCP_ATTRIBUTES = {'eu.fi-ware.compute.tcp': '', }
+_TCP_ATTRIBUTES = {'eu.fi-ware.compute.tcp': '', }
 TCP = core_model.Mixin(\
     'http://schemas.fi-ware.eu/occi/infrastructure/compute#',
-    'tcp', attributes=TCP_ATTRIBUTES)
+    'tcp', attributes=_TCP_ATTRIBUTES)

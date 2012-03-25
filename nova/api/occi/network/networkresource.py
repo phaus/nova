@@ -133,7 +133,6 @@ class QuantumNetworkBackend(backend.KindBackend, backend.ActionBackend):
         entity.actions = [infrastructure.DOWN]
 
     def retrieve(self, entity, extras):
-        # FIXME: hackish - subclass network?
         if entity.title == 'Default Network':
             self.qclient.tenant = 'default'
         else:
