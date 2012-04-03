@@ -22,10 +22,10 @@ from nova import wsgi
 from nova import flags
 from nova import db
 from nova.openstack.common import cfg
-#from nova.compute import API
 from nova.compute import instance_types
 from nova.network import api as net_api
 from nova.api.occi import extensions
+from nova.api.occi import registry
 from nova.api.occi.extensions import occi_future
 from nova.api.occi.compute import templates
 from nova.api.occi.compute import computeresource
@@ -34,7 +34,6 @@ from nova.api.occi.network import networkresource
 from nova.api.occi.storage import storagelink
 from nova.api.occi.storage import storageresource
 
-from nova.api.occi import registry
 from occi import core_model
 from occi import backend
 from occi import wsgi as occi_wsgi

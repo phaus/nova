@@ -1,21 +1,26 @@
-'''
-Created on Jan 11, 2012
+# vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-@author: openstack
-'''
+#
+#    Copyright (c) 2012, Intel Performance Learning Solutions Ltd.
+#
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
 
 from nova import context
 from nova import test
 from nova import flags
-from nova import image
-from nova import rpc
-
-from nova.image import fake
 
 from nova.api.occi.storage import storageresource
-from nova.api.occi.compute import templates
 from nova.api.occi import registry
-from nova.network import api as net_api
 from nova.scheduler import driver as scheduler_driver
 from nova.tests.api import occi
 
@@ -95,7 +100,7 @@ class TestOcciStorageResource(test.TestCase):
 #    def test_action_for_success(self):
 #        self.fail('To be implemented...')
 #
-#    #--------------------------------------------------------- Test for Failure
+#    #-------------------------------------------------------- Test for Failure
 #
 #    def test_create_for_failure(self):
 #        self.fail('To be implemented...')
@@ -115,7 +120,7 @@ class TestOcciStorageResource(test.TestCase):
 #    def test_action_for_failure(self):
 #        self.fail('To be implemented...')
 #
-#    #---------------------------------------------------------- Test for Sanity
+#    #--------------------------------------------------------- Test for Sanity
 #
 #    def test_create_for_sanity(self):
 #        self.fail('To be implemented...')
