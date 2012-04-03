@@ -38,9 +38,6 @@ class OCCIRegistry(registry.NonePersistentRegistry):
         key = resource.kind.location + resource.attributes['occi.core.id']
         resource.identifier = key
 
-        if extras:
-            resource.extras = self.get_extras(extras)
-
         super(OCCIRegistry, self).add_resource(key, resource, extras)
 
     def delete_mixin(self, mixin, extras):
@@ -55,9 +52,6 @@ class OCCIRegistry(registry.NonePersistentRegistry):
         '''
         Assigns user id and tenant id to user defined mixins
         '''
-        if extras:
-            category.extras = self.get_extras(extras)
-
         if hasattr(category, 'related') and \
                                     occi_future.SEC_GROUP in category.related:
             be = occi_future.SecurityGroupBackend()
