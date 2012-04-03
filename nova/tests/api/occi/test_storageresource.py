@@ -59,8 +59,8 @@ class TestOcciStorageResource(test.TestCase):
         self.stubs.Set(registry.OCCIRegistry, 'get_resource',
                        occi.fake_get_resource)
         from nova import volume
-        self.stubs.Set(volume.API, 'get',
-                       occi.fake_storage_get)
+        self.stubs.Set(volume.API, 'get', occi.fake_storage_get)
+        self.stubs.Set(volume.API, 'delete', occi.fake_storage_delete)
 
         # OCCI related setup
         self.entity = Entity("123", 'A test entity', None, [])
@@ -88,9 +88,9 @@ class TestOcciStorageResource(test.TestCase):
 #
 #    def test_replace_for_success(self):
 #        self.fail('To be implemented...')
-#
-#    def test_delete_for_success(self):
-#        self.fail('To be implemented...')
+
+    def test_delete_for_success(self):
+        self.class_under_test.delete(self.entity, self.extras)
 #
 #    def test_action_for_success(self):
 #        self.fail('To be implemented...')

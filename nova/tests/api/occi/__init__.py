@@ -84,9 +84,15 @@ def fake_compute_get(meh, ct, uid):
     instance['vm_state'] = 'active'
     return instance
 
+def fake_compute_delete(meh, ctx, vol):
+    pass
+
 def fake_storage_get(meh, ct, uid):
     instance = {}
     instance['id'] = '321321'
     instance['size'] = '1.0'
     instance['status'] = 'available'
     return instance
+
+def fake_storage_delete(meh, ctx, vol):
+    pass

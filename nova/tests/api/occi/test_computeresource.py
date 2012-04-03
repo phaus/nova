@@ -5,13 +5,13 @@ Created on Jan 11, 2012
 '''
 
 from nova import context
-from nova import test
+from nova import compute
 from nova import flags
 from nova import image
 from nova import rpc
+from nova import test
 
 from nova.image import fake
-
 from nova.api.occi.compute import computeresource
 from nova.api.occi.compute import templates
 from nova.api.occi import registry
@@ -64,9 +64,8 @@ class TestOcciComputeResource(test.TestCase):
                        occi.fake_get_instance_nw_info)
         self.stubs.Set(registry.OCCIRegistry, 'get_resource',
                        occi.fake_get_resource)
-        from nova import compute
-        self.stubs.Set(compute.API, 'get',
-                       occi.fake_compute_get)
+        self.stubs.Set(compute.API, 'get', occi.fake_compute_get)
+        self.stubs.Set(compute.API, 'delete', occi.fake_storage_delete)
 
         # OCCI related setup
         self.os_template = templates.OsTemplate(
@@ -101,10 +100,10 @@ class TestOcciComputeResource(test.TestCase):
 #
 #    def test_replace_for_success(self):
 #        self.fail('To be implemented...')
-#
-#    def test_delete_for_success(self):
-#        self.fail('To be implemented...')
-#
+
+    def test_delete_for_success(self):
+        self.class_under_test.delete(self.entity, self.extras)
+
 #    def test_action_for_success(self):
 #        self.fail('To be implemented...')
 #
