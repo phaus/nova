@@ -295,7 +295,12 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         extracts the VMs network adapter information: interface name,
         IP address, gateway and mac address.
         '''
-        vm_net_info = {'vm_iface': '', 'address': '', 'gateway': '', 'mac': ''}
+        # TODO(dizz): currently this assumes one adapter on the VM.
+        # It's likely that this will not be the case when using Quantum
+
+        vm_net_info = {'vm_iface': '', 'address': '', 'gateway': '', 'mac': '',
+                       'allocation': ''}
+
         sj = self.network_api.get_instance_nw_info(extras['nova_ctx'], \
                                                                     instance)
         #catches an odd error whereby no network info is returned back
@@ -303,8 +308,6 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
             LOG.warn('No network info was returned either live or cached.')
             return vm_net_info
 
-        # TODO(dizz): currently this assumes one adapter on the VM.
-        # It's likely that this will not be the case when using Quantum
         vm_net_info['vm_iface'] = sj[0]['network']['meta']['bridge_interface']
         #OS-specific if a VM is stopped it has no IP address
         if len(sj[0]['network']['subnets'][0]['ips']) > 0:
@@ -315,6 +318,10 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         vm_net_info['gateway'] = \
                         sj[0]['network']['subnets'][0]['gateway']['address']
         vm_net_info['mac'] = sj[0]['address']
+        if sj[0]['network']['subnets'][0]['ips'][0]['type'] == 'fixed':
+            vm_net_info['allocation'] = 'static'
+        else:
+            vm_net_info['allocation'] = 'dynamic'
         return vm_net_info
 
     def _attach_to_default_network(self, vm_net_info, resource, extras):
@@ -360,8 +367,8 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
                                                         vm_net_info['address']
         link.attributes['occi.networkinterface.gateway'] = \
                                                         vm_net_info['gateway']
-        # TODO(dizz): set this based on API not by default
-        link.attributes['occi.networkinterface.allocation'] = 'dhcp'
+        link.attributes['occi.networkinterface.allocation'] = \
+                                                    vm_net_info['allocation']
 
         resource.links.append(link)
         registry.add_resource(identifier, link, extras)
