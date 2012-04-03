@@ -20,6 +20,7 @@ from nova.scheduler import driver as scheduler_driver
 from nova.tests.api import occi
 
 from occi.core_model import Entity
+from occi.extensions import infrastructure
 
 
 FLAGS = flags.FLAGS
@@ -104,9 +105,39 @@ class TestOcciComputeResource(test.TestCase):
     def test_delete_for_success(self):
         self.class_under_test.delete(self.entity, self.extras)
 
-#    def test_action_for_success(self):
-#        self.fail('To be implemented...')
-#
+    def test_action_for_success(self):
+        self.stubs.Set(computeresource.ComputeBackend, 'retrieve',
+                                                occi.fake_compute_occi_get)
+        self.stubs.Set(compute.API, 'unpause', occi.fake_compute_unpause)
+        self.stubs.Set(compute.API, 'resume', occi.fake_compute_resume)
+        self.stubs.Set(compute.API, 'suspend', occi.fake_compute_suspend)
+        self.stubs.Set(compute.API, 'reboot', occi.fake_compute_reboot)
+        self.stubs.Set(compute.API, 'pause', occi.fake_compute_pause)
+
+
+        self.entity.attributes['occi.compute.state'] = 'inactive'
+        self.entity.actions = [infrastructure.START]
+        self.class_under_test.action(self.entity, infrastructure.START,
+                                                                self.extras)
+
+        self.entity.attributes['occi.compute.state'] = 'active'
+        self.entity.actions = [infrastructure.STOP]
+        self.class_under_test.action(self.entity, infrastructure.STOP,
+                                                                self.extras)
+
+        self.entity.attributes['occi.compute.state'] = 'active'
+        self.entity.attributes['method'] = 'graceful'
+        self.entity.actions = [infrastructure.RESTART]
+        self.class_under_test.action(self.entity, infrastructure.RESTART,
+                                                                self.extras)
+
+        self.entity.attributes['occi.compute.state'] = 'active'
+        self.entity.actions = [infrastructure.SUSPEND]
+        self.class_under_test.action(self.entity, infrastructure.SUSPEND,
+                                                                self.extras)
+
+        self.stubs.UnsetAll()
+
 #    #--------------------------------------------------------- Test for Failure
 #
 #    def test_create_for_failure(self):

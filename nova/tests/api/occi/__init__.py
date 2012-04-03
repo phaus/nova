@@ -13,8 +13,8 @@
 #    under the License.
 
 from nova import image
-from occi.extensions import infrastructure
 from occi import core_model
+from occi.extensions import infrastructure
 
 def fake_get_image_service(context, image_href):
     '''
@@ -84,7 +84,32 @@ def fake_compute_get(meh, ct, uid):
     instance['vm_state'] = 'active'
     return instance
 
+def fake_compute_occi_get(meh, entity, extras):
+    entity = core_model.Entity("123", 'A test entity', None, [])
+    entity.attributes['occi.core.id'] = '123-123-123'
+    entity.links = []
+    entity.actions = [infrastructure.START,
+                          infrastructure.STOP,
+                          infrastructure.SUSPEND, \
+                          infrastructure.RESTART]
+    return entity
+
 def fake_compute_delete(meh, ctx, vol):
+    pass
+
+def fake_compute_unpause(meh, context, instance):
+    pass
+
+def fake_compute_resume(meh, context, instance):
+    pass
+
+def fake_compute_suspend(meh, context, instance):
+    pass
+
+def fake_compute_reboot(meh, context, instance, type):
+    pass
+
+def fake_compute_pause(meh, context, instance):
     pass
 
 def fake_storage_get(meh, ct, uid):
