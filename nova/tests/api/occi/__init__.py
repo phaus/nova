@@ -13,7 +13,8 @@
 #    under the License.
 
 from nova import image
-
+from occi.extensions import infrastructure
+from occi import core_model
 
 def fake_get_image_service(context, image_href):
     '''
@@ -46,3 +47,34 @@ def fake_response(arg0, arg1):
     Fake WSGI response method
     '''
     pass
+
+def fake_get_floating_ip_pools(meh, context):
+    return [{'name': 'test1'}, {'name': 'test2'}, ]
+
+def fake_get_instance_nw_info(meh, ctx, instance):
+    return []
+
+def fake_get_resource(meh, key, extras):
+    name = 'DEFAULT_NETWORK'
+
+    net_attrs = {
+        'occi.core.id': name,
+        'occi.network.vlan': '',
+        'occi.network.label': 'public',
+        'occi.network.state': 'up',
+        'occi.network.address': '',
+        'occi.network.gateway': '',
+        'occi.network.allocation': '',
+    }
+
+    default_network = core_model.Resource(name, infrastructure.NETWORK, \
+                        [infrastructure.IPNETWORK], [],
+                        'This is the network all VMs are attached to.',
+                        'Default Network')
+
+    default_network.attributes = net_attrs
+
+    return default_network
+
+def fake_security_group_get_by_project(ctx, proj_id):
+    return [{'name':'grp1'}, {'name':'grp2'}]

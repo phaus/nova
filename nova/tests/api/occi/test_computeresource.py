@@ -14,12 +14,13 @@ from nova.image import fake
 
 from nova.api.occi.compute import computeresource
 from nova.api.occi.compute import templates
+from nova.api.occi import registry
+from nova.network import api as net_api
+from nova.scheduler import driver as scheduler_driver
+from nova.tests.api import occi
 
 from occi.core_model import Entity
 
-from nova.scheduler import driver as scheduler_driver
-
-from nova.tests.api import occi
 
 FLAGS = flags.FLAGS
 
@@ -59,13 +60,23 @@ class TestOcciComputeResource(test.TestCase):
         self.stubs.Set(image, 'get_image_service', occi.fake_get_image_service)
         self.stubs.Set(fake._FakeImageService, 'show', occi.fake_show)
         self.stubs.Set(rpc, 'cast', fake_rpc_cast)
+        self.stubs.Set(net_api.API, 'get_instance_nw_info',
+                       occi.fake_get_instance_nw_info)
+        self.stubs.Set(registry.OCCIRegistry, 'get_resource',
+                       occi.fake_get_resource)
+
 
         # OCCI related setup
-        self.os_template = templates.OsTemplate('http://schemas.openstack.org/template/os#', 'foo', '1')
-        self.resource_template = templates.ResourceTemplate('http://schemas.openstack.org/template/resource#', 'm1.small')
+        self.os_template = templates.OsTemplate(
+                                'http://schemas.openstack.org/template/os#',
+                                'foo', '1')
+        self.resource_template = templates.ResourceTemplate(
+                            'http://schemas.openstack.org/template/resource#',
+                            'm1.small')
 
-        self.entity = Entity("123", 'A test entity', None, [self.os_template, self.resource_template])
-        self.extras = {'nova_ctx': self.context}
+        self.entity = Entity("123", 'A test entity', None,
+                             [self.os_template, self.resource_template])
+        self.extras = {'nova_ctx': self.context, 'registry': registry.OCCIRegistry()}
 
         self.class_under_test = computeresource.ComputeBackend()
 

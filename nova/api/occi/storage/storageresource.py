@@ -27,11 +27,6 @@ from occi import backend
 from occi.extensions import infrastructure
 
 
-# TODO(dizz): Storage allows to go offline and online. StorageLink allows to go
-#      active or inactive. How should storage 'go offline' or 'come online'?
-# TODO(dizz): volume_type can be specified by mixin
-
-
 #Hi I'm a logger, use me! :-)
 LOG = logging.getLogger('nova.api.occi.backends.storage')
 
@@ -48,7 +43,7 @@ class StorageBackend(backend.KindBackend, backend.ActionBackend):
         """Creates a new volume."""
         size = float(resource.attributes['occi.storage.size'])
 
-        # TODO(dizz): Right, this sucks. Suggest a patch to OpenStack.
+        # TODO(dizz): A blueprint?
         # OpenStack deals with size in terms of integer.
         # Need to convert float to integer for now and only if the float
         # can be losslessly converted to integer
@@ -78,6 +73,7 @@ class StorageBackend(backend.KindBackend, backend.ActionBackend):
             disp_descr = disp_name
 
         snapshot = None
+        # volume_type can be specified by mixin
         volume_type = None
         metadata = None
         avail_zone = None
@@ -184,7 +180,7 @@ class StorageBackend(backend.KindBackend, backend.ActionBackend):
             self._snapshot_storage(entity, extras)
 
         elif action == infrastructure.RESIZE:
-            # TODO(dizz): not supported by API. Patch to OS?
+            # TODO(dizz): not supported by API. A blueprint candidate?
             # RESIZE: increase, decrease size of volume. Not supported directly
             #         by the API
 
@@ -215,7 +211,6 @@ class StorageBackend(backend.KindBackend, backend.ActionBackend):
         Updates simple attributes of a storage resource:
         occi.core.title, occi.core.summary
         '''
-        # TODO(dizz): this is the same code taken from computeresource.
         # update attributes.
         if len(new.attributes) > 0:
             LOG.info('Updating mutable attributes of volume instance')

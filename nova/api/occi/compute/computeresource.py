@@ -16,7 +16,6 @@
 #    under the License.
 
 import uuid
-import json
 
 from webob import exc
 
@@ -75,6 +74,8 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         like occi.compute.cores then a bad request must be issued
         OpenStack does not support this.
         '''
+        #temporary fix
+        resource.links = []
         LOG.info('Creating the virtual machine.')
         self._check_invalid_attrs(resource)
 
@@ -86,8 +87,8 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         password = utils.generate_password(FLAGS.password_length)
         access_ip_v4 = None
         access_ip_v6 = None
-        # TODO(dizz): would be good to specify user_data via OCCI. Look to use
-        #             CompatibleOne extensions spec.
+        # Would be good to specify user_data via OCCI. Look to use
+        # CompatibleOne extensions spec.
         user_data = None
         metadata = {}
         injected_files = []
@@ -98,12 +99,11 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         availability_zone = None
         config_drive = None
         block_device_mapping = None
-        # TODO(dizz): these can be specified through OS Templates
+        # these can be specified through OS Templates
         kernel_id = ramdisk_id = None
         auto_disk_config = None
         scheduler_hints = None
 
-        # TODO(dizz): refactor, more validation of values
         # extract mixin information
         rc = oc = 0
         for mixin in resource.mixins:
@@ -114,21 +114,15 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
             elif isinstance(mixin, templates.OsTemplate):
                 o = mixin
                 oc += 1
-            elif (mixin.scheme + mixin.term) == \
-                                (os_extns.OS_KEY_PAIR_EXT.scheme +
-                                            os_extns.OS_KEY_PAIR_EXT.term):
+            elif mixin == os_extns.OS_KEY_PAIR_EXT:
                 key_name = \
                 resource.attributes['org.openstack.credentials.publickey.name']
                 key_data = \
                 resource.attributes['org.openstack.credentials.publickey.data']
-            elif (mixin.scheme + mixin.term) == \
-                            (os_extns.OS_ADMIN_PWD_EXT.scheme + \
-                                            os_extns.OS_ADMIN_PWD_EXT.term):
+            elif mixin == os_extns.OS_ADMIN_PWD_EXT:
                 password = \
                     resource.attributes['org.openstack.credentials.admin_pwd']
-            elif (mixin.scheme + mixin.term) == \
-                            (os_extns.OS_ACCESS_IP_EXT.scheme + \
-                                            os_extns.OS_ACCESS_IP_EXT.term):
+            elif mixin == os_extns.OS_ACCESS_IP_EXT:
                 if resource.attributes['org.openstack.network.access.version'] == 'ipv4':
                     access_ip_v4 = \
                         resource.attributes['org.openstack.network.access.ip']
@@ -138,12 +132,10 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
                 else:
                     raise exc.HTTPBadRequest()
 
-            for rel in mixin.related:
-                #Look for security group. If the group is non-existant, the
-                #call to create will fail.
-                if rel == occi_future.SEC_GROUP.scheme + \
-                                                    occi_future.SEC_GROUP.term:
-                    sg_names.append(mixin.term)
+            #Look for security group. If the group is non-existant, the
+            #call to create will fail.
+            if occi_future.SEC_GROUP in mixin.related:
+                sg_names.append(mixin.term)
 
         if rc < 1 and oc < 1:
             LOG.error('No resource or OS template in the request.')
@@ -224,7 +216,8 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         resource.attributes['occi.compute.architecture'] = \
                                     self._get_vm_arch(extras['nova_ctx'], o)
         resource.attributes['occi.compute.cores'] = str(instances[0]['vcpus'])
-        # TODO(dizz): occi.compute.speed is not available in instances by
+        # TODO(dizz): possible blueprint?
+        # occi.compute.speed is not available in instances by
         # default.CPU speed is not available but could be made available
         # through: db::nova::compute_nodes::cpu_info
         # Additional code is required in:
@@ -241,10 +234,10 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         # addresses allocated by DHCP
         # A link is created to this network (IP) and set the ip to that of the
         # allocated ip
-        vm_net_info = self._get_adapter_info(instances[0], extras, True)
+        vm_net_info = self._get_adapter_info(instances[0], extras)
         self._attach_to_default_network(vm_net_info, resource, extras)
         self._get_console_info(resource, instances[0], extras)
-        self._attach_to_local_storage()
+        self._attach_to_local_storage(inst_type)
 
         #set valid actions
         resource.actions = [infrastructure.STOP,
@@ -254,7 +247,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
                           os_extns.OS_CONFIRM_RESIZE, \
                           os_extns.OS_CREATE_IMAGE]
 
-    def _attach_to_local_storage(self):
+    def _attach_to_local_storage(self, inst_type):
         '''
         Associate ephemeral or root storage with compute instance
         '''
@@ -296,28 +289,22 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
             arch = 'x86'
         return arch
 
-    def _get_adapter_info(self, instance, extras, live_query=False):
+    def _get_adapter_info(self, instance, extras):
+        #, live_query=False
         '''
         extracts the VMs network adapter information: interface name,
         IP address, gateway and mac address.
         '''
         vm_net_info = {'vm_iface': '', 'address': '', 'gateway': '', 'mac': ''}
-
-        if live_query:
-            sj = self.network_api.get_instance_nw_info(extras['nova_ctx'], \
+        sj = self.network_api.get_instance_nw_info(extras['nova_ctx'], \
                                                                     instance)
-        else:
-            sj = instance['info_cache'].network_info
-
         #catches an odd error whereby no network info is returned back
         if len(sj) <= 0:
             LOG.warn('No network info was returned either live or cached.')
             return vm_net_info
 
-        # L8R: currently this assumes one adapter on the VM.
+        # TODO(dizz): currently this assumes one adapter on the VM.
         # It's likely that this will not be the case when using Quantum
-        if not live_query:
-            sj = json.loads(sj)
         vm_net_info['vm_iface'] = sj[0]['network']['meta']['bridge_interface']
         #OS-specific if a VM is stopped it has no IP address
         if len(sj[0]['network']['subnets'][0]['ips']) > 0:
@@ -355,7 +342,8 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         # If the network association does not exist...
         # Get a handle to the default network
         registry = extras['registry']
-        default_network = registry.get_resource('/network/DEFAULT_NETWORK')
+        default_network = registry.get_resource('/network/DEFAULT_NETWORK',
+                                                extras)
         source = resource
         target = default_network
 
@@ -376,7 +364,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         link.attributes['occi.networkinterface.allocation'] = 'dhcp'
 
         resource.links.append(link)
-        registry.add_resource(identifier, link)
+        registry.add_resource(identifier, link, extras)
 
     def _get_console_info(self, resource, instance, extras):
         '''
@@ -413,7 +401,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
             ssh_console.attributes['occi.core.id'] = identifier
             ssh_console.attributes['org.openstack.compute.console.ssh'] = \
                                                     'ssh://' + address + ':22'
-            registry.add_resource(identifier, ssh_console)
+            registry.add_resource(identifier, ssh_console, extras)
 
             identifier = str(uuid.uuid4())
             ssh_console_link = core_model.Link(
@@ -421,7 +409,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
                                     occi_future.CONSOLE_LINK, \
                                     [], resource, ssh_console)
             ssh_console_link.attributes['occi.core.id'] = identifier
-            registry.add_resource(identifier, ssh_console_link)
+            registry.add_resource(identifier, ssh_console_link, extras)
 
             resource.links.append(ssh_console_link)
 
@@ -449,7 +437,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
                                                     'http://' + address + ':80'
 #   console['url']
 
-            registry.add_resource(identifier, vnc_console)
+            registry.add_resource(identifier, vnc_console, extras)
 
             identifier = str(uuid.uuid4())
             vnc_console_link = core_model.Link(
@@ -457,7 +445,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
                                     occi_future.CONSOLE_LINK, \
                                     [], resource, vnc_console)
             vnc_console_link.attributes['occi.core.id'] = identifier
-            registry.add_resource(identifier, vnc_console_link)
+            registry.add_resource(identifier, vnc_console_link, extras)
 
             resource.links.append(vnc_console_link)
 
@@ -607,8 +595,8 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         elif isinstance(mixin, templates.OsTemplate):
             # do we need to check for new os rebuild in new?
             self._update_rebuild_vm(old, extras, instance, mixin)
-        elif isinstance(mixin, occi_future.SecurityGroupMixin):
-            #TODO(dizz): implement
+        elif isinstance(mixin, occi_future.UserSecurityGroupMixin):
+            #TODO(dizz): should we implement this here?
             LOG.info('Updating security rule group')
             raise exc.HTTPBadRequest()
         else:
@@ -664,7 +652,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         '''
         rebuilds the specified VM with the supplied OsTemplate mixin.
         '''
-        # L8R: Use the admin_password extension?
+        # TODO(dizz): Use the admin_password extension?
         LOG.info('Rebuild requested')
         image_href = mixin.os_id
         admin_password = utils.generate_password(FLAGS.password_length)
@@ -746,8 +734,8 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
             LOG.info('OS only allows one type of stop. \
                             What is specified in the request will be ignored.')
         try:
-            # L8R: There are issues with the stop and start methods of OS
-            #      For now we'll use suspend.
+            # TODO(dizz): There are issues with the stop and start methods of
+            #             OS. For now we'll use suspend.
             # self.compute_api.stop(context, instance)
             self.compute_api.suspend(context, instance)
         except Exception:

@@ -110,33 +110,38 @@ SEC_GROUP = core_model.Mixin(\
 
 
 # An extended Mixin, an extension
-class SecurityGroupMixin(core_model.Mixin):
-    def __init__(self, scheme, term, sec_grp_id, related=None, actions=None,
+# rename this.
+class UserSecurityGroupMixin(core_model.Mixin):
+    def __init__(self, scheme, term, related=None, actions=None,
                  title='', attributes=None, location=None):
-        super(SecurityGroupMixin, self).__init__(scheme, term, related,
+        super(UserSecurityGroupMixin, self).__init__(scheme, term, related,
                                                  actions, title,
                                                  attributes, location)
-        self.sec_grp_id = sec_grp_id
 
 
-class SecurityGroupBackend(backend.MixinBackend):
+class SecurityGroupBackend(backend.UserDefinedMixinBackend):
 
     def __init__(self):
         super(SecurityGroupBackend, self).__init__()
         self.compute_api = API()
         self.sgh = utils.import_object(FLAGS.security_group_handler)
 
-    def create(self, entity, extras):
+    def init_sec_group(self, category, extras):
+        #do not recreate default openstack security groups
+        if category.scheme == \
+                'http://schemas.openstack.org/infrastructure/security/group#':
+            return
+
         context = extras['nova_ctx']
 
-        group_name = entity.term.strip()
-        group_description = entity.title.strip() \
-            if entity.title else group_name
+        group_name = category.term.strip()
+        group_description = category.title.strip() \
+            if category.title else group_name
 
         self.compute_api.ensure_default_security_group(context)
         if db.security_group_exists(context, context.project_id, group_name):
-            raise exc.HTTPBadRequest(explanation=
-                            _('Security group %s already exists') % group_name)
+            raise exc.HTTPBadRequest(
+                explanation=_('Security group %s already exists') % group_name)
 
         group = {'user_id': context.user_id,
                  'project_id': context.project_id,
@@ -145,12 +150,12 @@ class SecurityGroupBackend(backend.MixinBackend):
         db.security_group_create(context, group)
         self.sgh.trigger_security_group_create_refresh(context, group)
 
-    def delete(self, entity, extras):
+    def destroy(self, category, extras):
         context = extras['nova_ctx']
-        security_group = self._get_sec_group(extras, entity)
+        security_group = self._get_sec_group(extras, category)
         if db.security_group_in_use(context, security_group.id):
-            raise exc.HTTPBadRequest(explanation=
-                                        _("Security group is still in use"))
+            raise exc.HTTPBadRequest(
+                            explanation=_("Security group is still in use"))
 
         db.security_group_destroy(context, security_group.id)
         self.sgh.trigger_security_group_destroy_refresh(
@@ -158,29 +163,14 @@ class SecurityGroupBackend(backend.MixinBackend):
 
     def _get_sec_group(self, extras, sec_mixin):
         '''
-        Retreive the security group associated with the security mixin.
+        Retreive the security group by name associated with the security mixin.
         '''
         try:
             sec_group = db.security_group_get_by_name(extras['nova_ctx'], \
                                  extras['nova_ctx'].project_id, sec_mixin.term)
         except Exception:
-            # ensure that an OpenStack sec group matches the mixin
-            # if not, create one.
-            # This has to be done as pyssf has no way to associate
-            # a handler for the creation of mixins at the query interface
-#            LOG.warn('The corresponsing OS security group was not found')
-#            LOG.warn('Creating an OS security group')
             LOG.error('Security group does not exist.')
             raise exc.HTTPBadRequest()
-#            for rel in sec_mixin.related:
-#                if rel == SEC_GROUP.scheme + SEC_GROUP.term:
-#                    _create_group(sec_mixin, extras,
-#                                  self.compute_api, self.sgh)
-#                else:
-#                    raise exc.HTTPBadRequest()
-#        finally:
-#            sec_group = db.security_group_get_by_name(extras['nova_ctx'], \
-#                                extras['nova_ctx'].project_id, sec_mixin.term)
 
         return sec_group
 
@@ -200,7 +190,7 @@ class SecurityRuleBackend(backend.KindBackend):
         '''
         LOG.info('Creating a network security rule')
 
-        sec_mixin = self._get_sec_mixin(entity, extras)
+        sec_mixin = self._get_sec_mixin(entity)
         security_group = self._get_sec_group(extras, sec_mixin)
         sg_rule = self._make_sec_rule(entity, security_group.id)
 
@@ -220,7 +210,8 @@ class SecurityRuleBackend(backend.KindBackend):
         sg_rule['id'] = random.randrange(0, 99999999)
         entity.attributes['occi.core.id'] = str(sg_rule['id'])
         sg_rule['parent_group_id'] = sec_grp_id
-        prot = entity.attributes['occi.network.security.protocol'].lower().strip()
+        prot = \
+            entity.attributes['occi.network.security.protocol'].lower().strip()
         if prot in ('tcp', 'udp', 'icmp'):
             sg_rule['protocol'] = prot
         else:
@@ -277,19 +268,16 @@ class SecurityRuleBackend(backend.KindBackend):
 
         return sec_group
 
-    def _get_sec_mixin(self, entity, extras):
+    def _get_sec_mixin(self, entity):
         '''
         Get the security mixin of the supplied entity.
         '''
         sec_mixin_present = 0
         sec_mixin = None
         for mixin in entity.mixins:
-
-            for rel in mixin.related:
-                if rel == SEC_GROUP.scheme + SEC_GROUP.term:
-                    sec_mixin = mixin
-                    sec_mixin_present = sec_mixin_present + 1
-                    break
+            if SEC_GROUP in mixin.related:
+                sec_mixin = mixin
+                sec_mixin_present = sec_mixin_present + 1
 
         if not sec_mixin_present:
             # no mixin of the type security group was found

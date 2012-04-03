@@ -151,7 +151,7 @@ class OsComputeActionBackend(backend.ActionBackend):
         elif action == OS_ALLOC_FLOATING_IP:
             self._os_allocate_floating_ip(entity, instance, context)
         elif action == OS_DEALLOC_FLOATING_IP:
-            self._os_deallocate_floating_ip(entity, instance, context)
+            self._os_deallocate_floating_ip(entity, context)
         else:
             raise exc.HTTPBadRequest()
 
@@ -238,8 +238,9 @@ class OsComputeActionBackend(backend.ActionBackend):
                                                     OS_FLOATING_IP_EXT.term:
                 #TODO(dizz): implement support for multiple floating ips
                 #            needs support in pyssf for URI in link
-                exc.HTTPBadRequest(explanation=
-                        _('There is already a floating IP assigned to the VM'))
+                exc.HTTPBadRequest(
+            explanation=_('There is already a floating IP assigned to the VM')
+                )
                 LOG.error('There is already a floating IP assigned to the VM')
 
         if 'org.openstack.network.floating.pool' not in entity.attributes:
@@ -256,7 +257,7 @@ class OsComputeActionBackend(backend.ActionBackend):
         entity.mixins.append(OS_FLOATING_IP_EXT)
         entity.attributes['org.openstack.network.floating.ip'] = address
 
-    def _os_deallocate_floating_ip(self, entity, instance, context):
+    def _os_deallocate_floating_ip(self, entity, context):
         '''
         This deallocates a floating ip from the compute resource.
         This returns the deallocated IP address to the pool.

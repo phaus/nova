@@ -24,11 +24,14 @@ class OsTemplate(core_model.Mixin):
     Represents the OS Template mechanism as per OCCI specification.
     An OS template is equivocal to an image in OpenStack
     '''
-    def __init__(self, scheme, term, os_id, related=None, actions=None,
+    def __init__(self, scheme, term, os_id=None, related=None, actions=None,
                  title='', attributes=None, location=None):
         super(OsTemplate, self).__init__(scheme, term, related, actions,
                                          title, attributes, location)
         self.os_id = os_id
+
+OS_TEMPLATE = OsTemplate('http://schemas.ogf.org/occi/infrastructure#',
+                                                                    'os_tpl')
 
 
 class ResourceTemplate(core_model.Mixin):
@@ -37,4 +40,10 @@ class ResourceTemplate(core_model.Mixin):
     An Resource template is equivocal to a flavor in OpenStack. Implemented
     as such for consistency with OsTemplate.
     '''
-    pass
+    def __init__(self, scheme, term, related=None, actions=None,
+                 title='', attributes=None, location=None):
+        super(ResourceTemplate, self).__init__(scheme, term, related, actions,
+                                         title, attributes, location)
+
+RES_TEMPLATE = ResourceTemplate('http://schemas.ogf.org/occi/infrastructure#',
+                                                                'resource_tpl')
