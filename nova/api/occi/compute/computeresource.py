@@ -414,16 +414,12 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
             resource.links.append(ssh_console_link)
 
         if not vnc_console_present:
-# TODO(dizz): implement
-#            import ipdb
-#            ipdb.set_trace()
-#            novnc, vnc+xvp,vmrc+credentials
-#            try:
-#                console = self.compute_api.get_vnc_console(extras['nova_ctx'],
-#                                                      instance,
-#                                                      'novnc')
-#            except:
-#                pass
+            try:
+                console = self.compute_api.get_vnc_console(extras['nova_ctx'],
+                                                      instance, 'novnc')
+            except Exception:
+                # console info is not available yet
+                return
 
             registry = extras['registry']
 
@@ -434,8 +430,7 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
                 title='')
             vnc_console.attributes['occi.core.id'] = identifier
             vnc_console.attributes['org.openstack.compute.console.vnc'] = \
-                                                    'http://' + address + ':80'
-#   console['url']
+                                                                console['url']
 
             registry.add_resource(identifier, vnc_console, extras)
 
@@ -683,7 +678,6 @@ class ComputeBackend(backend.KindBackend, backend.ActionBackend):
         # of computes known by occi, a call to get the latest representation
         # must be made.
         instance = self.retrieve(entity, extras)
-
         context = extras['nova_ctx']
 
         if action not in entity.actions:
