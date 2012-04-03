@@ -12,7 +12,7 @@ from nova import rpc
 
 from nova.image import fake
 
-from nova.api.occi.compute import computeresource
+from nova.api.occi.storage import storageresource
 from nova.api.occi.compute import templates
 from nova.api.occi import registry
 from nova.network import api as net_api
@@ -44,10 +44,10 @@ def fake_rpc_cast(context, topic, msg, do_cast=True):
         pass
 
 
-class TestOcciComputeResource(test.TestCase):
+class TestOcciStorageResource(test.TestCase):
 
     def setUp(self):
-        super(TestOcciComputeResource, self).setUp()
+        super(TestOcciStorageResource, self).setUp()
 
         # create sec context
         self.user_id = 'fake'
@@ -56,34 +56,21 @@ class TestOcciComputeResource(test.TestCase):
                                               self.project_id,
                                               is_admin=True)
 
-        # setup image service...
-        self.stubs.Set(image, 'get_image_service', occi.fake_get_image_service)
-        self.stubs.Set(fake._FakeImageService, 'show', occi.fake_show)
-        self.stubs.Set(rpc, 'cast', fake_rpc_cast)
-        self.stubs.Set(net_api.API, 'get_instance_nw_info',
-                       occi.fake_get_instance_nw_info)
         self.stubs.Set(registry.OCCIRegistry, 'get_resource',
                        occi.fake_get_resource)
-        from nova import compute
-        self.stubs.Set(compute.API, 'get',
-                       occi.fake_compute_get)
+        from nova import volume
+        self.stubs.Set(volume.API, 'get',
+                       occi.fake_storage_get)
 
         # OCCI related setup
-        self.os_template = templates.OsTemplate(
-                                'http://schemas.openstack.org/template/os#',
-                                'foo', '1')
-        self.resource_template = templates.ResourceTemplate(
-                            'http://schemas.openstack.org/template/resource#',
-                            'm1.small')
-
-        self.entity = Entity("123", 'A test entity', None,
-                             [self.os_template, self.resource_template])
-        self.entity.attributes['occi.core.id'] = '123-123-123'
-        self.entity.links = []
+        self.entity = Entity("123", 'A test entity', None, [])
+        self.entity.attributes['occi.storage.size'] = '1.0'
+        self.entity.attributes['occi.core.id'] = '321'
+        self.reg = registry.OCCIRegistry()
         self.extras = {'nova_ctx': self.context,
-                       'registry': registry.OCCIRegistry()}
+                       'registry': self.reg}
 
-        self.class_under_test = computeresource.ComputeBackend()
+        self.class_under_test = storageresource.StorageBackend()
 
     #---------------------------------------------------------- Test for succes
 
@@ -95,7 +82,7 @@ class TestOcciComputeResource(test.TestCase):
 
     def test_retrieve_for_success(self):
         self.class_under_test.retrieve(self.entity, self.extras)
-
+#
 #    def test_update_for_success(self):
 #        self.fail('To be implemented...')
 #

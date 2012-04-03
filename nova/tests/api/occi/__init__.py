@@ -78,3 +78,15 @@ def fake_get_resource(meh, key, extras):
 
 def fake_security_group_get_by_project(ctx, proj_id):
     return [{'name':'grp1'}, {'name':'grp2'}]
+
+def fake_compute_get(meh, ct, uid):
+    instance = {}
+    instance['vm_state'] = 'active'
+    return instance
+
+def fake_storage_get(meh, ct, uid):
+    instance = {}
+    instance['id'] = '321321'
+    instance['size'] = '1.0'
+    instance['status'] = 'available'
+    return instance

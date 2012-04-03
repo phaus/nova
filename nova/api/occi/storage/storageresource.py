@@ -41,6 +41,10 @@ class StorageBackend(backend.KindBackend, backend.ActionBackend):
 
     def create(self, resource, extras):
         """Creates a new volume."""
+
+        if 'occi.storage.size' not in resource.attributes:
+            exc.HTTPBadRequest()
+
         size = float(resource.attributes['occi.storage.size'])
 
         # TODO(dizz): A blueprint?
