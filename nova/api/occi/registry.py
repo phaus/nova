@@ -24,6 +24,12 @@ class OCCIRegistry(registry.NonePersistentRegistry):
     Simple SSF registry for OpenStack.
     '''
 
+    def get_extras(self, extras):
+        sec_extras = {}
+        sec_extras['user_id'] = extras['nova_ctx'].user_id
+        sec_extras['project_id'] = extras['nova_ctx'].project_id
+        return sec_extras
+
     def add_resource(self, key, resource, extras):
         '''
         Ensures OpenStack keys are used as resource identifiers and sets
@@ -33,15 +39,11 @@ class OCCIRegistry(registry.NonePersistentRegistry):
         resource.identifier = key
 
         if extras:
-            resource.extras = {}
-            resource.extras['user_id'] = extras['nova_ctx'].user_id
-            resource.extras['project_id'] = extras['nova_ctx'].project_id
+            resource.extras = self.get_extras(extras)
 
         super(OCCIRegistry, self).add_resource(key, resource, extras)
 
     def delete_mixin(self, mixin, extras):
-        import ipdb
-        ipdb.set_trace()
         if hasattr(mixin, 'related') and \
                                     occi_future.SEC_GROUP in mixin.related:
             be = self.get_backend(mixin, extras)
@@ -54,9 +56,7 @@ class OCCIRegistry(registry.NonePersistentRegistry):
         Assigns user id and tenant id to user defined mixins
         '''
         if extras:
-            category.extras = {}
-            category.extras['user_id'] = extras['nova_ctx'].user_id
-            category.extras['project_id'] = extras['nova_ctx'].project_id
+            category.extras = self.get_extras(extras)
 
         if hasattr(category, 'related') and \
                                     occi_future.SEC_GROUP in category.related:
