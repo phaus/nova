@@ -124,3 +124,60 @@ def fake_storage_get(meh, ct, uid):
 
 def fake_storage_delete(meh, ctx, vol):
     pass
+
+def fake_compute_set_admin_password(meh, context, instance, new_password):
+    pass
+
+def fake_compute_revert_resize(meh, context, instance):
+    pass
+
+def fake_compute_confirm_resize(meh, context, instance):
+    pass
+
+def fake_compute_snapshot(meh, context, instance, image_name, extra_properties):
+    pass
+
+def fake_compute_associate_floating_ip(meh, context, instance, address):
+    pass
+
+def fake_network_allocate_floating_ip(meh, context, pool):
+    pass
+
+def fake_network_disassociate_floating_ip(meh, context, address):
+    pass
+
+def fake_network_release_floating_ip(meh, context, address):
+    pass
+
+def fake_db_security_group_get_by_name(ctx, project_id, name):
+    security_group = {}
+    security_group['id'] = '12'
+    security_group['rules'] = []
+    return security_group
+
+def fake_db_security_group_in_use(context, security_group_id):
+    return False
+
+def fake_db_security_group_rule_get(context, id):
+    rule = {}
+    rule['occi.core.id'] = '123-123-123'
+    rule['occi.network.security.protocol'] = 'tcp'
+    rule['occi.network.security.to'] = '22'
+    rule['occi.network.security.from'] = '22'
+    rule['occi.network.security.range'] = '0.0.0.0/24'
+    rule['parent_group_id'] = 12
+    rule['id'] = 12
+    return rule
+
+def fake_db_security_group_get(context, id):
+    security_group = {}
+    security_group['id'] = '12'
+    security_group['rules'] = []
+    return security_group
+
+def fake_db_security_group_rule_destroy(context, id):
+    pass
+
+def fake_compute_trigger_security_group_rules_refresh(meh, context,
+                                                        security_group_id):
+    pass

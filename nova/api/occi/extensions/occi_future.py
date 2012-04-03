@@ -153,13 +153,13 @@ class SecurityGroupBackend(backend.UserDefinedMixinBackend):
     def destroy(self, category, extras):
         context = extras['nova_ctx']
         security_group = self._get_sec_group(extras, category)
-        if db.security_group_in_use(context, security_group.id):
+        if db.security_group_in_use(context, security_group['id']):
             raise exc.HTTPBadRequest(
                             explanation=_("Security group is still in use"))
 
-        db.security_group_destroy(context, security_group.id)
+        db.security_group_destroy(context, security_group['id'])
         self.sgh.trigger_security_group_destroy_refresh(
-            context, security_group.id)
+            context, security_group['id'])
 
     def _get_sec_group(self, extras, sec_mixin):
         '''
@@ -192,7 +192,7 @@ class SecurityRuleBackend(backend.KindBackend):
 
         sec_mixin = self._get_sec_mixin(entity)
         security_group = self._get_sec_group(extras, sec_mixin)
-        sg_rule = self._make_sec_rule(entity, security_group.id)
+        sg_rule = self._make_sec_rule(entity, security_group['id'])
 
         if self._security_group_rule_exists(security_group, sg_rule):
             #This rule already exists in group
@@ -252,19 +252,8 @@ class SecurityRuleBackend(backend.KindBackend):
             # if not, create one.
             # This has to be done as pyssf has no way to associate
             # a handler for the creation of mixins at the query interface
-#            LOG.warn('The corresponsing OS security group was not found')
-#            LOG.warn('Creating an OS security group')
             LOG.error('Security group does not exist.')
             raise exc.HTTPBadRequest()
-#            for rel in sec_mixin.related:
-#                if rel == SEC_GROUP.scheme + SEC_GROUP.term:
-#                    _create_group(sec_mixin, extras,
-#                                  self.compute_api, self.sgh)
-#                else:
-#                    raise exc.HTTPBadRequest()
-#        finally:
-#            sec_group = db.security_group_get_by_name(extras['nova_ctx'], \
-#                                extras['nova_ctx'].project_id, sec_mixin.term)
 
         return sec_group
 
@@ -294,7 +283,7 @@ class SecurityRuleBackend(backend.KindBackend):
         """Indicates whether the specified rule values are already
            defined in the given security group.
         """
-        for rule in security_group.rules:
+        for rule in security_group['rules']:
             is_duplicate = True
             keys = ('group_id', 'cidr', 'from_port', 'to_port', 'protocol')
             for key in keys:
@@ -317,7 +306,7 @@ class SecurityRuleBackend(backend.KindBackend):
         except Exception:
             raise exc.HTTPNotFound()
 
-        group_id = rule.parent_group_id
+        group_id = rule['parent_group_id']
         self.compute_api.ensure_default_security_group(extras['nova_ctx'])
         security_group = db.security_group_get(extras['nova_ctx'], group_id)
 
@@ -326,4 +315,4 @@ class SecurityRuleBackend(backend.KindBackend):
             extras['nova_ctx'], [rule['id']])
         self.compute_api.trigger_security_group_rules_refresh(
                                                         extras['nova_ctx'],
-                                    security_group_id=security_group['id'])
+                                                        security_group['id'])

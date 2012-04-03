@@ -71,10 +71,11 @@ OS_CONFIRM_RESIZE = core_model.Action(
                  'confirm_resize', 'Use this to confirm the resize action')
 
 # OS create image from VM action
+_OS_CREATE_IMAGE_ATTRIBUTES = {'org.openstack.snapshot.image_name': '', }
 OS_CREATE_IMAGE = core_model.Action(
                 'http://schemas.openstack.org/instance/action#',
                  'create_image', 'Creates a new image for the given server.',
-                 {'image_name': ''})
+                 _OS_CREATE_IMAGE_ATTRIBUTES)
 
 # OS Key pair extension
 _OS_KEY_PAIR_ATTRIBUTES = {'org.openstack.credentials.publickey.name': '',
@@ -211,7 +212,7 @@ class OsComputeActionBackend(backend.ActionBackend):
         '''
         LOG.info('Creating image from virtual machine with id' + \
                                                             entity.identifier)
-        if 'occi.compute.image.name' not in entity.attributes:
+        if 'org.openstack.snapshot.image_name' not in entity.attributes:
             exc.HTTPBadRequest()
 
         image_name = entity.attributes['org.openstack.snapshot.image_name']
