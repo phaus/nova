@@ -367,7 +367,7 @@ class LibvirtConnection(driver.ComputeDriver):
                         is_okay = True
 
                 if not is_okay:
-                    LOG.warning(_("Error from libvirt during destroy. "
+                    LOG.error(_("Error from libvirt during destroy. "
                                   "Code=%(errcode)s Error=%(e)s") %
                                 locals(), instance=instance)
                     raise
@@ -379,7 +379,7 @@ class LibvirtConnection(driver.ComputeDriver):
                     virt_dom.managedSaveRemove(0)
             except libvirt.libvirtError as e:
                 errcode = e.get_error_code()
-                LOG.warning(_("Error from libvirt during saved instance "
+                LOG.error(_("Error from libvirt during saved instance "
                               "removal. Code=%(errcode)s Error=%(e)s") %
                             locals(), instance=instance)
 
@@ -390,7 +390,7 @@ class LibvirtConnection(driver.ComputeDriver):
                 virt_dom.undefine()
             except libvirt.libvirtError as e:
                 errcode = e.get_error_code()
-                LOG.warning(_("Error from libvirt during undefine. "
+                LOG.error(_("Error from libvirt during undefine. "
                               "Code=%(errcode)s Error=%(e)s") %
                             locals(), instance=instance)
                 raise
@@ -414,7 +414,7 @@ class LibvirtConnection(driver.ComputeDriver):
                                                    network_info=network_info)
         except libvirt.libvirtError as e:
             errcode = e.get_error_code()
-            LOG.warning(_("Error from libvirt during unfilter. "
+            LOG.error(_("Error from libvirt during unfilter. "
                           "Code=%(errcode)s Error=%(e)s") %
                         locals(), instance=instance)
             reason = "Error unfiltering instance."
@@ -592,7 +592,11 @@ class LibvirtConnection(driver.ComputeDriver):
 
         (image_service, image_id) = nova.image.get_image_service(
             context, instance['image_ref'])
-        base = image_service.show(context, image_id)
+        try:
+            base = image_service.show(context, image_id)
+        except exception.ImageNotFound:
+            base = {}
+
         _image_service = nova.image.get_image_service(context, image_href)
         snapshot_image_service, snapshot_image_id = _image_service
         snapshot = snapshot_image_service.show(context, snapshot_image_id)
@@ -608,7 +612,7 @@ class LibvirtConnection(driver.ComputeDriver):
                                    'ramdisk_id': instance['ramdisk_id'],
                                    }
                     }
-        if 'architecture' in base['properties']:
+        if 'architecture' in base.get('properties', {}):
             arch = base['properties']['architecture']
             metadata['properties']['architecture'] = arch
 
@@ -671,7 +675,7 @@ class LibvirtConnection(driver.ComputeDriver):
                          instance=instance)
                 return
             else:
-                LOG.info(_("Failed to soft reboot instance."),
+                LOG.warn(_("Failed to soft reboot instance."),
                          instance=instance)
         return self._hard_reboot(instance, network_info)
 
@@ -955,9 +959,7 @@ class LibvirtConnection(driver.ComputeDriver):
         else:
             raise exception.Error(_("Guest does not have a console available"))
 
-        console_log = os.path.join(FLAGS.instances_path, instance['name'],
-                                   'console.log')
-        libvirt_utils.chown(console_log, os.getuid())
+        self._chown_console_log_for_instance(instance['name'])
         data = self._flush_libvirt_console(pty)
         fpath = self._append_to_file(data, console_log)
 
@@ -986,7 +988,13 @@ class LibvirtConnection(driver.ComputeDriver):
 
     @staticmethod
     def _supports_direct_io(dirpath):
+
+        if not hasattr(os, 'O_DIRECT'):
+            LOG.debug("This python runtime does not support direct I/O")
+            return False
+
         testfile = os.path.join(dirpath, ".directio.test")
+
         hasDirectIO = True
         try:
             f = os.open(testfile, os.O_CREAT | os.O_WRONLY | os.O_DIRECT)
@@ -1047,7 +1055,8 @@ class LibvirtConnection(driver.ComputeDriver):
             @utils.synchronized(fname)
             def call_if_not_exists(base, fn, *args, **kwargs):
                 if not os.path.exists(base):
-                    fn(target=base, *args, **kwargs)
+                    with utils.remove_path_on_error(base):
+                        fn(target=base, *args, **kwargs)
 
             if cow or not generating:
                 call_if_not_exists(base, fn, *args, **kwargs)
@@ -1063,8 +1072,9 @@ class LibvirtConnection(driver.ComputeDriver):
                         size_gb = size / (1024 * 1024 * 1024)
                         cow_base += "_%d" % size_gb
                         if not os.path.exists(cow_base):
-                            libvirt_utils.copy_image(base, cow_base)
-                            disk.extend(cow_base, size)
+                            with utils.remove_path_on_error(cow_base):
+                                libvirt_utils.copy_image(base, cow_base)
+                                disk.extend(cow_base, size)
                     libvirt_utils.create_cow_image(cow_base, target)
                 elif not generating:
                     libvirt_utils.copy_image(base, target)
@@ -1074,7 +1084,8 @@ class LibvirtConnection(driver.ComputeDriver):
                     if size:
                         disk.extend(target, size)
 
-            copy_and_extend(cow, generating, base, target, size)
+            with utils.remove_path_on_error(target):
+                copy_and_extend(cow, generating, base, target, size)
 
     @staticmethod
     def _create_local(target, local_size, unit='G',
@@ -1099,6 +1110,13 @@ class LibvirtConnection(driver.ComputeDriver):
         libvirt_utils.create_image('raw', target, '%dM' % swap_mb)
         libvirt_utils.mkfs('swap', target)
 
+    @staticmethod
+    def _chown_console_log_for_instance(instance_name):
+        console_log = os.path.join(FLAGS.instances_path, instance_name,
+                                   'console.log')
+        if os.path.exists(console_log):
+            libvirt_utils.chown(console_log, os.getuid())
+
     def _create_image(self, context, instance, libvirt_xml, suffix='',
                       disk_images=None, network_info=None,
                       block_device_info=None):
@@ -1120,6 +1138,9 @@ class LibvirtConnection(driver.ComputeDriver):
         if FLAGS.libvirt_type == 'lxc':
             container_dir = '%s/rootfs' % basepath(suffix='')
             libvirt_utils.ensure_tree(container_dir)
+
+        # NOTE(dprince): for rescue console.log may already exist... chown it.
+        self._chown_console_log_for_instance(instance['name'])
 
         # NOTE(vish): No need add the suffix to console.log
         libvirt_utils.write_to_file(basepath('console.log', ''), '', 007)
@@ -1234,8 +1255,9 @@ class LibvirtConnection(driver.ComputeDriver):
                               project_id=instance['project_id'],)
         elif config_drive:
             label = 'config'
-            self._create_local(basepath('disk.config'), 64, unit='M',
-                               fs_format='msdos', label=label)  # 64MB
+            with utils.remove_path_on_error(basepath('disk.config')):
+                self._create_local(basepath('disk.config'), 64, unit='M',
+                                   fs_format='msdos', label=label)  # 64MB
 
         if instance['key_data']:
             key = str(instance['key_data'])
@@ -1362,7 +1384,6 @@ class LibvirtConnection(driver.ComputeDriver):
         root_device_name = driver.block_device_info_get_root(block_device_info)
         if root_device_name:
             root_device = block_device.strip_dev(root_device_name)
-            xml_info['root_device_name'] = root_device_name
         else:
             # NOTE(yamahata):
             # for nova.api.ec2.cloud.CloudController.get_metadata()
@@ -2369,6 +2390,9 @@ class LibvirtConnection(driver.ComputeDriver):
                               locals())
                 else:
                     raise
+            except exception.InstanceNotFound:
+                # Instance was deleted during the check so ignore it
+                pass
 
         # Disk available least size
         available_least_size = dk_sz_gb * (1024 ** 3) - instances_sz

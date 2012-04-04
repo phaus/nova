@@ -1002,16 +1002,20 @@ def fixed_ip_disassociate_all_by_timeout(context, host, time):
     host_filter = or_(and_(models.Instance.host == host,
                            models.Network.multi_host == True),
                       models.Network.host == host)
-    fixed_ips = model_query(context, models.FixedIp, session=session,
-                       read_deleted="yes").\
-                      filter(models.FixedIp.updated_at < time).\
-                      filter(models.FixedIp.instance_id != None).\
-                      filter(models.FixedIp.allocated == False).\
-                      filter(host_filter).\
-                      all()
-    fixed_ip_ids = [fip.id for fip in fixed_ips]
-    result = model_query(context, models.FixedIp, session=session,
-                         read_deleted="yes").\
+    result = session.query(models.FixedIp.id).\
+                     filter(models.FixedIp.deleted == False).\
+                     filter(models.FixedIp.allocated == False).\
+                     filter(models.FixedIp.updated_at < time).\
+                     join((models.Network,
+                           models.Network.id == models.FixedIp.network_id)).\
+                     join((models.Instance,
+                           models.Instance.id == models.FixedIp.instance_id)).\
+                     filter(host_filter).\
+                     all()
+    fixed_ip_ids = [fip[0] for fip in result]
+    if not fixed_ip_ids:
+        return 0
+    result = model_query(context, models.FixedIp, session=session).\
                      filter(models.FixedIp.id.in_(fixed_ip_ids)).\
                      update({'instance_id': None,
                              'leased': False,
@@ -2237,6 +2241,9 @@ def quota_get_all_by_project(context, project_id):
 
 @require_admin_context
 def quota_create(context, project_id, resource, limit):
+    # NOTE: Treat -1 as unlimited for consistency w/ flags
+    if limit == -1:
+        limit = None
     quota_ref = models.Quota()
     quota_ref.project_id = project_id
     quota_ref.resource = resource
@@ -2247,6 +2254,9 @@ def quota_create(context, project_id, resource, limit):
 
 @require_admin_context
 def quota_update(context, project_id, resource, limit):
+    # NOTE: Treat -1 as unlimited for consistency w/ flags
+    if limit == -1:
+        limit = None
     session = get_session()
     with session.begin():
         quota_ref = quota_get(context, project_id, resource, session=session)
@@ -2651,6 +2661,13 @@ def snapshot_get(context, snapshot_id, session=None):
 @require_admin_context
 def snapshot_get_all(context):
     return model_query(context, models.Snapshot).all()
+
+
+@require_context
+def snapshot_get_all_for_volume(context, volume_id):
+    return model_query(context, models.Snapshot, read_deleted='no',
+                       project_only=True).\
+              filter_by(volume_id=volume_id).all()
 
 
 @require_context
