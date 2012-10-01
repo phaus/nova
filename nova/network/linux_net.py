@@ -800,7 +800,8 @@ def restart_dhcp(context, dev, network_ref):
 
     """
     conffile = _dhcp_file(dev, 'conf')
-
+    # HXO: Disabled for now to make smartos work
+    return 
     if FLAGS.use_single_default_gateway:
         # NOTE(vish): this will have serious performance implications if we
         #             are not in multi_host mode.

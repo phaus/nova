@@ -19,7 +19,9 @@ import inspect
 import math
 import time
 from xml.dom import minidom
-from xml.parsers import expat
+# HXO: Disabled for now to make smartos work
+# pyexpat does not seem to work on SmartOS. Will look into into it later
+#from xml.parsers import expat
 
 from lxml import etree
 import webob

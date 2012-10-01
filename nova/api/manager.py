@@ -39,4 +39,6 @@ class MetadataManager(manager.Manager):
         Currently, we only add an iptables filter rule for the metadata
         service.
         """
-        self.network_driver.metadata_accept()
+        # HXO: Disabled for now to make smartos work
+        #self.network_driver.metadata_accept()
+        pass
