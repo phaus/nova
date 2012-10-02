@@ -277,12 +277,12 @@ def upgrade(migrate_engine):
         Column('updated_at', DateTime),
         Column('deleted_at', DateTime),
         Column('deleted', Boolean),
-        Column('domain', String(length=512), primary_key=True, nullable=False),
+        Column('domain', String(length=255), primary_key=True, nullable=False),
         Column('scope', String(length=255)),
         Column('availability_zone', String(length=255)),
         Column('project_id', String(length=255), ForeignKey('projects.id')),
         mysql_engine='InnoDB',
-        #mysql_charset='utf8'
+        mysql_charset='utf8'
     )
 
     fixed_ips = Table('fixed_ips', meta,
