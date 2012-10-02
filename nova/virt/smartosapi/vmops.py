@@ -57,7 +57,7 @@ class SmartOSOps(object):
 	 image_temp_target = "/tmp/%s-tmp-img" % image_uuid
          if not self.check_image_exists_locally(image_uuid):
              LOG.debug("Fetching image from glance")
-             images.fetch(context, image_uuid, image_temp_target, user_id, tenant_id)
+             images.fetch_to_raw(context, image_uuid, image_temp_target, user_id, tenant_id)
              # Decide wether image is smartos zone or kvm disk
              if zone:
                  LOG.debug("Doing the -zone- thing")
@@ -68,7 +68,9 @@ class SmartOSOps(object):
                  #utils.delete_if_exists(manifest_file)
              else:
                  LOG.debug("Doing the -KVM- thing")
-                 image_size_in_mb = (int(image_size) / 1024 / 1024) + 1
+                 # Get the actual file sizse from file (the image might have been converted from qcow2 to raw)
+                 # and thus become bigger
+                 image_size_in_mb = (int(os.path.getsize(image_temp_target)) / 1024 / 1024) + 1
 	         #utils.execute("zfs","create","zones/%s" % image_uuid)
                  utils.execute("zfs","create","-V","%sM" % image_size_in_mb,"zones/%s" % image_uuid)
                  utils.execute("dd","if=%s" % image_temp_target, "of=/dev/zvol/rdsk/zones/%s" % image_uuid)
