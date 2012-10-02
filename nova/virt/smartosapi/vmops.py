@@ -170,8 +170,8 @@ class SmartOSOps(object):
          image_id = str(uuid.UUID(image_meta['id']))
          image_size =image_meta['size']
          # TODO: Actually check key and value
-         zone = image_meta['properties'].has_key('zone')
-         # == 'true'
+         zone = image_meta['properties'].has_key('zone') and image_meta['properties']['zone'] == 'true'
+         LOG.debug("-- HXO: zone %s" % zone)
          self.ensure_image_created(context, image_id, image_size, zone, instance['user_id'], instance['project_id'])
          startinfo = {}
          if zone:
