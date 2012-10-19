@@ -1,3 +1,4 @@
+# coding=utf-8
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
 # Copyright (c) 2012 Hendrik Volkmer
@@ -20,6 +21,7 @@ from nova import utils
 
 LOG = logging.getLogger(__name__)
 
+
 class VmDriver(object):
 
     def __init__(self, instance, image, nics):
@@ -30,10 +32,11 @@ class VmDriver(object):
 
     def boot(self):
         LOG.debug("-- HXO -- booting")
-        # TODO: Writing to the filesystem should be made optional (for debugging only)
+        # TODO: Writing to the filesystem should be made optional (for dbg
+        # only)
         # later on. vmadm supports STDIN
-        machine_file =  "/tmp/machine-%s.json" % self.instance['uuid']
+        machine_file = "/tmp/machine-%s.json" % self.instance['uuid']
         with open(machine_file, "w") as f:
             f.write(jsonutils.dumps(self.startinfo()))
-        utils.execute("vmadm","create", "-f", machine_file)
+        utils.execute("vmadm", "create", "-f", machine_file)
         LOG.debug("-- HXO -- done booting")

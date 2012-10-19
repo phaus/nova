@@ -1,6 +1,7 @@
+# coding=utf-8
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright (c) 2012 Hendrik Volkmer
+# Copyright (c) 2012 Hendrik Volkmer, Thijs Metsch
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -14,22 +15,23 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from nova.virt.smartosapi.vm_driver import VmDriver
+from nova.virt.smartosapi import vm_driver
 
-class KVMDriver(VmDriver):
 
-	def startinfo(self):
-		return {
+class KVMDriver(vm_driver.VmDriver):
+
+    def startinfo(self):
+        return {
            "brand": "kvm",
            "default-gateway": "192.168.2.1",
            "resolvers": [
              "208.67.222.222",
              "8.8.4.4"
              ],
-	           "ram": self.instance['memory_mb'],
-	           "vcpus": self.instance['vcpus'],
-	           "uuid": self.instance['uuid'],
-	           "nics": [
+               "ram": self.instance['memory_mb'],
+               "vcpus": self.instance['vcpus'],
+               "uuid": self.instance['uuid'],
+               "nics": [
              {
                "nic_tag": "admin",
                "ip": self.nics["ips"][0]["ip"],

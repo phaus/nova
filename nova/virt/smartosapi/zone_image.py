@@ -1,3 +1,4 @@
+# coding=utf-8
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
 # Copyright (c) 2012 Hendrik Volkmer
@@ -14,21 +15,21 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import os
-
 from nova.openstack.common import log as logging
 from nova import utils
-from nova.virt.smartosapi.image import Image
+from nova.virt.smartosapi import image
 
 LOG = logging.getLogger(__name__)
 
-class ZoneImage(Image):
+
+class ZoneImage(image.Image):
 
     def register_image(self):
         LOG.debug("Doing the -zone- thing")
         manifest_file = "/tmp/%s-manifest.json" % self.image_uuid
         self.write_manifest_file(manifest_file)
-        utils.execute("imgadm","install","-m", manifest_file, "-f", self.image_temp_target)
+        utils.execute("imgadm", "install", "-m", manifest_file, "-f",
+            self.image_temp_target)
         LOG.debug("zone image registered via %s" % manifest_file)
 
         #utils.delete_if_exists(manifest_file)

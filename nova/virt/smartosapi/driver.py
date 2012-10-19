@@ -1,6 +1,7 @@
+# coding=utf-8
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright (c) 2012 Hendrik Volkmer
+# Copyright (c) 2012 Hendrik Volkmer, Thijs Metsch
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -16,23 +17,14 @@
 
 """
 A connection to the SmartOS VM management system (vmadm)
-
-
 """
 
-import time
-
-from eventlet import event
-
-from nova import context
 from nova import db
 from nova import exception
 from nova import flags
 from nova.openstack.common import log as logging
-from nova.openstack.common import cfg
 from nova.openstack.common import jsonutils
 
-from nova import utils
 from nova.virt import driver
 from nova.virt.smartosapi import vmops
 
@@ -75,10 +67,8 @@ class SmartOSDriver(driver.ComputeDriver):
         """List VM instances."""
         return self._vmops.list_instances()
 
-    def spawn(self, context, instance, image_meta,
-                              injected_files, admin_password,
-                              network_info,
-                              block_device_info=None):
+    def spawn(self, context, instance, image_meta, injected_files,
+              admin_password, network_info=None, block_device_info=None):
         """Create VM instance."""
         self._vmops.spawn(context, instance, image_meta, network_info)
 
@@ -86,7 +76,8 @@ class SmartOSDriver(driver.ComputeDriver):
         """Create snapshot from a running VM instance."""
         self._vmops.snapshot(context, instance, name)
 
-    def reboot(self, instance, network_info, reboot_type):
+    def reboot(self, instance, network_info, reboot_type,
+               block_device_info=None):
         """Reboot VM instance."""
         self._vmops.reboot(instance, network_info)
 
@@ -147,16 +138,15 @@ class SmartOSDriver(driver.ComputeDriver):
                 'username': FLAGS.vmwareapi_host_username,
                 'password': FLAGS.vmwareapi_host_password}
 
-
     def get_disk_available_least(self):
         return 100
 
     def update_available_resource(self, ctxt, host):
         """Updates compute manager resource info on ComputeNode table.
-	   This method is called as an periodic tasks and is used only
-		  in live migration currently.
-			 :param ctxt: security context
-				:param host: hostname that compute manager is currently running
+       This method is called as an periodic tasks and is used only
+          in live migration currently.
+             :param ctxt: security context
+                :param host: hostname that compute manager is currently running
         """
 
         try:
@@ -166,11 +156,11 @@ class SmartOSDriver(driver.ComputeDriver):
 
         # Updating host information
         dic = {'vcpus': self.get_vcpu_total(),
-	       'memory_mb': self.get_memory_mb_total(),
-	       'local_gb': self.get_local_gb_total(),
+           'memory_mb': self.get_memory_mb_total(),
+           'local_gb': self.get_local_gb_total(),
            'vcpus_used': self.get_vcpu_used(),
-	   'memory_mb_used': self.get_memory_mb_used(),
-	   'local_gb_used': self.get_local_gb_used(),
+       'memory_mb_used': self.get_memory_mb_used(),
+       'local_gb_used': self.get_local_gb_used(),
            'hypervisor_type': self.get_hypervisor_type(),
            'hypervisor_version': self.get_hypervisor_version(),
            'cpu_info': self.get_cpu_info(),
@@ -179,7 +169,7 @@ class SmartOSDriver(driver.ComputeDriver):
 
         compute_node_ref = service_ref['compute_node']
         if not compute_node_ref:
-	    LOG.info(_('Compute_service record created for %s ') % host)
+            LOG.info(_('Compute_service record created for %s ') % host)
             db.compute_node_create(ctxt, dic)
         else:
             LOG.info(_('Compute_service record updated for %s ') % host)
@@ -231,7 +221,7 @@ class SmartOSDriver(driver.ComputeDriver):
         if not self._host_state:
             self._host_state = HostState(self.read_only)
         return self._host_state
- 
+
     def get_host_stats(self, refresh=False):
         """Return currently known host stats"""
         return self.host_state.get_host_stats(refresh=refresh)
@@ -251,8 +241,8 @@ class SmartOSDriver(driver.ComputeDriver):
 
     @staticmethod
     def get_vcpu_used():
-        # vmadm list -o vcpus 
-	return 0
+        # vmadm list -o vcpus
+        return 0
 
     @staticmethod
     def get_cpu_info():
@@ -283,7 +273,7 @@ class SmartOSDriver(driver.ComputeDriver):
     def get_memory_mb_total():
         # prtconf |grep -i mem
         return 12000
- 
+
     @staticmethod
     def get_memory_mb_used():
         #  echo ::memstat | mdb -k
@@ -294,18 +284,18 @@ class SmartOSDriver(driver.ComputeDriver):
         # zpool list -p zones
         return 0
 
-   
     @staticmethod
     def get_local_gb_total():
         return 20
-    
+
     @staticmethod
     def get_hypervisor_type():
         return "kvm"
 
     @staticmethod
     def get_hypervisor_version():
-       return 1
+        return 1
+
 
 class HostState(object):
     """Manages information about the compute node through libvirt"""
@@ -329,12 +319,11 @@ class HostState(object):
         LOG.debug(_("Updating host stats"))
         if self.connection is None:
             self.connection = get_connection(self.read_only)
-        data = {}
-        data["vcpus"] = self.connection.get_vcpu_total()
-        data["vcpus_used"] = self.connection.get_vcpu_used()
-        data["cpu_info"] = jsonutils.loads(self.connection.get_cpu_info())
-        data["disk_total"] = self.connection.get_local_gb_total()
-        data["disk_used"] = self.connection.get_local_gb_used()
+        data = {"vcpus": self.connection.get_vcpu_total(),
+                "vcpus_used": self.connection.get_vcpu_used(),
+                "cpu_info": jsonutils.loads(self.connection.get_cpu_info()),
+                "disk_total": self.connection.get_local_gb_total(),
+                "disk_used": self.connection.get_local_gb_used()}
         data["disk_available"] = data["disk_total"] - data["disk_used"]
         data["host_memory_total"] = self.connection.get_memory_mb_total()
         data["host_memory_free"] = (data["host_memory_total"] -
@@ -345,4 +334,3 @@ class HostState(object):
         self._stats = data
 
         return data
-

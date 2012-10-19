@@ -1,3 +1,4 @@
+# coding=utf-8
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
 # Copyright (c) 2012 Hendrik Volkmer
@@ -16,14 +17,15 @@
 
 from nova.virt.smartosapi.vm_driver import VmDriver
 
+
 class ZoneDriver(VmDriver):
 
-     def startinfo(self):
-     	return {
+    def startinfo(self):
+        return {
            "brand": "joyent",
            "hostname": (self.instance['server_name'] or self.instance['uuid']),
            "max_physical_memory": self.instance['memory_mb'],
-           "dataset_uuid": self.image_id ,
+           "dataset_uuid": self.image_id,
            "internal_metadata": {
              "created_by_openstack": True,
              },
