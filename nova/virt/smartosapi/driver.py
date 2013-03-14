@@ -182,9 +182,10 @@ class SmartOSDriver(driver.ComputeDriver):
         "supports_recreate": True,
         }
 
-    def __init__(self):
+    def __init__(self, virtapi, read_only=False):
+        super(SmartOSDriver, self).__init__(virtapi)
         self._host_state = None
-        self.read_only = False
+        self.read_only = read_only
         self._vmops = vmops.SmartOSOps()
 
     def init_host(self, host):
