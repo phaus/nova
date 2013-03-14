@@ -266,40 +266,40 @@ class SmartOSDriver(driver.ComputeDriver):
     def get_disk_available_least(self):
         return 100
 
-    def update_available_resource(self, ctxt, host):
-        """Updates compute manager resource info on ComputeNode table.
-       This method is called as an periodic tasks and is used only
-          in live migration currently.
-             :param ctxt: security context
-                :param host: hostname that compute manager is currently running
-        """
-
-        try:
-            service_ref = db.service_get_all_compute_by_host(ctxt, host)[0]
-        except exception.NotFound:
-            raise exception.ComputeServiceUnavailable(host=host)
-
-        # Updating host information
-        dic = {'vcpus': self.get_vcpu_total(),
-           'memory_mb': self.get_memory_mb_total(),
-           'local_gb': self.get_local_gb_total(),
-           'vcpus_used': self.get_vcpu_used(),
-       'memory_mb_used': self.get_memory_mb_used(),
-       'local_gb_used': self.get_local_gb_used(),
-           'hypervisor_type': self.get_hypervisor_type(),
-           'hypervisor_version': self.get_hypervisor_version(),
-           'hypervisor_hostname': self.get_hypervisor_hostname(),
-           'cpu_info': self.get_cpu_info(),
-           'service_id': service_ref['id'],
-           'disk_available_least': self.get_disk_available_least()}
-
-        compute_node_ref = service_ref['compute_node']
-        if not compute_node_ref:
-            LOG.info(_('Compute_service record created for %s ') % host)
-            db.compute_node_create(ctxt, dic)
-        else:
-            LOG.info(_('Compute_service record updated for %s ') % host)
-            db.compute_node_update(ctxt, compute_node_ref[0]['id'], dic)
+    #def update_available_resource(self, ctxt, host):
+#        """Updates compute manager resource info on ComputeNode table.
+#       This method is called as an periodic tasks and is used only
+#          in live migration currently.
+#             :param ctxt: security context
+#                :param host: hostname that compute manager is currently running
+#        """
+#
+#        try:
+#            service_ref = db.service_get_all_compute_by_host(ctxt, host)[0]
+#        except exception.NotFound:
+#            raise exception.ComputeServiceUnavailable(host=host)
+#
+#        # Updating host information
+#        dic = {'vcpus': self.get_vcpu_total(),
+#           'memory_mb': self.get_memory_mb_total(),
+#           'local_gb': self.get_local_gb_total(),
+#           'vcpus_used': self.get_vcpu_used(),
+#       'memory_mb_used': self.get_memory_mb_used(),
+#       'local_gb_used': self.get_local_gb_used(),
+#           'hypervisor_type': self.get_hypervisor_type(),
+#           'hypervisor_version': self.get_hypervisor_version(),
+#           'hypervisor_hostname': self.get_hypervisor_hostname(),
+#           'cpu_info': self.get_cpu_info(),
+#           'service_id': service_ref['id'],
+#           'disk_available_least': self.get_disk_available_least()}
+#
+#        compute_node_ref = service_ref['compute_node']
+#        if not compute_node_ref:
+#            LOG.info(_('Compute_service record created for %s ') % host)
+#            db.compute_node_create(ctxt, dic)
+#        else:
+#            LOG.info(_('Compute_service record updated for %s ') % host)
+#            db.compute_node_update(ctxt, compute_node_ref[0]['id'], dic)
 
     def get_available_resource(self):
         """Retrieve resource info.
