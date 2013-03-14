@@ -301,12 +301,13 @@ class SmartOSDriver(driver.ComputeDriver):
 #            LOG.info(_('Compute_service record updated for %s ') % host)
 #            db.compute_node_update(ctxt, compute_node_ref[0]['id'], dic)
 
-    def get_available_resource(self):
+    def get_available_resource(self, nodename):
         """Retrieve resource info.
 
         This method is called as a periodic task and is used only
         in live migration currently.
 
+        :param nodename: ignored in this driver
         :returns: dictionary containing resource info
         """
         dic = {'vcpus': self.get_vcpu_total(),
