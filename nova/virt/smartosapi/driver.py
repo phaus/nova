@@ -288,6 +288,7 @@ class SmartOSDriver(driver.ComputeDriver):
        'local_gb_used': self.get_local_gb_used(),
            'hypervisor_type': self.get_hypervisor_type(),
            'hypervisor_version': self.get_hypervisor_version(),
+           'hypervisor_hostname': self.get_hypervisor_hostname(),
            'cpu_info': self.get_cpu_info(),
            'service_id': service_ref['id'],
            'disk_available_least': self.get_disk_available_least()}
@@ -455,6 +456,7 @@ class HostState(object):
                                     self.connection.get_memory_mb_used())
         data["hypervisor_type"] = self.connection.get_hypervisor_type()
         data["hypervisor_version"] = self.connection.get_hypervisor_version()
+        data["hypervisor_hostname"] = self.connection.get_hypervisor_hostname()
 
         self._stats = data
 
