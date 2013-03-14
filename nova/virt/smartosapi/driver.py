@@ -165,7 +165,7 @@ class Failure(Exception):
 
 def get_connection(_read_only):
     """Sets up the smartOS connection."""
-    return SmartOSDriver()
+    return SmartOSDriver(None)
 
 
 class SmartOSDriver(driver.ComputeDriver):

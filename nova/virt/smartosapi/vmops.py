@@ -2,6 +2,7 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
 # Copyright (c) 2012 Hendrik Volkmer, Thijs Metsch
+# Copyright (c) 2013 Daniele Stroppa
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
