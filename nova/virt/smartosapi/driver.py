@@ -2,6 +2,7 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
 # Copyright (c) 2012 Hendrik Volkmer, Thijs Metsch
+# Copyright (c) 2013 Daniele Stroppa
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -19,9 +20,10 @@
 A connection to the SmartOS VM management system (vmadm)
 """
 
+from oslo.config import cfg
+
 from nova import db
 from nova import exception
-from nova import flags
 from nova.openstack.common import log as logging
 from nova.openstack.common import jsonutils
 
@@ -32,7 +34,129 @@ import socket
 
 LOG = logging.getLogger(__name__)
 
-FLAGS = flags.FLAGS
+smartos_opts = [
+    cfg.StrOpt('rescue_image_id',
+        default=None,
+        help='Rescue ami image'),
+    cfg.StrOpt('rescue_kernel_id',
+        default=None,
+        help='Rescue aki image'),
+    cfg.StrOpt('rescue_ramdisk_id',
+        default=None,
+        help='Rescue ari image'),
+    cfg.StrOpt('smartos_type',
+        default='kvm',
+        help='smartos domain type (valid options are: '
+             'kvm, lxc, qemu, uml, xen)'),
+    cfg.StrOpt('smartos_uri',
+        default='',
+        help='Override the default smartos URI '
+             '(which is dependent on smartos_type)'),
+    cfg.BoolOpt('smartos_inject_password',
+        default=False,
+        help='Inject the admin password at boot time, '
+             'without an agent.'),
+    cfg.BoolOpt('smartos_inject_key',
+        default=True,
+        help='Inject the ssh public key at boot time'),
+    cfg.IntOpt('smartos_inject_partition',
+        default=1,
+        help='The partition to inject to : '
+             '-2 => disable, -1 => inspect (libguestfs only), '
+             '0 => not partitioned, >0 => partition number'),
+    cfg.BoolOpt('use_usb_tablet',
+        default=True,
+        help='Sync virtual and real mouse cursors in Windows VMs'),
+    cfg.StrOpt('live_migration_uri',
+        default="qemu+tcp://%s/system",
+        help='Migration target URI '
+             '(any included "%s" is replaced with '
+             'the migration target hostname)'),
+    cfg.StrOpt('live_migration_flag',
+        default='VIR_MIGRATE_UNDEFINE_SOURCE, VIR_MIGRATE_PEER2PEER',
+        help='Migration flags to be set for live migration'),
+    cfg.StrOpt('block_migration_flag',
+        default='VIR_MIGRATE_UNDEFINE_SOURCE, VIR_MIGRATE_PEER2PEER, '
+                'VIR_MIGRATE_NON_SHARED_INC',
+        help='Migration flags to be set for block migration'),
+    cfg.IntOpt('live_migration_bandwidth',
+        default=0,
+        help='Maximum bandwidth to be used during migration, in Mbps'),
+    cfg.StrOpt('snapshot_image_format',
+        default=None,
+        help='Snapshot image format (valid options are : '
+             'raw, qcow2, vmdk, vdi). '
+             'Defaults to same as source image'),
+    cfg.StrOpt('smartos_vif_driver',
+        default='nova.virt.smartos.vif.smartosGenericVIFDriver',
+        help='The smartos VIF driver to configure the VIFs.'),
+    cfg.ListOpt('smartos_volume_drivers',
+        default=[
+            'iscsi=nova.virt.smartos.volume.smartosISCSIVolumeDriver',
+            'local=nova.virt.smartos.volume.smartosVolumeDriver',
+            'fake=nova.virt.smartos.volume.smartosFakeVolumeDriver',
+            'rbd=nova.virt.smartos.volume.smartosNetVolumeDriver',
+            'sheepdog=nova.virt.smartos.volume.smartosNetVolumeDriver',
+            'nfs=nova.virt.smartos.volume.smartosNFSVolumeDriver',
+            'aoe=nova.virt.smartos.volume.smartosAOEVolumeDriver',
+            'glusterfs='
+            'nova.virt.smartos.volume.smartosGlusterfsVolumeDriver',
+            'fibre_channel=nova.virt.smartos.volume.'
+            'smartosFibreChannelVolumeDriver',
+            'scality='
+            'nova.virt.smartos.volume.smartosScalityVolumeDriver',
+            ],
+        help='smartos handlers for remote volumes.'),
+    cfg.StrOpt('smartos_disk_prefix',
+        default=None,
+        help='Override the default disk prefix for the devices attached'
+             ' to a server, which is dependent on smartos_type. '
+             '(valid options are: sd, xvd, uvd, vd)'),
+    cfg.IntOpt('smartos_wait_soft_reboot_seconds',
+        default=120,
+        help='Number of seconds to wait for instance to shut down after'
+             ' soft reboot request is made. We fall back to hard reboot'
+             ' if instance does not shutdown within this window.'),
+    cfg.BoolOpt('smartos_nonblocking',
+        default=True,
+        help='Use a separated OS thread pool to realize non-blocking'
+             ' smartos calls'),
+    cfg.StrOpt('smartos_cpu_mode',
+        default=None,
+        help='Set to "host-model" to clone the host CPU feature flags; '
+             'to "host-passthrough" to use the host CPU model exactly; '
+             'to "custom" to use a named CPU model; '
+             'to "none" to not set any CPU model. '
+             'If smartos_type="kvm|qemu", it will default to '
+             '"host-model", otherwise it will default to "none"'),
+    cfg.StrOpt('smartos_cpu_model',
+        default=None,
+        help='Set to a named smartos CPU model (see names listed '
+             'in /usr/share/smartos/cpu_map.xml). Only has effect if '
+             'smartos_cpu_mode="custom" and smartos_type="kvm|qemu"'),
+    cfg.StrOpt('smartos_snapshots_directory',
+        default='$instances_path/snapshots',
+        help='Location where smartos driver will store snapshots '
+             'before uploading them to image service'),
+    cfg.StrOpt('xen_hvmloader_path',
+        default='/usr/lib/xen/boot/hvmloader',
+        help='Location where the Xen hvmloader is kept'),
+    cfg.ListOpt('disk_cachemodes',
+        default=[],
+        help='Specific cachemodes to use for different disk types '
+             'e.g: ["file=directsync","block=none"]'),
+    ]
+
+CONF = cfg.CONF
+CONF.register_opts(smartos_opts)
+CONF.import_opt('host', 'nova.netconf')
+CONF.import_opt('my_ip', 'nova.netconf')
+CONF.import_opt('default_ephemeral_format', 'nova.virt.driver')
+CONF.import_opt('use_cow_images', 'nova.virt.driver')
+CONF.import_opt('live_migration_retry_count', 'nova.compute.manager')
+CONF.import_opt('vncserver_proxyclient_address', 'nova.vnc')
+CONF.import_opt('server_proxyclient_address', 'nova.spice', group='spice')
+
 
 
 class Failure(Exception):
@@ -53,6 +177,11 @@ def get_connection(_read_only):
 class SmartOSDriver(driver.ComputeDriver):
     """The smartOS host connection object."""
 
+    capabilities = {
+        "has_imagecache": True,
+        "supports_recreate": True,
+        }
+
     def __init__(self):
         self._host_state = None
         self.read_only = False
@@ -66,6 +195,13 @@ class SmartOSDriver(driver.ComputeDriver):
     def list_instances(self):
         """List VM instances."""
         return self._vmops.list_instances()
+
+    def list_instance_uuids(self):
+        """
+        Return the UUIDS of all the instances known to the virtualization
+        layer, as a list.
+        """
+        return self._vmops.list_instances_uuids()
 
     def spawn(self, context, instance, image_meta, injected_files,
               admin_password, network_info=None, block_device_info=None):
@@ -131,12 +267,6 @@ class SmartOSDriver(driver.ComputeDriver):
     def detach_volume(self, connection_info, instance_name, mountpoint):
         """Detach volume storage to VM instance."""
         pass
-
-    def get_console_pool_info(self, console_type):
-        """Get info about the host on which the VM resides."""
-        return {'address': FLAGS.vmwareapi_host_ip,
-                'username': FLAGS.vmwareapi_host_username,
-                'password': FLAGS.vmwareapi_host_password}
 
     def get_disk_available_least(self):
         return 100
@@ -266,7 +396,7 @@ class SmartOSDriver(driver.ComputeDriver):
         guest_arches.append("i386")
         guest_arches.append("x86_64")
         cpu_info['permitted_instance_types'] = guest_arches
-        # TODO: See libvirt/driver.py:2149
+        # TODO: See smartos/driver.py:2149
         return jsonutils.dumps(cpu_info)
 
     @staticmethod
@@ -298,7 +428,7 @@ class SmartOSDriver(driver.ComputeDriver):
 
 
 class HostState(object):
-    """Manages information about the compute node through libvirt"""
+    """Manages information about the compute node through smartos"""
     def __init__(self, read_only):
         super(HostState, self).__init__()
         self.read_only = read_only
@@ -315,7 +445,7 @@ class HostState(object):
         return self._stats
 
     def update_status(self):
-        """Retrieve status info from libvirt."""
+        """Retrieve status info from smartos."""
         LOG.debug(_("Updating host stats"))
         if self.connection is None:
             self.connection = get_connection(self.read_only)

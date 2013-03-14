@@ -34,6 +34,9 @@ class SmartOSOps(object):
     def list_instances(self):
         return []
 
+    def list_instances_uuids(self):
+        return []
+
     def get_info(self, instance):
         # TODO: Replace with real request to data instead of dummy values
         (state, max_mem, mem, num_cpu, cpu_time) = ('running', 512, 512, 1,
