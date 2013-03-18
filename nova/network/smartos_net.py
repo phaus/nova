@@ -1,9 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
-# Copyright (c) 2011 X.commerce, a business unit of eBay Inc.
-# Copyright 2010 United States Government as represented by the
-# Administrator of the National Aeronautics and Space Administration.
-# All Rights Reserved.
+# Copyright (c) 2013 Daniele Stroppa
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -17,7 +14,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-"""Implements vlans, bridges, and iptables rules using linux utilities."""
+"""Implements vlans, bridges, and iptables rules using SmartOS utilities."""
 
 import calendar
 import inspect
@@ -50,7 +47,7 @@ linux_net_opts = [
                default=paths.state_path_def('networks'),
                help='Location to keep network config files'),
     cfg.StrOpt('public_interface',
-               default='eth0',
+               default='e1000g0',
                help='Interface for public IP addresses'),
     cfg.StrOpt('network_device_mtu',
                default=None,
@@ -1287,7 +1284,7 @@ def get_dev(network):
     return _get_interface_driver().get_dev(network)
 
 
-class LinuxNetInterfaceDriver(object):
+class SmartOSNetInterfaceDriver(object):
     """
     Abstract class that defines generic network host API
     for for all Linux interface drivers.
@@ -1307,7 +1304,7 @@ class LinuxNetInterfaceDriver(object):
 
 
 # plugs interfaces using Linux Bridge
-class LinuxBridgeInterfaceDriver(LinuxNetInterfaceDriver):
+class LinuxBridgeInterfaceDriver(SmartOSNetInterfaceDriver):
 
     def plug(self, network, mac_address, gateway=True):
         vlan = network.get('vlan')
@@ -1608,7 +1605,7 @@ def get_gateway_rules(bridge):
 
 
 # plugs interfaces using Open vSwitch
-class LinuxOVSInterfaceDriver(LinuxNetInterfaceDriver):
+class LinuxOVSInterfaceDriver(SmartOSNetInterfaceDriver):
 
     def plug(self, network, mac_address, gateway=True):
         dev = self.get_dev(network)
@@ -1663,7 +1660,7 @@ class LinuxOVSInterfaceDriver(LinuxNetInterfaceDriver):
 
 
 # plugs interfaces using Linux Bridge when using QuantumManager
-class QuantumLinuxBridgeInterfaceDriver(LinuxNetInterfaceDriver):
+class QuantumLinuxBridgeInterfaceDriver(SmartOSNetInterfaceDriver):
 
     BRIDGE_NAME_PREFIX = 'brq'
     GATEWAY_INTERFACE_PREFIX = 'gw-'
