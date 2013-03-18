@@ -47,7 +47,7 @@ smartos_opts = [
     cfg.StrOpt('smartos_type',
         default='kvm',
         help='smartos domain type (valid options are: '
-             'kvm, lxc, qemu, uml, xen)'),
+             'kvm, zone)'),
     cfg.StrOpt('smartos_uri',
         default='',
         help='Override the default smartos URI '
@@ -121,26 +121,10 @@ smartos_opts = [
         default=True,
         help='Use a separated OS thread pool to realize non-blocking'
              ' smartos calls'),
-    cfg.StrOpt('smartos_cpu_mode',
-        default=None,
-        help='Set to "host-model" to clone the host CPU feature flags; '
-             'to "host-passthrough" to use the host CPU model exactly; '
-             'to "custom" to use a named CPU model; '
-             'to "none" to not set any CPU model. '
-             'If smartos_type="kvm|qemu", it will default to '
-             '"host-model", otherwise it will default to "none"'),
-    cfg.StrOpt('smartos_cpu_model',
-        default=None,
-        help='Set to a named smartos CPU model (see names listed '
-             'in /usr/share/smartos/cpu_map.xml). Only has effect if '
-             'smartos_cpu_mode="custom" and smartos_type="kvm|qemu"'),
     cfg.StrOpt('smartos_snapshots_directory',
         default='$instances_path/snapshots',
         help='Location where smartos driver will store snapshots '
              'before uploading them to image service'),
-    cfg.StrOpt('xen_hvmloader_path',
-        default='/usr/lib/xen/boot/hvmloader',
-        help='Location where the Xen hvmloader is kept'),
     cfg.ListOpt('disk_cachemodes',
         default=[],
         help='Specific cachemodes to use for different disk types '
