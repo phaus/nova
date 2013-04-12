@@ -335,6 +335,10 @@ class NetworkManager(manager.SchedulerDependentManager):
         """
         # NOTE(vish): Set up networks for which this host already has
         #             an ip address.
+
+        # STRP: Disabled for now to make smartos work
+        return
+
         ctxt = context.get_admin_context()
         for network in self.db.network_get_all_by_host(ctxt, self.host):
             self._setup_network_on_host(ctxt, network)

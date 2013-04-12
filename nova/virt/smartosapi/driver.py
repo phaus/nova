@@ -45,7 +45,7 @@ smartos_opts = [
         default=None,
         help='Rescue ari image'),
     cfg.StrOpt('smartos_type',
-        default='kvm',
+        default='zone',
         help='smartos domain type (valid options are: '
              'kvm, zone)'),
     cfg.StrOpt('smartos_uri',
