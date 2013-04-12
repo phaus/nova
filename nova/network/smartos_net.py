@@ -46,7 +46,7 @@ smartos_net_opts = [
     cfg.StrOpt('networks_path',
                default=paths.state_path_def('networks'),
                help='Location to keep network config files'),
-    cfg.StrOpt('public_interface',
+    cfg.StrOpt('sm_public_interface',
                default='e1000g0',
                help='Interface for public IP addresses'),
     cfg.StrOpt('network_device_mtu',
