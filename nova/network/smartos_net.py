@@ -39,7 +39,7 @@ from nova import utils
 LOG = logging.getLogger(__name__)
 
 
-linux_net_opts = [
+smartos_net_opts = [
     cfg.MultiStrOpt('dhcpbridge_flagfile',
                     default=['/etc/nova/nova-dhcpbridge.conf'],
                     help='location of flagfiles for dhcpbridge'),
@@ -81,7 +81,7 @@ linux_net_opts = [
                default='',
                help='Override the default dnsmasq settings with this file'),
     cfg.StrOpt('linuxnet_interface_driver',
-               default='nova.network.linux_net.LinuxBridgeInterfaceDriver',
+               default='nova.network.smartos_net.LinuxBridgeInterfaceDriver',
                help='Driver used to create ethernet devices.'),
     cfg.StrOpt('linuxnet_ovs_integration_bridge',
                default='br-int',
@@ -118,7 +118,7 @@ linux_net_opts = [
     ]
 
 CONF = cfg.CONF
-CONF.register_opts(linux_net_opts)
+CONF.register_opts(smartos_net_opts)
 CONF.import_opt('host', 'nova.netconf')
 CONF.import_opt('use_ipv6', 'nova.netconf')
 CONF.import_opt('my_ip', 'nova.netconf')
