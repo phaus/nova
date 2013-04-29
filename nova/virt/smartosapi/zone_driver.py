@@ -2,6 +2,7 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
 # Copyright (c) 2012 Hendrik Volkmer
+# Changed 2013 Thijs Metsch
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -23,7 +24,7 @@ class ZoneDriver(VmDriver):
     def startinfo(self):
         return {
            "brand": "joyent",
-           "hostname": (self.instance['server_name'] or self.instance['uuid']),
+           "hostname": (self.instance['name'] or self.instance['uuid']),
            "max_physical_memory": self.instance['memory_mb'],
            "dataset_uuid": self.image_id,
            "internal_metadata": {

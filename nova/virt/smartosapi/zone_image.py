@@ -2,6 +2,7 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
 # Copyright (c) 2012 Hendrik Volkmer
+# Changed 2013 Thijs Metsch
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -45,7 +46,7 @@ class ZoneImage(image.Image):
             "files": [
               {
                 "path": "smartos64-1.6.3.zfs",
-                "sha1": "9df6543bc4bde6e2efc532fe37ce21bc95318397",
+                "sha1": "ed6de4fb84eb35c0c7ebcc788c23aafcc5a02aca",
                 "size": 47480510,
                 "url": "https://datasets.joyent.com/datasets/f9e4be48-9466-11e1-bc41-9f993f5dff36/smartos64-1.6.3.zfs.bz2"
               }

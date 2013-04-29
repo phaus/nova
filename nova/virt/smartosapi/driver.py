@@ -2,7 +2,7 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
 # Copyright (c) 2012 Hendrik Volkmer, Thijs Metsch
-# Copyright (c) 2013 Daniele Stroppa
+# Copyright (c) 2013 Daniele Stroppa, Thijs Metsch
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -249,6 +249,9 @@ class SmartOSDriver(driver.ComputeDriver):
 
     def get_disk_available_least(self):
         return 100
+
+    def legacy_nwinfo(self):
+        return True
 
     #def update_available_resource(self, ctxt, host):
 #        """Updates compute manager resource info on ComputeNode table.
